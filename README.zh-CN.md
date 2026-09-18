@@ -6,27 +6,23 @@
 
 ## 平台
 
-| | macOS |---|---|---|
-| 语言 | 中文 / 英文 / 跟随系统 | 中文 / 英文 / 跟随系统 |
-| 行情 | Yahoo / 腾讯，或明确标注的模拟行情 | Yahoo / 腾讯，或明确标注的模拟行情 |
-| 显示 | LED 点阵；像素或系统字体报价卡；分时图 | LED 点阵；原生报价列表 |
-| 设置 | 分区设置、自选股增删改与排序 | 分区设置、自选股增删改与排序 |
-| 系统要求 | macOS 13 及以上 | .NET 10 支持的 Windows 10/11 x64 |
+| | macOS |
+|---|---|
+| 系统入口 | 菜单栏、浮动行情条、报价卡 |
+| 语言 | 中文 / 英文 / 跟随系统 |
+| 行情 | Yahoo / 腾讯，或明确标注的模拟行情 |
+| 显示 | LED 点阵；像素或系统字体报价卡；分时图 |
+| 设置 | 分区设置、自选股增删改与排序 |
+| 系统要求 | macOS 13 及以上 |
 
 
 ## 使用
 
 macOS：打开 `Pinwheel.app`，右键菜单栏、行情条或报价卡 → **设置…**。左键菜单栏图标可暂停/收起与继续；浮窗可拖动。仅开报价卡时仍保留一个小菜单栏入口。
 
-Windows：解压完整 ZIP 后运行 `Pinwheel.exe`，通过系统托盘菜单操作。发布包自带运行时，不需要另装 .NET。左键拖动行情条；关闭报价卡只是隐藏，退出应用请用托盘菜单的 **退出 Pinwheel**。
-
 设置分为 **自选股 / 显示 / 通用**。保存后立即生效，取消不改动配置。可切换语言、行情来源、显示模式、刷新间隔、滚动速度与宽度、价格闪色、市场红绿规则，也可重置浮窗位置。
 
 代码示例：`AAPL`、`^GSPC`、`600519`、`00700`、`BTC-USD`。同一代码不能重复。A 股使用六位代码，港股一至五位代码会在请求时向左补零。演示源使用模拟价格，状态菜单会明确标注。
-
-## 价格闪色
-
-`81.20 → 81.30` 时闪整个 **30**，包括没变的末尾 `0`。颜色按上一笔价格的方向决定，与当日涨跌幅独立，遵循对应市场的红绿规则。闪色持续 0.55 秒后恢复原色。每段滚入可读区域后独立计时，同一轮环绕不重复闪。首笔、未变化或舍入后没有可见变化时不闪。超过 1000 的价格也保留两位小数。
 
 ## 刷新与限流
 
@@ -51,24 +47,12 @@ bash build-app.sh --arch arm64 --arch x86_64
 
 构建产物 `Pinwheel.app` 采用本地 ad-hoc 签名；Developer ID 签名与公证需要维护者自己的 Apple 凭据。
 
-Windows 构建需要 .NET 10 SDK，可在 macOS/Linux 交叉编译：
-
-```sh
-dotnet run --project Windows/Pinwheel.Core.Tests -c Release
-dotnet publish Windows/Pinwheel.Windows -c Release -r win-x64 --self-contained true \
-  -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true \
-  -p:EnableCompressionInSingleFile=true -p:DebugType=None -o dist/windows-x64
-```
-
-发布包自带运行时。Windows GUI 仍需在 Windows 上执行验证。仓库附有 GitHub Actions 双平台构建、核心测试和 Windows 控件创建/渲染冒烟检查。
-
 ## 配置与隐私
 
 - macOS：`~/.config/pinwheel/config.json`；沿用原路径，升级保留自选股。
-- Windows：`%APPDATA%\Pinwheel\config.json`。
 - 无账号、遥测、分析或云同步。自选股与配置保存在本机；真实行情请求会将代码及网络元数据发送到 Yahoo/腾讯。演示源不发行情请求。
 - 原子保存；旧配置缺字段时补默认值，损坏文件不会在启动时被默认配置悄悄覆盖。仓库不包含私人自选股配置。
-- macOS 菜单 **高级 → 显示配置文件…** 或 Windows 托盘 **显示配置文件…** 可定位文件。
+- macOS 菜单 **高级 → 显示配置文件…** 可定位文件。
 
 macOS 还支持 `--settings`、`--status`、`--send`、`--urgent`、`--very-urgent`、`--standby`、`--width`、`--clear`、`--quit`，详细示例见[英文说明](README.md#macos-cli)。本地控制 socket 按用户隔离，不对网络开放。`--on-click` 会执行本地 shell 命令，只应传入可信命令。
 
