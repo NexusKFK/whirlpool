@@ -51,7 +51,7 @@ final class BoardWindow: NSPanel, NSWindowDelegate {
         let pixel = config.boardPixelFont
         let W: CGFloat = pixel ? Self.fittedWidth(rows: rowsData) : 250
         let inset: CGFloat = 10
-        let rowH: CGFloat = pixel ? 30 : 22
+        let rowH: CGFloat = pixel ? 24 : 22
         let H = inset * 2 + CGFloat(rowsData.count) * rowH
 
         programmaticMove = true
@@ -97,6 +97,9 @@ final class BoardWindow: NSPanel, NSWindowDelegate {
                 let spark = SparklineView(frame: NSRect(x: rowW - 70, y: 3, width: 66, height: rowH - 6))
                 spark.points = pts
                 spark.lineColor = color
+                if let q = quotes[r.symbol], q.changePct > -99 {
+                    spark.baseline = q.price / (1 + q.changePct / 100)   // 昨收
+                }
                 row.addSubview(spark)
             }
 
@@ -168,7 +171,7 @@ final class BoardWindow: NSPanel, NSWindowDelegate {
         for ch in s.uppercased() {
             if FONT[ch] != nil { cols += 6 }
         }
-        return CGFloat(cols) * 3   // dot 2 + gap 1 = 3pt/列
+        return CGFloat(cols) * 2   // dot 1 + gap 1 = 2pt/列
     }
 
     /// 行底闪光:方向色 32% 透明圆角垫块(真实子视图,垫在文字下),
@@ -221,6 +224,7 @@ final class SparklineView: NSView {
 
     var points: [Double] = [] { didSet { needsDisplay = true } }
     var lineColor: NSColor = .systemGreen
+    var baseline: Double? = nil   // 昨收锚点:波动按真实比例画,平静的日子不夸大成满幅锯齿
 
     override var isFlipped: Bool { true }
     override var isOpaque: Bool { false }
@@ -228,16 +232,40 @@ final class SparklineView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         guard points.count > 1 else { return }
         let minV = points.min()!, maxV = points.max()!
-        let span = max(maxV - minV, 0.000001)
+
+        // 以昨收为中心的对称量程;无基准时退回中点自适应
+        let ref: Double, span: Double
+        if let base = baseline, base > 0 {
+            ref = base
+            let dev = max(abs(maxV - base), abs(base - minV), base * 0.0015)
+            span = dev * 2
+        } else {
+            ref = (minV + maxV) / 2
+            span = max(maxV - minV, 0.000001)
+        }
+
         let n = points.count
         let inset: CGFloat = 1.5
+
+        // 昨收基准虚线
+        if baseline != nil {
+            let yc = inset + (bounds.height - inset * 2) * 0.5
+            let dash = NSBezierPath()
+            dash.move(to: NSPoint(x: 0, y: yc))
+            dash.line(to: NSPoint(x: bounds.width, y: yc))
+            let pattern: [CGFloat] = [2, 2]
+            dash.setLineDash(pattern, count: 2, phase: 0)
+            dash.lineWidth = 0.8
+            lineColor.withAlphaComponent(0.22).setStroke()
+            dash.stroke()
+        }
 
         let path = NSBezierPath()
         var first = NSPoint.zero
         var coords: [NSPoint] = []
         for (i, p) in points.enumerated() {
             let x = inset + (bounds.width - inset * 2) * CGFloat(i) / CGFloat(n - 1)
-            let v = CGFloat((p - minV) / span)
+            let v = CGFloat((p - (ref - span / 2)) / span)
             let y = inset + (bounds.height - inset * 2) * (1 - v)   // flipped:低值在下
             let pt = NSPoint(x: x, y: y)
             if i == 0 { first = pt; path.move(to: pt) } else { path.line(to: pt) }
