@@ -195,7 +195,7 @@ func renderStandbyFrame(text: String, displayWidth: Int,
 // ── 像素文本(board 卡等非跑马灯场景) ─────────────────────────────────────────
 // 用同一张 LED 位图字体表渲染任意分段着色文本,直写 RGBA,透明底。
 
-func renderPixelText(_ segments: [(text: String, color: NSColor)], dot: Int = 2) -> NSImage {
+func renderPixelText(_ segments: [(text: String, color: NSColor)], dot: Int = 1) -> NSImage {
     var cols: [(UInt8, NSColor)] = []
     for seg in segments {
         for ch in seg.text.uppercased() {
