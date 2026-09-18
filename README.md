@@ -32,6 +32,8 @@ swift build
 
 board 模式下状态栏图标让位;跑马灯模式和 board 各自独立刷新(共用同一个 provider)。
 
+交互约定:菜单栏图标**左键=弹出配置窗**(松手常驻),**右键=菜单**;bar/board 左键拖动、右键菜单。图标是 `<SPX` 点阵包框(tools/make-pinwheel-icon.swift 可重画)。
+
 ## 配置
 
 `~/.config/pinwheel/config.json`(菜单里也有 "Edit config…"):
@@ -41,6 +43,7 @@ board 模式下状态栏图标让位;跑马灯模式和 board 各自独立刷新
 | `watchlist` | 自选池,`{"symbol": "AAPL", "market": "us"}`;market 决定涨跌配色习惯 |
 | `redUpMarkets` | 这些市场红涨绿跌(默认 cn/hk),其余绿涨红跌 |
 | `pausePerSymbol` | >0 时每个标的滚到左缘停留 N 秒(默认 0,连续滚) |
+| `defaultWidth` | 跑马灯宽度(字符,8-60),GUI 有滑块;marquee 与 bar 同宽,保存即调 |
 | `changeArrows` | 涨跌用 ▲/▼ 三角(默认开,交易所风格;关=+/-号) |
 | `marqueeSeparator` | 标的间分隔,默认 3 个空格纯空隙 |
 | `provider` | `demo` \| `real` |
