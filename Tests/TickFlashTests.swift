@@ -12,7 +12,7 @@ struct TickFlashTests {
             (100.90, 99.90, "", "99.90"),
             (1000.01, 1000.02, "1000.0", "2")
         ] {
-            let flash = try unwrap(TickFlash.between(old, and: new, redUp: false))
+            let flash = try unwrap(PriceFlash.between(old, and: new, redUp: false))
             expectEqual(flash.prefix, prefix)
             expectEqual(flash.suffix, suffix)
             expectEqual(flash.color, new > old ? .green : .red)
@@ -20,16 +20,16 @@ struct TickFlashTests {
     }
 
     func testFirstQuoteUnchangedAndInvisibleChangesDoNotFlash() {
-        expectNil(TickFlash.between(nil, and: 81.20, redUp: false))
-        expectNil(TickFlash.between(81.20, and: 81.20, redUp: false))
-        expectNil(TickFlash.between(81.201, and: 81.204, redUp: false))
-        expectNil(TickFlash.between(.nan, and: 81.20, redUp: false))
-        expectNil(TickFlash.between(81.20, and: .infinity, redUp: false))
+        expectNil(PriceFlash.between(nil, and: 81.20, redUp: false))
+        expectNil(PriceFlash.between(81.20, and: 81.20, redUp: false))
+        expectNil(PriceFlash.between(81.201, and: 81.204, redUp: false))
+        expectNil(PriceFlash.between(.nan, and: 81.20, redUp: false))
+        expectNil(PriceFlash.between(81.20, and: .infinity, redUp: false))
     }
 
     func testMarketDirectionPreference() {
-        expectEqual(TickFlash.between(81.20, and: 81.30, redUp: true)?.color, .red)
-        expectEqual(TickFlash.between(81.30, and: 81.20, redUp: true)?.color, .green)
+        expectEqual(PriceFlash.between(81.20, and: 81.30, redUp: true)?.color, .red)
+        expectEqual(PriceFlash.between(81.30, and: 81.20, redUp: true)?.color, .green)
     }
 
     func testMarqueeUsesTickDirectionIndependentOfDayChange() {

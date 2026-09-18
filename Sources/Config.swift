@@ -11,6 +11,7 @@ struct TickerConfig: Codable {
     var tickerEnabled:     Bool              = true
     var defaultColor:      String            = "white"
     var defaultWidth:      Int               = 20
+    var ledDotSize:        Int               = 2      // 点阵字号:1=S 2=M(默认) 3=L;菜单栏超限自动钳中档
     var scrollSpeed:       Double            = 0.0222  // ≈45 列/秒
     var defaultPause:      Double            = 0      // 每轮开头停留秒数,0=连续滚
     var customChars:       [String: [UInt8]] = [:]
@@ -45,7 +46,7 @@ struct TickerConfig: Codable {
     init() {}
 
     private enum CodingKeys: String, CodingKey {
-        case tickerEnabled, defaultColor, defaultWidth, scrollSpeed, defaultPause, customChars, transparent, transparentColor, marqueeSeparator, changeArrows, quoteLoop, watchlist, pausePerSymbol, redUpMarkets, provider, displayMode, boardCorner, boardOrigin, boardRefresh, barOrigin, boardPixelFont, marqueeBlink, language
+        case tickerEnabled, defaultColor, defaultWidth, ledDotSize, scrollSpeed, defaultPause, customChars, transparent, transparentColor, marqueeSeparator, changeArrows, quoteLoop, watchlist, pausePerSymbol, redUpMarkets, provider, displayMode, boardCorner, boardOrigin, boardRefresh, barOrigin, boardPixelFont, marqueeBlink, language
     }
 
     init(from decoder: Decoder) throws {
@@ -54,6 +55,7 @@ struct TickerConfig: Codable {
         tickerEnabled = try values.decodeIfPresent(type(of: tickerEnabled), forKey: .tickerEnabled) ?? tickerEnabled
         defaultColor = try values.decodeIfPresent(type(of: defaultColor), forKey: .defaultColor) ?? defaultColor
         defaultWidth = try values.decodeIfPresent(type(of: defaultWidth), forKey: .defaultWidth) ?? defaultWidth
+        ledDotSize = try values.decodeIfPresent(type(of: ledDotSize), forKey: .ledDotSize) ?? ledDotSize
         scrollSpeed = try values.decodeIfPresent(type(of: scrollSpeed), forKey: .scrollSpeed) ?? scrollSpeed
         defaultPause = try values.decodeIfPresent(type(of: defaultPause), forKey: .defaultPause) ?? defaultPause
         customChars = try values.decodeIfPresent(type(of: customChars), forKey: .customChars) ?? customChars
@@ -79,6 +81,7 @@ struct TickerConfig: Codable {
 
     mutating func normalize() {
         defaultWidth = min(60, max(8, defaultWidth))
+        ledDotSize = min(3, max(1, ledDotSize))
         scrollSpeed = scrollSpeed.isFinite ? min(0.1, max(0.02, scrollSpeed)) : 0.0333
         boardRefresh = boardRefresh.isFinite ? min(3600, max(5, boardRefresh)) : 30
         defaultPause = defaultPause.isFinite ? min(60, max(0, defaultPause)) : 0

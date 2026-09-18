@@ -164,10 +164,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func startTimer() {
         guard animTimer == nil, config.tickerEnabled, !userPaused else { return }
-        let timer = Timer(timeInterval: config.scrollSpeed, repeats: true) { [weak self] _ in
+        // 滚速语义=屏幕上的物理速度:点阵愈大每列位移愈大,按点距归一,
+        // 换字号不改变视觉快慢(M 档与 1.6.x 完全一致;菜单栏侧 L 恒钳 M)。
+        let interval = config.scrollSpeed * Double(min(config.ledDotSize, 2) + 1) / 3.0
+        let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
             self?.tick()
         }
-        timer.tolerance = config.scrollSpeed * 0.1   // erlaubt dem Kernel, Wakeups zu bündeln
+        timer.tolerance = interval * 0.1   // erlaubt dem Kernel, Wakeups zu bündeln
         RunLoop.main.add(timer, forMode: .common)
         animTimer = timer
     }
@@ -261,7 +264,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func showAbout() {
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.6.0"
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.6.1"
         NSApp.activate(ignoringOtherApps: true)
         NSApp.orderFrontStandardAboutPanel(options: [
             .applicationName: "Whirlpool", .applicationVersion: version,
@@ -342,9 +345,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         case .standby:
             if let msg = currentMsg {
-                setImage(renderStandbyFrame(text: msg.text, displayWidth: displayWidth,
-                                            defaultColor: baseColor(),
-                                            customChars: config.customChars))
+                setImage(renderSurfaces {
+                    renderStandbyFrame(text: msg.text, displayWidth: displayWidth,
+                                       defaultColor: baseColor(),
+                                       customChars: config.customChars)
+                })
             }
 
         default:
@@ -635,9 +640,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             showScrollFrame()
 
         case .standby:
-            let img = renderStandbyFrame(text: msg.text, displayWidth: displayWidth,
-                                         defaultColor: defColor, customChars: config.customChars)
-            setImage(img)
+            setImage(renderSurfaces {
+                renderStandbyFrame(text: msg.text, displayWidth: displayWidth,
+                                   defaultColor: defColor, customChars: config.customChars)
+            })
             phase = .standby(until: Date().addingTimeInterval(msg.duration))
 
         case .setWidth, .clearQueue, .getStatus, .quit, .openSettings:
@@ -670,9 +676,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let flash = blank ? [:] : priceFlashes.colors(
             offset: scrollOffset, visibleColumns: visCols(displayWidth: displayWidth),
             roundLength: roundLen, now: ProcessInfo.processInfo.systemUptime)
-        let img = renderScrollFrame(columns: canvas, offset: scrollOffset,
-                                     displayWidth: displayWidth, blank: blank, flash: flash)
-        setImage(img)
+        setImage(renderSurfaces {
+            renderScrollFrame(columns: canvas, offset: scrollOffset,
+                              displayWidth: displayWidth, blank: blank, flash: flash)
+        })
     }
 
     /// 无缝环绕画布:把串拼几份,保证任何窗口位置都有内容,
@@ -683,22 +690,45 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         return (0..<reps).flatMap { _ in columns }
     }
 
-    private func setImage(_ img: NSImage) {
-        if let si = statusItem, config.displayMode.contains("marquee") {
-            si.button?.image = img
+    // ── 双面出帧 ────────────────────────────────────────────────────────────────
+    //
+    // 菜单栏状态项的宿主窗口实测高约 30pt,L 档(34pt)放不下 → 菜单栏恒钳 M,
+    // 浮动 bar 按配置吃满三档。字号 ≤ M 时两面同图,单帧共用零额外开销;
+    // 只有 bar 可见且配了 L 才付双倍渲染(两个面各出一帧)。
+
+    private var marqueeOn: Bool { config.displayMode.contains("marquee") }
+
+    private func renderSurfaces(_ make: () -> NSImage) -> (menubar: NSImage, bar: NSImage) {
+        if config.ledDotSize <= 2 {
+            renderDotSize = config.ledDotSize
+            let img = make()
+            return (img, img)
+        }
+        renderDotSize = 2
+        let menubar = make()
+        if barWindow?.isVisible == true {
+            renderDotSize = config.ledDotSize
+            return (menubar, make())
+        }
+        return (menubar, menubar)   // bar 不在时 bar 份不会被消费
+    }
+
+    private func setImage(_ surfaces: (menubar: NSImage, bar: NSImage)) {
+        if let si = statusItem, marqueeOn {
+            si.button?.image = surfaces.menubar
             si.button?.title = ""
         }
         if let bar = barWindow, bar.isVisible {
-            bar.update(img)
+            bar.update(surfaces.bar)
         }
     }
 
     private func setIdle() {
         guard !idleRendered else { return }
         idleRendered = true
-        let image = renderIdleIcon(color: currentIdleColor())
-        statusItem?.button?.image = image
-        barWindow?.update(image)
+        let surfaces = renderSurfaces { renderIdleIcon(color: currentIdleColor()) }
+        statusItem?.button?.image = surfaces.menubar
+        barWindow?.update(surfaces.bar)
     }
 
     // ── Queue ──────────────────────────────────────────────────────────────────
@@ -784,6 +814,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         stopTimer()
         boardTimer?.invalidate(); boardTimer = nil
         renderTransparent = config.transparent
+        renderDotSize = min(config.ledDotSize, 2)   // 环境默认=菜单栏安全档;出帧时各面显式定档
         applyTint()
         displayWidth = config.defaultWidth   // GUI 宽度保存后即时同步(marquee/bar 同宽)
         let m = config.displayMode
@@ -796,6 +827,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         if barOn {
             if barWindow == nil {
+                renderDotSize = config.ledDotSize   // bar 初始宽度按配置档算
                 barWindow = BarWindow(config: config)
                 barWindow?.menuProvider = { [weak self] in self?.buildBoardMenu() ?? NSMenu() }
             }

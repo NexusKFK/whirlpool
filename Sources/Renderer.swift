@@ -1,17 +1,31 @@
 import AppKit
 
-// ── Layout (compile-time constants) ───────────────────────────────────────────
-let ledSize     = 2
-let ledGap      = 1
+// ── Layout ────────────────────────────────────────────────────────────────────
 let ledRows     = 8
 let paddingH    = 4
 let paddingV    = 0
 let colsPerChar = 6   // 5 Pixel + 1 Abstandsspalte
-
-let colW = ledSize + ledGap
-let rowH = ledSize + ledGap
-let imgH = ledRows * rowH - ledGap + paddingV * 2
 let edgeFadeCols = 8   // 两缘渐隐列数:文字出图不生硬
+private let paddingTop  = 3
+
+// ── 点阵字号 S/M/L ─────────────────────────────────────────────────────────────
+// 点距恒为 1px:字高 = 8·(dot+1)−1,点愈大字愈大。M=2 是 1.6.x 的历史默认档。
+// 菜单栏状态项的宿主窗口实测高约 30pt,L 档(34pt)放不下,界面层把菜单栏
+// 一侧钳回 M(见 AppDelegate.renderSurfaces);浮动 bar 窗口自适应宽高,三档全可用。
+var renderDotSize = 2
+
+struct LEDLayout {
+    let dot: Int
+    var colW: Int { dot + 1 }
+    var rowH: Int { dot + 1 }
+    var imgH: Int { ledRows * rowH - 1 + paddingV * 2 }
+    var imgHTransparent: Int { ledRows * rowH - 1 + paddingTop }
+    func imgWidth(_ displayWidth: Int) -> Int { displayWidth * colsPerChar * colW + paddingH * 2 }
+}
+
+// 旧引用点(测试解码、bar 初始宽度)按当前全局档位取值
+var colW: Int { LEDLayout(dot: renderDotSize).colW }
+var rowH: Int { LEDLayout(dot: renderDotSize).rowH }
 
 // ── Farben ─────────────────────────────────────────────────────────────────────
 
@@ -30,8 +44,6 @@ let colorOff = NSColor(red: 0.15, green: 0.11, blue: 0.0, alpha: 1.0)
 
 // Transparenter Modus — gesetzt aus Config beim Start
 var renderTransparent = false
-private let paddingTop  = 3
-private let imgHtransparent = ledRows * rowH - ledGap + paddingTop
 
 // Backing-Scale des Bildschirms mit der Menüleiste — gesetzt aus AppDelegate,
 // aktualisiert bei Bildschirmwechsel. Ganzzahlig, damit das Punktraster scharf bleibt.
@@ -68,10 +80,6 @@ private let packedClear:    UInt32 = 0
 
 // ── Hilfsfunktionen ────────────────────────────────────────────────────────────
 
-func imgWidth(displayWidth: Int) -> Int {
-    displayWidth * colsPerChar * colW + paddingH * 2
-}
-
 func visCols(displayWidth: Int) -> Int {
     displayWidth * colsPerChar
 }
@@ -89,7 +97,8 @@ func visCols(displayWidth: Int) -> Int {
 
 private func renderFrame(columns: [ColoredColumn], offset: Int, visibleCols: Int,
                          width: Int, height: Int, yPad: Int,
-                         fadeEdges: Bool = false, flash: [Int: LEDColor] = [:]) -> NSImage {
+                         fadeEdges: Bool = false, flash: [Int: LEDColor] = [:],
+                         layout: LEDLayout) -> NSImage {
     let s    = max(1, renderScale)
     let pw   = width  * s
     let ph   = height * s
@@ -115,13 +124,13 @@ private func renderFrame(columns: [ColoredColumn], offset: Int, visibleCols: Int
     }
 
     // Punkte
-    let dot = ledSize * s
+    let dot = layout.dot * s
     for ci in 0..<visibleCols {
         let si = offset + ci
         guard si >= 0, si < columns.count else { continue }
         let flashColor = flash[si]
         let col = columns[si]
-        let x0  = (paddingH + ci * colW) * s
+        let x0  = (paddingH + ci * layout.colW) * s
         for bit in 0..<ledRows {
             let on = (col.value & (1 << bit)) != 0
             var v: UInt32
@@ -143,7 +152,7 @@ private func renderFrame(columns: [ColoredColumn], offset: Int, visibleCols: Int
                 let alpha: UInt32 = UInt32(UInt8(max(0, fade * 255.0)))
                 v = (v & 0x00FF_FFFF) | (alpha << 24)
             }
-            let y0 = (yPad + bit * rowH) * s
+            let y0 = (yPad + bit * layout.rowH) * s
             for dy in 0..<dot {
                 let row = (y0 + dy) * pw + x0
                 for dx in 0..<dot { px[row + dx] = v }
@@ -163,41 +172,47 @@ private func renderFrame(columns: [ColoredColumn], offset: Int, visibleCols: Int
 // ── Scroll-Frame ───────────────────────────────────────────────────────────────
 
 func renderScrollFrame(columns: [ColoredColumn], offset: Int,
-                       displayWidth: Int, blank: Bool = false, flash: [Int: LEDColor] = [:]) -> NSImage {
-    renderFrame(columns:    columns,
+                       displayWidth: Int, blank: Bool = false, flash: [Int: LEDColor] = [:],
+                       dot: Int = renderDotSize) -> NSImage {
+    let lay = LEDLayout(dot: dot)
+    return renderFrame(columns:    columns,
                 offset:     offset,
                 visibleCols: blank ? 0 : visCols(displayWidth: displayWidth),
-                width:      imgWidth(displayWidth: displayWidth),
-                height:     renderTransparent ? imgHtransparent : imgH,
+                width:      lay.imgWidth(displayWidth),
+                height:     renderTransparent ? lay.imgHTransparent : lay.imgH,
                 yPad:       renderTransparent ? paddingTop : paddingV,
                 fadeEdges:  true,
-                flash:      flash)
+                flash:      flash,
+                layout:     lay)
 }
 
 // ── Idle-Icon (< aus LED-Punkten) ─────────────────────────────────────────────
 
-func renderIdleIcon(color: LEDColor) -> NSImage {
+func renderIdleIcon(color: LEDColor, dot: Int = renderDotSize) -> NSImage {
     // 收起态:<W — 每字符 5 列字面 + 1 空隙列
+    let lay = LEDLayout(dot: dot)
     let glyphs = ["<", "w"].map { FONT[$0] ?? Array(repeating: 0, count: 5) }
     var cols: [UInt8] = []
     for g in glyphs { cols += g }
     return renderFrame(columns:     cols.map { ColoredColumn(value: $0, color: color) },
                        offset:      0,
                        visibleCols: cols.count,
-                       width:       paddingH * 2 + cols.count * colW - ledGap,
-                       height:      renderTransparent ? imgHtransparent : imgH,
-                       yPad:        renderTransparent ? paddingTop : paddingV)
+                       width:       paddingH * 2 + cols.count * lay.colW - 1,
+                       height:      renderTransparent ? lay.imgHTransparent : lay.imgH,
+                       yPad:        renderTransparent ? paddingTop : paddingV,
+                       layout:      lay)
 }
 
 // ── Standby-Frame (links-ausgerichtet, geclippt) ───────────────────────────────
 
 func renderStandbyFrame(text: String, displayWidth: Int,
                         defaultColor: LEDColor,
-                        customChars: [String: [UInt8]]) -> NSImage {
+                        customChars: [String: [UInt8]],
+                        dot: Int = renderDotSize) -> NSImage {
     let stream  = buildScrollStream(text: text, defaultColor: defaultColor,
                                     onClickCommand: nil, customChars: customChars)
     let clipped = Array(stream.columns.prefix(visCols(displayWidth: displayWidth)))
-    return renderScrollFrame(columns: clipped, offset: 0, displayWidth: displayWidth)
+    return renderScrollFrame(columns: clipped, offset: 0, displayWidth: displayWidth, dot: dot)
 }
 
 // ── 像素文本(board 卡等非跑马灯场景) ─────────────────────────────────────────
