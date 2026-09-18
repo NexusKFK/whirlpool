@@ -1,6 +1,6 @@
 import Foundation
 
-let socketPath = "/tmp/pinwheel-\(getuid()).sock"
+let socketPath = "/tmp/whirlpool-\(getuid()).sock"
 
 func runSocketServer(onMessage: @escaping (TickerMessage) -> String) {
     DispatchQueue.global(qos: .background).async {
@@ -65,7 +65,7 @@ func runSocketServer(onMessage: @escaping (TickerMessage) -> String) {
 
 func cliSend(_ msg: TickerMessage) {
     guard FileManager.default.fileExists(atPath: socketPath) else {
-        fputs("Error: pinwheel is not running.\n", stderr)
+        fputs("Error: whirlpool is not running.\n", stderr)
         exit(1)
     }
     let fd = socket(AF_UNIX, SOCK_STREAM, 0)
@@ -81,7 +81,7 @@ func cliSend(_ msg: TickerMessage) {
     } == 0
     guard connected else {
         close(fd)
-        fputs("Error: pinwheel is not running.\n", stderr)
+        fputs("Error: whirlpool is not running.\n", stderr)
         exit(1)
     }
     let payload = encodeSocketMessage(msg)

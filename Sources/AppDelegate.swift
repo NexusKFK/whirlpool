@@ -91,11 +91,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func installMainMenu() {
         let root = NSMenu()
-        let application = NSMenuItem(title: "Pinwheel", action: nil, keyEquivalent: "")
-        let appMenu = NSMenu(title: "Pinwheel")
-        for (title, action, key) in [("About Pinwheel", #selector(showAbout), ""),
+        let application = NSMenuItem(title: "Whirlpool", action: nil, keyEquivalent: "")
+        let appMenu = NSMenu(title: "Whirlpool")
+        for (title, action, key) in [("About Whirlpool", #selector(showAbout), ""),
                                       ("Settings…", #selector(openConfigWindow), ","),
-                                      ("Quit Pinwheel", #selector(quit), "q")] {
+                                      ("Quit Whirlpool", #selector(quit), "q")] {
             let item = NSMenuItem(title: L(title), action: action, keyEquivalent: key)
             item.target = self; appMenu.addItem(item)
         }
@@ -225,7 +225,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let entry = NSMenuItem(title: L(title), action: action, keyEquivalent: key)
             entry.target = self; menu.addItem(entry)
         }
-        item("About Pinwheel", #selector(showAbout))
+        item("About Whirlpool", #selector(showAbout))
         menu.addItem(.separator())
         let status = NSMenuItem(title: userPaused ? L("Paused") : L(quoteService?.status ?? "Waiting for quotes"), action: nil, keyEquivalent: "")
         status.isEnabled = false; menu.addItem(status)
@@ -256,7 +256,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         advanced.submenu = advancedMenu; menu.addItem(advanced)
         item("Help", #selector(showHelp))
         menu.addItem(.separator())
-        item("Quit Pinwheel", #selector(quit), "q")
+        item("Quit Whirlpool", #selector(quit), "q")
         return menu
     }
 
@@ -264,7 +264,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.6.0"
         NSApp.activate(ignoringOtherApps: true)
         NSApp.orderFrontStandardAboutPanel(options: [
-            .applicationName: "Pinwheel", .applicationVersion: version,
+            .applicationName: "Whirlpool", .applicationVersion: version,
             .credits: NSAttributedString(string: L("A quiet desktop ticker for your watchlist.") + "\n\n" + L("Open-source software under the MIT license. Market data remains subject to provider terms."))
         ])
     }
@@ -286,7 +286,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         quoteService = QuoteService(provider: QuoteEngine.provider(for: config.provider), interval: config.boardRefresh)
         quoteService.onUpdate = { [weak self] in
             guard let self else { return }
-            let text = "Pinwheel · " + L(self.quoteService.status)
+            let text = "Whirlpool · " + L(self.quoteService.status)
             self.statusItem?.button?.toolTip = text
             self.board?.contentView?.toolTip = text
             self.barWindow?.contentView?.toolTip = text

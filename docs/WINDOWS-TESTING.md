@@ -2,7 +2,7 @@
 
 Status: cross-compilation and core checks can run on macOS. Native Windows execution and visual QA require a Windows machine. Do not mark the items below as passed merely because compilation succeeded.
 
-建议先在 Windows 10/11 x64 用少量自选股验收。发布包无安装步骤，解压后运行 `Pinwheel.exe`；尚未使用商业代码签名。
+建议先在 Windows 10/11 x64 用少量自选股验收。发布包无安装步骤，解压后运行 `Whirlpool.exe`；尚未使用商业代码签名。
 
 - [ ] Launch on a machine without .NET installed; verify the tray icon, ticker, and quit action.
 - [ ] Launch a second copy; verify the single-instance message and that the first copy continues.
@@ -19,6 +19,6 @@ Status: cross-compilation and core checks can run on macOS. Native Windows execu
 - [ ] Verify `81.20 → 81.30` highlights the entire `30`, including the unchanged zero.
 - [ ] Verify a rising tick can flash green while its daily percentage is red.
 - [ ] Inspect with Narrator and keyboard-only navigation.
-- [ ] Run `Pinwheel.exe --smoke-test` and inspect the process exit code.
+- [ ] Run `Whirlpool.exe --smoke-test` and inspect the process exit code.
 
-Config: `%APPDATA%\Pinwheel\config.json`. To report issues, include OS version, display scaling, app version, and steps. Remove personal information from screenshots/configs before sharing.
+Config: `%APPDATA%\Whirlpool\config.json`. To report issues, include OS version, display scaling, app version, and steps. Remove personal information from screenshots/configs before sharing.

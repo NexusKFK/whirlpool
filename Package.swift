@@ -2,11 +2,11 @@
 import PackageDescription
 
 let package = Package(
-    name: "pinwheel",
+    name: "whirlpool",
     platforms: [.macOS(.v13)],
     targets: [
         .executableTarget(
-            name: "pinwheel",
+            name: "whirlpool",
             path: "Sources"
         )
     ]

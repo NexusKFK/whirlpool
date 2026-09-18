@@ -61,11 +61,11 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
     private func buildWindow() {
         let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 660, height: 550),
                          styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
-        w.title = L("Pinwheel Settings")
+        w.title = L("Whirlpool Settings")
         w.minSize = NSSize(width: 660, height: 550)
         w.isReleasedWhenClosed = false
         w.delegate = self
-        w.setFrameAutosaveName("PinwheelSettings")
+        w.setFrameAutosaveName("WhirlpoolSettings")
         window = w
         let tabs = NSTabView()
         for (title, view) in [(L("Watchlist"), watchlistTab()), (L("Display"), displayTab()), (L("General"), generalTab())] {

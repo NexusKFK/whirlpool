@@ -62,17 +62,17 @@ if CommandLine.arguments.count > 1 {
     guard let txt = text else {
         fputs("""
         Usage:
-          pinwheel --send TEXT [--on-click CMD]
-          pinwheel --urgent TEXT [--on-click CMD]
-          pinwheel --very-urgent TEXT [--on-click CMD]
-          pinwheel --standby TEXT --duration N
-          pinwheel --standby-urgent TEXT --duration N
-          pinwheel --standby-very-urgent TEXT --duration N
-          pinwheel --width N
-          pinwheel --settings
-          pinwheel --clear
-          pinwheel --status
-          pinwheel --quit
+          whirlpool --send TEXT [--on-click CMD]
+          whirlpool --urgent TEXT [--on-click CMD]
+          whirlpool --very-urgent TEXT [--on-click CMD]
+          whirlpool --standby TEXT --duration N
+          whirlpool --standby-urgent TEXT --duration N
+          whirlpool --standby-very-urgent TEXT --duration N
+          whirlpool --width N
+          whirlpool --settings
+          whirlpool --clear
+          whirlpool --status
+          whirlpool --quit
         """, stderr)
         exit(1)
     }
@@ -115,7 +115,7 @@ if FileManager.default.fileExists(atPath: socketPath) {
             var buf = [UInt8](repeating: 0, count: 64)
             _ = recv(checkFd, &buf, buf.count, 0)
             close(checkFd)
-            fputs("pinwheel: already running\n", stderr)
+            fputs("whirlpool: already running\n", stderr)
             exit(0)
         } else {
             // Veraltete Socket-Datei entfernen
