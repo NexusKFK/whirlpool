@@ -82,13 +82,13 @@ final class BoardWindow: NSPanel, NSWindowDelegate {
                 row.addSubview(spark)
             }
 
-            // 数字变化:该行短促亮度脉冲再回满(LED 换数的味道)
+            // 数字变化:主流 App 式方向色闪光(半透明色块圆角覆盖整行,0.55s 淡出)
             if let old = lastPrices[r.symbol], let now = quotes[r.symbol]?.price, old != now {
-                row.alphaValue = 0.25
-                NSAnimationContext.runAnimationGroup({ ctx in
-                    ctx.duration = 0.35
-                    row.animator().alphaValue = 1.0
-                })
+                let tickUp = now > old
+                let flash: NSColor = redUpMarkets.contains(r.market)
+                    ? (tickUp ? .systemRed : .systemGreen)
+                    : (tickUp ? .systemGreen : .systemRed)
+                Self.flash(row: row, color: flash)
             }
             container.addSubview(row)
         }
@@ -133,8 +133,21 @@ final class BoardWindow: NSPanel, NSWindowDelegate {
     // ── 行渲染 ───────────────────────────────────────────────────────────────
     // 单条 attributed label + 右对齐 tab 站:代码左,价格/涨跌幅右,等宽数字对齐。
 
-    private static func rowLabel(_ r: BoardRow, color: NSColor, width: CGFloat) -> NSTextField {
-        let para = NSMutableParagraphStyle()
+    /// 行底闪光:方向色 32% 透明圆角色块 → 0.55s 淡出(Robinhood 式换数提示)
+    private static func flash(row: NSView, color: NSColor) {
+        row.wantsLayer = true
+        row.layer?.cornerRadius = 5
+        let from = color.withAlphaComponent(0.32).cgColor
+        let anim = CABasicAnimation(keyPath: "backgroundColor")
+        anim.fromValue = from
+        anim.toValue = NSColor.clear.cgColor
+        anim.duration = 0.55
+        anim.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        row.layer?.backgroundColor = NSColor.clear.cgColor
+        row.layer?.add(anim, forKey: "priceFlash")
+    }
+
+    private static func rowLabel(_ r: BoardRow, color: NSColor, width: CGFloat) -> NSTextField {        let para = NSMutableParagraphStyle()
         para.tabStops = [
             NSTextTab(type: .rightTabStopType, location: width - 64),
             NSTextTab(type: .rightTabStopType, location: width),
