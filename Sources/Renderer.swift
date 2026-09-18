@@ -88,7 +88,8 @@ func visCols(displayWidth: Int) -> Int {
 // darum y = yPad + bit * rowH (in der alten Zeichnung von unten gerechnet).
 
 private func renderFrame(columns: [ColoredColumn], offset: Int, visibleCols: Int,
-                         width: Int, height: Int, yPad: Int) -> NSImage {
+                         width: Int, height: Int, yPad: Int,
+                         fadeEdges: Bool = false) -> NSImage {
     let s    = max(1, renderScale)
     let pw   = width  * s
     let ph   = height * s
@@ -130,11 +131,14 @@ private func renderFrame(columns: [ColoredColumn], offset: Int, visibleCols: Int
             } else {
                 v = on ? (packedOn[col.color] ?? packedTemplate) : packedOff
             }
-            // 两缘渐隐:左右各 edgeFadeCols 列 alpha 线性爬升
-            let edgeDist: Double = min(Double(ci), Double(visibleCols - 1 - ci))
-            let fade: Double = min(1.0, edgeDist / Double(edgeFadeCols))
-            let alpha: UInt32 = UInt32(UInt8(max(0, fade * 255.0)))
-            v = (v & 0x00FF_FFFF) | (alpha << 24)
+            // 两缘渐隐仅用于滚动帧;idle/standby 小图标不吃,否则 5 列宽的
+            // "<" 会被 8 列渐隐区整颗压暗
+            if fadeEdges {
+                let edgeDist: Double = min(Double(ci), Double(visibleCols - 1 - ci))
+                let fade: Double = min(1.0, edgeDist / Double(edgeFadeCols))
+                let alpha: UInt32 = UInt32(UInt8(max(0, fade * 255.0)))
+                v = (v & 0x00FF_FFFF) | (alpha << 24)
+            }
             let y0 = (yPad + bit * rowH) * s
             for dy in 0..<dot {
                 let row = (y0 + dy) * pw + x0
@@ -161,7 +165,8 @@ func renderScrollFrame(columns: [ColoredColumn], offset: Int,
                 visibleCols: blank ? 0 : visCols(displayWidth: displayWidth),
                 width:      imgWidth(displayWidth: displayWidth),
                 height:     renderTransparent ? imgHtransparent : imgH,
-                yPad:       renderTransparent ? paddingTop : paddingV)
+                yPad:       renderTransparent ? paddingTop : paddingV,
+                fadeEdges:  true)
 }
 
 // ── Idle-Icon (< aus LED-Punkten) ─────────────────────────────────────────────
