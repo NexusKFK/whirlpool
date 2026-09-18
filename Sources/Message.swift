@@ -70,7 +70,7 @@ func buildScrollStream(text: String, defaultColor: LEDColor,
         // Control code?
         if text[i] == "\\", text.index(after: i) < text.endIndex {
             let ni = text.index(after: i)
-            if text[ni] == "c" || text[ni] == "p" || text[ni] == "g" {
+            if text[ni] == "c" || text[ni] == "p" || text[ni] == "g" || text[ni] == "b" {
                 if let (code, end) = parseCode(text, from: i) {
                     switch code {
                     case .color(let c):
