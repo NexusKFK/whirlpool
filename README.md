@@ -1,0 +1,67 @@
+# Pinwheel 风车星系
+
+macOS 状态栏行情跑马灯。LED 点阵风格,自选池循环滚动,一轮滚完自动拉新行情再来一轮——风车周而复始地转,和 M101 同名同构。
+
+显示引擎 fork 自 [rhsev/ticker](https://github.com/rhsev/ticker)(MIT,致谢见 ATTRIBUTION.md);本仓新增的是行情层:QuoteEngine + QuoteProvider。
+
+## 快速开始
+
+```bash
+swift build
+.build/debug/pinwheel        # 直接跑,demo 行情源,无需网络
+```
+
+或打包成 app(可拖进应用程序、设登录项):
+
+```bash
+./build-app.sh               # → Pinwheel.app,ad-hoc 签名
+```
+
+默认 `provider = "demo"`:本地随机游走的假数据,只为了让屏幕上有东西滚。接真实行情见下文。
+
+## 配置
+
+`~/.config/pinwheel/config.json`(菜单里也有 "Edit config…"):
+
+| 字段 | 说明 |
+|---|---|
+| `watchlist` | 自选池,`{"symbol": "AAPL", "market": "us"}`;market 决定涨跌配色习惯 |
+| `redUpMarkets` | 这些市场红涨绿跌(默认 cn/hk),其余绿涨红跌 |
+| `pausePerSymbol` | >0 时每个标的滚到左缘停留 N 秒(默认 0,连续滚) |
+| `provider` | `demo` \| `real` |
+| `defaultWidth` | 菜单栏显示宽度(字符数),默认 20 |
+| `scrollSpeed` | 每 tick 秒数,默认 0.05(= 20fps) |
+| `quoteLoop` | 行情循环开关(菜单可切) |
+
+## 接真实行情
+
+编辑 `Sources/RealProvider.swift`,把 API 填进 `fetch()`,协议只有一个方法。本机已验证过的两条免费链供参考:
+
+- A股 腾讯:`https://qt.gtimg.cn/q=sh600519,sz510300`(GBK 编码)
+- 美股 Yahoo:`https://query1.finance.yahoo.com/v8/finance/chart/AAPL?interval=1m&range=1d`(偶尔要 UA 头)
+
+改完 `swift build` 即可。轮询节奏不用自己控:一轮滚动结束才会触发下一次拉取,滚动周期 = 行情刷新周期,天然同步。拉取失败自动停在 idle,15 秒后重试。
+
+## CLI(与上游一致)
+
+同一个二进制,带参数即客户端——外部工具可以往跑马灯推消息:
+
+```bash
+pinwheel --send "TEXT"          # 滚一条(支持 \c[green] 等颜色码、\p[3] 暂停码)
+pinwheel --urgent TEXT          # 插队
+pinwheel --very-urgent TEXT     # 打断当前滚动,播完回放
+pinwheel --standby TEXT -d 10   # 静态显示 10 秒
+pinwheel --status / --clear / --quit
+```
+
+## 设计备注
+
+- 一轮 = 一次刷新:利用引擎现成的 end-of-message 相位,滚完拉新行情重新入队,无闪烁。
+- 引擎细节(位图字体、列流预编译、.common RunLoop、直接写像素)见 TECHNICAL.md(上游原文)。
+- 字体为 5×7 点阵大写 ASCII,不支持中文/小写——股票代码场景刚好。
+
+## Roadmap
+
+- [ ] RealProvider 接真实 API(腾讯 + Yahoo 双链)
+- [ ] 收盘时段自动降频(A股/美股休市时拉取间隔拉长)
+- [ ] 与 Shepherd 联动:盯盘提醒直接 `--very-urgent` 推上跑马灯
