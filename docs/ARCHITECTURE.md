@@ -6,6 +6,8 @@
 
 The scroll stream is precompiled into LED columns. `PriceFlash` finds the highest changed digit and retains the entire suffix. `ScrollFlashes` owns one monotonic pulse clock per changed range, starting when the range is readable. No frames are blanked by quote animation. Board rendering shares the same price rule.
 
+The LED dot size is a runtime setting (`ledDotSize` 1–3 in `TickerConfig`, geometry in `LEDLayout`). The menu bar clamps Large to Medium — the status item's host window is about 30 pt tall — while the floating bar uses the full tier; in that case frames are rendered per surface, otherwise one frame is shared. The scroll timer is normalized to physical speed, so changing the dot size does not change how fast quotes scroll.
+
 `ConfigWindowController` edits a draft. Validation runs before atomic persistence and hot application. `TickerConfig` defaults missing fields instead of discarding the user's watchlist. `Localization.swift` is generated from the shared JSON catalog. macOS keeps its historical configuration path.
 
 ## Windows
