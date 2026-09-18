@@ -11,6 +11,7 @@ let colsPerChar = 6   // 5 Pixel + 1 Abstandsspalte
 let colW = ledSize + ledGap
 let rowH = ledSize + ledGap
 let imgH = ledRows * rowH - ledGap + paddingV * 2
+let edgeFadeCols = 8   // 两缘渐隐列数:文字出图不生硬
 
 // ── Farben ─────────────────────────────────────────────────────────────────────
 
@@ -121,7 +122,7 @@ private func renderFrame(columns: [ColoredColumn], offset: Int, visibleCols: Int
         let x0  = (paddingH + ci * colW) * s
         for bit in 0..<ledRows {
             let on = (col.value & (1 << bit)) != 0
-            let v: UInt32
+            var v: UInt32
             if renderTransparent {
                 guard on else { continue }          // unbeleuchtete Punkte bleiben transparent
                 v = renderColoredTransparent ? (packedOn[col.color] ?? packedTemplate)
@@ -129,6 +130,11 @@ private func renderFrame(columns: [ColoredColumn], offset: Int, visibleCols: Int
             } else {
                 v = on ? (packedOn[col.color] ?? packedTemplate) : packedOff
             }
+            // 两缘渐隐:左右各 edgeFadeCols 列 alpha 线性爬升
+            let edgeDist: Double = min(Double(ci), Double(visibleCols - 1 - ci))
+            let fade: Double = min(1.0, edgeDist / Double(edgeFadeCols))
+            let alpha: UInt32 = UInt32(UInt8(max(0, fade * 255.0)))
+            v = (v & 0x00FF_FFFF) | (alpha << 24)
             let y0 = (yPad + bit * rowH) * s
             for dy in 0..<dot {
                 let row = (y0 + dy) * pw + x0
