@@ -19,6 +19,16 @@ swift build
 
 默认 `provider = "demo"`:本地随机游走的假数据,只为了让屏幕上有东西滚。接真实行情见下文。
 
+## 两种显示模式
+
+菜单里 `Mode` 切换(或改配置 `displayMode`),三种取值:
+
+- **marquee**(默认):状态栏 LED 点阵跑马灯,循环滚动。
+- **board**:程序坞两端空位的报价小卡,`boardRefresh` 秒一刷(默认 30)。程序坞本体不容第三方塞内容,浮层小窗占在底部条两端的空白处,视觉上就是坞的延伸。左键整卡拖动(位置自动记忆),右键出菜单(模式切换/编辑配置/退出)。
+- **both**:两个同时开。
+
+board 模式下状态栏图标让位;跑马灯模式和 board 各自独立刷新(共用同一个 provider)。
+
 ## 配置
 
 `~/.config/pinwheel/config.json`(菜单里也有 "Edit config…"):
@@ -32,6 +42,10 @@ swift build
 | `defaultWidth` | 菜单栏显示宽度(字符数),默认 20 |
 | `scrollSpeed` | 每 tick 秒数,默认 0.05(= 20fps) |
 | `quoteLoop` | 行情循环开关(菜单可切) |
+| `displayMode` | `marquee` \| `board` \| `both`(菜单 Mode 可切) |
+| `boardCorner` | board 卡默认贴程序坞哪端:`left` \| `right` |
+| `boardOrigin` | 手动拖动后自动写入的位置,不用手填 |
+| `boardRefresh` | board 刷新间隔秒数,默认 30 |
 
 ## 接真实行情
 
