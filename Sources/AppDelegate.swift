@@ -307,6 +307,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         phase = .idle
         setIdle()
         stopTimer()
+        // 行情循环还开着就续上下一轮,否则 Clear queue 会把跑马灯清死
+        if config.quoteLoop, config.tickerEnabled, !userPaused {
+            fetchNextQuoteCycle()
+        }
     }
 
     @objc private func togglePause() {
@@ -652,7 +656,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         if m == "marquee" || m == "both" {
             ensureStatusItem()
-            if config.quoteLoop { fetchNextQuoteCycle() }
+            // 重建定时器:配置里的 scrollSpeed(速度滑块)保存后即时生效;
+            // 队列空时 idle 分支自会拉行情续上,不必显式 kick。
+            stopTimer()
+            if config.tickerEnabled, !userPaused { startTimer() }
         } else if let si = statusItem {
             NSStatusBar.system.removeStatusItem(si)
             statusItem = nil

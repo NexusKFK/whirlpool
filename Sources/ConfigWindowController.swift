@@ -21,6 +21,9 @@ final class ConfigWindowController: NSObject, NSWindowDelegate {
     private var rowViews: [WatchlistRow] = []
     private let modePopup = NSPopUpButton()
     private let refreshField = NSTextField()
+    private let speedSlider = NSSlider(value: 0.05, minValue: 0.02, maxValue: 0.3,
+                                       target: nil, action: nil)
+    private let speedValueLabel = NSTextField(labelWithString: "")
     private var config: TickerConfig
 
     init(config: TickerConfig) {
@@ -37,6 +40,8 @@ final class ConfigWindowController: NSObject, NSWindowDelegate {
         rebuildRows()
         modePopup.selectItem(at: Self.modes.firstIndex { $0.key == config.displayMode } ?? 0)
         refreshField.stringValue = String(Int(config.boardRefresh))
+        speedSlider.doubleValue = min(0.3, max(0.02, config.scrollSpeed))
+        updateSpeedLabel()
         window?.center()
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
@@ -49,6 +54,7 @@ final class ConfigWindowController: NSObject, NSWindowDelegate {
                          styleMask: [.titled, .closable], backing: .buffered, defer: false)
         w.title = "Pinwheel 设置"
         w.isReleasedWhenClosed = false
+        w.level = .floating   // accessory 应用的窗,不置顶会被别的窗口挡住
         w.delegate = self
         window = w
 
@@ -87,6 +93,17 @@ final class ConfigWindowController: NSObject, NSWindowDelegate {
         refreshRow.orientation = .horizontal
         refreshRow.spacing = 8
 
+        let speedLabel = NSTextField(labelWithString: "跑马灯速度")
+        speedSlider.isContinuous = true
+        speedSlider.target = self
+        speedSlider.action = #selector(speedChanged)
+        speedSlider.widthAnchor.constraint(equalToConstant: 150).isActive = true
+        speedValueLabel.textColor = .secondaryLabelColor
+        speedValueLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        let speedRow = NSStackView(views: [speedLabel, speedSlider, speedValueLabel])
+        speedRow.orientation = .horizontal
+        speedRow.spacing = 8
+
         let resetBtn = NSButton(title: "报价卡归位(清除拖动记忆)", target: self,
                                 action: #selector(resetBoardOrigin))
         resetBtn.bezelStyle = .inline
@@ -107,7 +124,7 @@ final class ConfigWindowController: NSObject, NSWindowDelegate {
         btnRow.alignment = .centerY
 
         let form = NSStackView(views: [title, scroll, addBtn, separator,
-                                       modeRow, refreshRow, resetBtn, btnRow])
+                                       modeRow, refreshRow, speedRow, resetBtn, btnRow])
         form.orientation = .vertical
         form.alignment = .leading
         form.spacing = 10
@@ -169,6 +186,13 @@ final class ConfigWindowController: NSObject, NSWindowDelegate {
 
     @objc private func cancel() { window?.close() }
 
+    @objc private func speedChanged() { updateSpeedLabel() }
+
+    private func updateSpeedLabel() {
+        let perSec = 1.0 / max(0.02, speedSlider.doubleValue)
+        speedValueLabel.stringValue = String(format: "%.0f 列/秒", perSec)
+    }
+
     @objc private func save() {
         var entries: [WatchEntry] = []
         for rv in rowViews {
@@ -185,6 +209,7 @@ final class ConfigWindowController: NSObject, NSWindowDelegate {
         if let secs = Double(refreshField.stringValue) {
             config.boardRefresh = min(3600, max(5, secs))
         }
+        config.scrollSpeed = min(0.5, max(0.02, speedSlider.doubleValue))
 
         saveConfig(config)
         onApplied?(config)

@@ -3,6 +3,7 @@ import Foundation
 struct Quote {
     let price: Double
     let changePct: Double
+    let series: [Double]?   // 当日分钟线(降采样后),board 缩略图用
 }
 
 // Board 模式一行的展示数据(market 随行,配色习惯到渲染层再定)
@@ -12,6 +13,7 @@ struct BoardRow {
     let change: String   // 带符号带 %
     let up: Bool
     let market: String
+    let series: [Double]?
 }
 
 protocol QuoteProvider {
@@ -51,7 +53,7 @@ enum QuoteEngine {
                                          : String(format: "%.2f", q.price)
             let change = String(format: "%@%.2f%%", q.changePct >= 0 ? "+" : "", q.changePct)
             return BoardRow(symbol: e.symbol, price: price, change: change,
-                            up: q.changePct >= 0, market: e.market)
+                            up: q.changePct >= 0, market: e.market, series: q.series)
         }
     }
 }
@@ -61,20 +63,31 @@ final class DemoProvider: QuoteProvider {
     var name: String { "demo" }
 
     private var last: [String: Quote] = [
-        "AAPL":   Quote(price: 228.90,  changePct: 0.82),
-        "SPY":    Quote(price: 566.40,  changePct: -0.31),
-        "600519": Quote(price: 1487.00, changePct: 1.24),
-        "510300": Quote(price: 3.94,    changePct: -0.51),
+        "AAPL":   Quote(price: 228.90,  changePct: 0.82,  series: DemoProvider.walk(228.90, 40)),
+        "SPY":    Quote(price: 566.40,  changePct: -0.31, series: DemoProvider.walk(566.40, 40)),
+        "600519": Quote(price: 1487.00, changePct: 1.24,  series: DemoProvider.walk(1487.00, 40)),
+        "510300": Quote(price: 3.94,    changePct: -0.51, series: DemoProvider.walk(3.94, 40)),
     ]
+
+    private static func walk(_ end: Double, _ n: Int) -> [Double] {
+        // 从 end 倒着随机游走出一条演示曲线
+        var pts: [Double] = [end]
+        for _ in 1..<n { pts.append(pts.last! * (1 + Double.random(in: -0.002...0.002))) }
+        return pts.reversed()
+    }
 
     func quotes(for entries: [WatchEntry], completion: @escaping ([String: Quote]) -> Void) {
         var out: [String: Quote] = [:]
         for e in entries {
-            let base  = last[e.symbol] ?? Quote(price: 100, changePct: 0)
+            let base  = last[e.symbol] ?? Quote(price: 100, changePct: 0, series: nil)
             let drift = Double.random(in: -0.6...0.6)
+            var series = base.series ?? []
+            series.append(max(0.01, (series.last ?? base.price) * (1 + drift / 400)))
+            if series.count > 60 { series.removeFirst(series.count - 60) }
             out[e.symbol] = Quote(
                 price:     max(0.01, base.price * (1 + drift / 400)),
-                changePct: min(9.99, max(-9.99, base.changePct + drift / 3))
+                changePct: min(9.99, max(-9.99, base.changePct + drift / 3)),
+                series:    series
             )
         }
         last = out
