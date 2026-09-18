@@ -29,32 +29,39 @@ enum QuoteEngine {
     }
 
     /// 拼跑马灯文本。基底色由配置给(默认白),只有涨跌幅段着色,完事 \c[] 复位。
-    /// pausePerSymbol > 0 时在每个标的前埋 \p 暂停标记,标的滚到左缘停留 N 秒。
+    /// 箭头模式:价格后不留空格,▲/▼ 本身就是视觉分隔;符号模式保留空格。
     static func marqueeText(entries: [WatchEntry], quotes: [String: Quote],
                             redUpMarkets: [String], pausePerSymbol: Double,
-                            separator: String = " ♦ ") -> String {
+                            separator: String = "   ", changeArrows: Bool = true) -> String {
         let parts = entries.compactMap { e -> String? in
             guard let q = quotes[e.symbol] else { return nil }
             let up    = q.changePct >= 0
             let redUp = redUpMarkets.contains(e.market)
             let color = up ? (redUp ? "red" : "green") : (redUp ? "green" : "red")
-            let sign  = up ? "+" : ""
             let price = q.price >= 1000 ? String(format: "%.1f", q.price)
                                         : String(format: "%.2f", q.price)
+            let change = changeArrows
+                ? "\(up ? "▲" : "▼")\(String(format: "%.2f", abs(q.changePct)))%"
+                : "\(up ? "+" : "")\(String(format: "%.2f", q.changePct))%"
+            let gap = changeArrows ? "" : " "
             let pause = pausePerSymbol > 0 ? "\\p[\(pausePerSymbol)]" : ""
-            return "\(pause)\(e.symbol) \(price) \\c[\(color)]\(sign)\(String(format: "%.2f", q.changePct))%\\c[]"
+            return "\(pause)\(e.symbol) \(price)\(gap) \\c[\(color)]\(change)\\c[]"
         }
         return parts.joined(separator: separator)
     }
 
-    static func boardRows(entries: [WatchEntry], quotes: [String: Quote]) -> [BoardRow] {
+    static func boardRows(entries: [WatchEntry], quotes: [String: Quote],
+                          changeArrows: Bool = true) -> [BoardRow] {
         entries.compactMap { e in
             guard let q = quotes[e.symbol] else { return nil }
             let price  = q.price >= 1000 ? String(format: "%.1f", q.price)
                                          : String(format: "%.2f", q.price)
-            let change = String(format: "%@%.2f%%", q.changePct >= 0 ? "+" : "", q.changePct)
+            let up = q.changePct >= 0
+            let change = changeArrows
+                ? "\(up ? "▲" : "▼")\(String(format: "%.2f", abs(q.changePct)))%"
+                : "\(up ? "+" : "")\(String(format: "%.2f", q.changePct))%"
             return BoardRow(symbol: e.symbol, price: price, change: change,
-                            up: q.changePct >= 0, market: e.market, series: q.series)
+                            up: up, market: e.market, series: q.series)
         }
     }
 }

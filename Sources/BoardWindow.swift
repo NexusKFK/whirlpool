@@ -41,8 +41,10 @@ final class BoardWindow: NSPanel, NSWindowDelegate {
         reposition()
     }
 
-    func update(entries: [WatchEntry], quotes: [String: Quote], redUpMarkets: [String], at date: Date) {
-        let rowsData = QuoteEngine.boardRows(entries: entries, quotes: quotes)
+    func update(entries: [WatchEntry], quotes: [String: Quote], redUpMarkets: [String],
+                at date: Date, changeArrows: Bool = true) {
+        let rowsData = QuoteEngine.boardRows(entries: entries, quotes: quotes,
+                                             changeArrows: changeArrows)
         container.subviews.forEach { $0.removeFromSuperview() }
 
         let W: CGFloat = 250, inset: CGFloat = 10, rowH: CGFloat = 22

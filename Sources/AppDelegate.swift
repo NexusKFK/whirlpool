@@ -27,6 +27,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var cycleInFlight = false
     private var board: BoardWindow?
     private var boardTimer: Timer?
+    private var barWindow: BarWindow?
     private var configWindow: ConfigWindowController?
 
     // Zustand
@@ -584,8 +585,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func setImage(_ img: NSImage) {
-        statusItem?.button?.image = img
-        statusItem?.button?.title = ""
+        if let si = statusItem {
+            si.button?.image = img
+            si.button?.title = ""
+        }
+        if let bar = barWindow, bar.isVisible {
+            bar.update(img)
+        }
     }
 
     private func setIdle() {
@@ -647,7 +653,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 }
                 let text = QuoteEngine.marqueeText(entries: entries, quotes: quotes,
                                                    redUpMarkets: redUp, pausePerSymbol: pause,
-                                                   separator: self.config.marqueeSeparator)
+                                                   separator: self.config.marqueeSeparator,
+                                                   changeArrows: self.config.changeArrows)
                 self.enqueue(TickerMessage(kind: .scroll, text: text, priority: .normal,
                                            duration: 0, onClickCommand: nil, width: nil))
                 self.startTimer()
@@ -657,24 +664,35 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // ── Display-Mode ─────────────────────────────────────────────────────────────
     //
-    // marquee = 跑马灯(状态栏);board = 报价卡(程序坞旁);both = 两个都要。
-    // board 模式下状态栏图标整个让位,控制菜单移到报价卡右键。
+    // 可组合 displayMode(逗号分隔):marquee=状态栏跑马灯,board=程序坞旁报价卡,
+    // bar=屏幕下缘置顶跑马灯条(给竖屏/放不下宽 bar 的屏幕)。"both"=旧别名(marquee+board)。
+    // bar/board 模式下状态栏图标让位,控制菜单移到各自右键。
 
     private func applyDisplayMode() {
         let m = config.displayMode
+        let marqueeOn = m.contains("marquee") || m == "both"
+        let boardOn   = m.contains("board")   || m == "both"
+        let barOn     = m.contains("bar")
 
-        if m == "marquee" || m == "both" {
+        if marqueeOn {
             ensureStatusItem()
-            // 保存(自选池/速度/颜色)即清旧一轮、按新配置立即重拉——
-            // clearAllMessages 内部会 fetchNextQuoteCycle 续上,期间保留最后一帧
-            clearAllMessages()
         } else if let si = statusItem {
             NSStatusBar.system.removeStatusItem(si)
             statusItem = nil
-            stopTimer()
         }
 
-        if m == "board" || m == "both" {
+        if barOn {
+            if barWindow == nil {
+                barWindow = BarWindow(config: config)
+                barWindow?.menuProvider = { [weak self] in self?.buildBoardMenu() ?? NSMenu() }
+            }
+            barWindow?.config = config
+            barWindow?.orderFrontRegardless()
+        } else {
+            barWindow?.orderOut(nil)
+        }
+
+        if boardOn {
             if board == nil {
                 board = BoardWindow(config: config)
                 board?.menuProvider = { [weak self] in self?.buildBoardMenu() ?? NSMenu() }
@@ -687,6 +705,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             boardTimer?.invalidate()
             boardTimer = nil
             board?.orderOut(nil)
+        }
+
+        // 跑马灯引擎(marquee/bar 共用同一滚动循环):清旧一轮、按新配置立即重拉
+        if marqueeOn || barOn {
+            clearAllMessages()
+        } else {
+            stopTimer()
         }
     }
 
@@ -703,11 +728,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func refreshBoard() {
         let entries = config.watchlist
         let redUp   = config.redUpMarkets
+        let arrows  = config.changeArrows
         quoteProvider.quotes(for: entries) { [weak self] quotes in
             DispatchQueue.main.async {
                 guard let self, !quotes.isEmpty else { return }
                 self.board?.update(entries: entries, quotes: quotes,
-                                   redUpMarkets: redUp, at: Date())
+                                   redUpMarkets: redUp, at: Date(), changeArrows: arrows)
             }
         }
     }
@@ -721,7 +747,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func buildModeMenu() -> NSMenu {
         let menu = NSMenu()
-        for (title, key) in [("Marquee", "marquee"), ("Board", "board"), ("Both", "both")] {
+        let modes: [(String, String)] = [
+            ("跑马灯(菜单栏)", "marquee"),
+            ("报价卡(程序坞旁)", "board"),
+            ("底部条(屏幕下缘)", "bar"),
+            ("跑马灯+报价卡", "marquee,board"),
+            ("跑马灯+底部条", "marquee,bar"),
+        ]
+        for (title, key) in modes {
             let i = NSMenuItem(title: title, action: #selector(setDisplayMode(_:)), keyEquivalent: "")
             i.target = self
             i.representedObject = key

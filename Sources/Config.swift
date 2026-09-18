@@ -11,13 +11,14 @@ struct TickerConfig: Codable {
     var tickerEnabled:     Bool              = true
     var defaultColor:      String            = "white"
     var defaultWidth:      Int               = 20
-    var scrollSpeed:       Double            = 0.05
+    var scrollSpeed:       Double            = 0.0222  // ≈45 列/秒
     var defaultPause:      Double            = 0      // 每轮开头停留秒数,0=连续滚
     var customChars:       [String: [UInt8]] = [:]
     var transparent:       Bool              = true
     // 彩色透明模式:点阵自带颜色。"auto" 会退化成菜单栏单色(吃掉涨跌色)。
     var transparentColor:  String            = "white"
-    var marqueeSeparator:  String            = " ♦ "  // 标的间分隔符,字体表内字符有效
+    var marqueeSeparator:  String            = "   "   // 标的间空隙(3 空格)
+    var changeArrows:      Bool              = true   // 涨跌用 ▲/▼(关=+/-号)
 
     // Quote loop — 一轮滚完自动拉新行情再入队,循环不息
     var quoteLoop:         Bool              = true
@@ -32,10 +33,11 @@ struct TickerConfig: Codable {
     var provider:          String            = "demo" // demo | real(见 RealProvider.swift)
 
     // Board 模式(缩略图报价卡,贴程序坞两端空位)
-    var displayMode:       String            = "marquee" // marquee | board | both
+    var displayMode:       String            = "marquee" // 可组合: marquee|board|bar,逗号分隔;both=旧别名
     var boardCorner:       String            = "right"   // 程序坞左端 | 右端
     var boardOrigin:       [Double]?         = nil       // 手动拖动后记忆 [x, y]
     var boardRefresh:      Double            = 30        // 秒
+    var barOrigin:         [Double]?         = nil       // 底部条手动拖动后记忆
 }
 
 private let configURL: URL = {
