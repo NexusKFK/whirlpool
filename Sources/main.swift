@@ -45,6 +45,13 @@ if CommandLine.arguments.count > 1 {
         cliSend(msg); exit(0)
     }
 
+    // --settings — 唤起运行实例的配置窗
+    if has(["--settings"]) {
+        let msg = TickerMessage(kind: .openSettings, text: "", priority: .normal,
+                                duration: 0, onClickCommand: nil, width: nil)
+        cliSend(msg); exit(0)
+    }
+
     // --width
     if let w = width, text == nil {
         let msg = TickerMessage(kind: .setWidth, text: "", priority: .normal,
@@ -62,6 +69,7 @@ if CommandLine.arguments.count > 1 {
           pinwheel --standby-urgent TEXT --duration N
           pinwheel --standby-very-urgent TEXT --duration N
           pinwheel --width N
+          pinwheel --settings
           pinwheel --clear
           pinwheel --status
           pinwheel --quit

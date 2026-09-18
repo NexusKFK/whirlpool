@@ -27,6 +27,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var cycleInFlight = false
     private var board: BoardWindow?
     private var boardTimer: Timer?
+    private var configWindow: ConfigWindowController?
 
     // Zustand
     private var displayWidth: Int = 20
@@ -194,6 +195,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         loopItem.state  = config.quoteLoop ? .on : .off
         menu.addItem(loopItem)
 
+        let cfgItem = NSMenuItem(title: "Configure…", action: #selector(openConfigWindow),
+                                 keyEquivalent: ",")
+        cfgItem.target = self
+        menu.addItem(cfgItem)
+
         let modeItem = NSMenuItem(title: "Mode", action: nil, keyEquivalent: "")
         modeItem.submenu = buildModeMenu()
         menu.addItem(modeItem)
@@ -325,6 +331,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         try? proc.run()
     }
 
+    @objc private func openConfigWindow() {
+        if configWindow == nil {
+            configWindow = ConfigWindowController(config: config)
+            configWindow?.onApplied = { [weak self] c in
+                guard let self else { return }
+                self.config = c
+                self.applyDisplayMode()
+            }
+        }
+        configWindow?.reload(config: config)
+        configWindow?.show()
+    }
+
     @objc private func quit() {
         animTimer?.invalidate()
         unlink(socketPath)
@@ -339,6 +358,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         switch msg.kind {
         case .getStatus:
             return statusJSON()
+        case .openSettings:
+            DispatchQueue.main.async { self.openConfigWindow() }
+            return "ok"
         case .quit:
             DispatchQueue.main.async { NSApp.terminate(nil) }
             return "ok"
@@ -357,7 +379,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return "ok"
         case .scroll, .standby:
             break
-        case .getStatus, .quit:
+        case .getStatus, .quit, .openSettings:
             return "ok"   // bereits oben behandelt
         }
 
@@ -518,7 +540,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             setImage(img)
             phase = .standby(until: Date().addingTimeInterval(msg.duration))
 
-        case .setWidth, .clearQueue, .getStatus, .quit:
+        case .setWidth, .clearQueue, .getStatus, .quit, .openSettings:
             break
         }
     }
@@ -696,6 +718,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func buildBoardMenu() -> NSMenu {
         let menu = NSMenu()
+        let cfgItem = NSMenuItem(title: "Configure…", action: #selector(openConfigWindow),
+                                 keyEquivalent: ",")
+        cfgItem.target = self
+        menu.addItem(cfgItem)
         let modeItem = NSMenuItem(title: "Mode", action: nil, keyEquivalent: "")
         modeItem.submenu = buildModeMenu()
         menu.addItem(modeItem)
