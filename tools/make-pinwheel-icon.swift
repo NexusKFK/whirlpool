@@ -46,22 +46,6 @@ for (gi, ch) in text.enumerated() {
     }
 }
 
-// 四角 L 形角括号(HUD 取景框风),臂长 5 点、单点厚
-let off = unit * 1.5
-let bx = tx - off, by = ty - off
-let bw = totalW + off * 2, bh = totalH + off * 2
-let armDots = 5
-for i in 0..<armDots {
-    let d = CGFloat(i) * unit
-    putDot(bx + d,              by)              // 左下横臂
-    putDot(bx,                  by + d)          // 左下竖臂
-    putDot(bx + bw - unit - d,  by)              // 右下横臂
-    putDot(bx + bw - unit,      by + d)          // 右下竖臂
-    putDot(bx + d,              by + bh - unit)  // 左上横臂
-    putDot(bx,                  by + bh - unit - d)
-    putDot(bx + bw - unit - d,  by + bh - unit)
-    putDot(bx + bw - unit,      by + bh - unit - d)
-}
 img.unlockFocus()
 
 guard let tiff = img.tiffRepresentation,
