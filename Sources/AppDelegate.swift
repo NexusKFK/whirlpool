@@ -618,8 +618,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         var flash: Set<Int> = []
         if let bs = blinkStart, !blinkCols.isEmpty, roundLen > 0 {
             let elapsed = Date().timeIntervalSince(bs)
-            if elapsed < 0.75 {
-                if Int(elapsed / 0.25) != 1 {
+            if elapsed < 0.3 {
+                if true {
                     let vc = visCols(displayWidth: displayWidth)
                     for ci in 0..<vc {
                         let si = scrollOffset + ci
