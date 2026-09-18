@@ -482,12 +482,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 return
             }
 
+            // 预取:离本轮结束还有约一屏时提前拉下一轮,
+            // 滚到头时新数据已入队,消除轮尾的冻结停顿感。
+            if config.quoteLoop, config.tickerEnabled, !userPaused, !cycleInFlight,
+               roundLen > 0,
+               scrollOffset >= roundLen - visCols(displayWidth: displayWidth) {
+                fetchNextQuoteCycle()
+            }
+
             // 一轮 = 一份完整串。画布是双拼环绕,窗口末端恰是"串尾接串头",
-            // 走完一份即拉下一轮——轮与轮之间没有整屏空白垫。
+            // 走完一份即换下一轮——轮与轮之间没有整屏空白垫。
             if roundLen > 0, scrollOffset >= roundLen {
                 phase = .idle
                 if config.quoteLoop, config.tickerEnabled, !userPaused, !cycleInFlight {
-                    fetchNextQuoteCycle()
+                    fetchNextQuoteCycle()   // 保险:预取没赶上时兜底
                 } else {
                     setIdle()
                 }
