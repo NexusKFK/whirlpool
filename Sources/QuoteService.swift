@@ -74,7 +74,7 @@ final class QuoteService {
 /// Bounded concurrency and a provider-wide cooldown. No retry loops on HTTP 429.
 final class QuoteHTTPClient {
     typealias Callback = (Data?, URLResponse?, Error?) -> Void
-    private let queue = DispatchQueue(label: "pinwheel.http")
+    private let queue = DispatchQueue(label: "whirlpool.http")
     private let session: URLSession
     private var pending: [(URLRequest, Callback)] = []
     private var active = 0

@@ -106,7 +106,7 @@ struct TickerConfig: Codable {
 
 /// The legacy path is retained so upgrades do not lose a user's watchlist.
 let configURL = FileManager.default.homeDirectoryForCurrentUser
-    .appendingPathComponent(".config/pinwheel/config.json")
+    .appendingPathComponent(".config/whirlpool/config.json")
 var configReadError: String?
 
 func readConfig(at url: URL) throws -> TickerConfig {
@@ -144,7 +144,7 @@ func saveConfig(_ config: TickerConfig) -> Bool {
         }
         try writeConfig(config, to: configURL); return true
     }
-    catch { fputs("Pinwheel: could not save configuration: \(error.localizedDescription)\n", stderr); return false }
+    catch { fputs("Whirlpool: could not save configuration: \(error.localizedDescription)\n", stderr); return false }
 }
 
 func configPath() -> String { configURL.path }

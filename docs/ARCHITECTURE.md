@@ -10,7 +10,7 @@ The scroll stream is precompiled into LED columns. `PriceFlash` finds the highes
 
 ## Windows
 
-The preview uses .NET 10 with a platform-independent `Pinwheel.Core` project and a Windows Forms shell. The application context owns the tray icon, one `QuoteFeed`, and the ticker/board/settings windows. Core logic can be exercised on macOS; window execution requires Windows.
+The preview uses .NET 10 with a platform-independent `Whirlpool.Core` project and a Windows Forms shell. The application context owns the tray icon, one `QuoteFeed`, and the ticker/board/settings windows. Core logic can be exercised on macOS; window execution requires Windows.
 
 The Windows ticker reuses the bitmap glyphs but has a native rendering/timer implementation. The board is a native read-only table with suffix-only price painting. HTTP requests run asynchronously and serially with spacing, caching, Retry-After, and backoff. No UI thread waits on network I/O.
 

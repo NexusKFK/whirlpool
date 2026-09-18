@@ -1,6 +1,6 @@
 # Security / 安全
 
-Pinwheel runs as the current user and requires no administrator privileges. It does not store brokerage credentials, place orders, or expose a network control service. Live quote requests use HTTPS. Local settings are not uploaded.
+Whirlpool runs as the current user and requires no administrator privileges. It does not store brokerage credentials, place orders, or expose a network control service. Live quote requests use HTTPS. Local settings are not uploaded.
 
 On macOS, the control socket is per-user, checks peer ownership, and uses owner-only permissions. The optional `--on-click` CLI feature intentionally executes a local shell command; only supply trusted commands. On Windows, settings live under the current user's application-data directory; the app uses a per-session single-instance mutex.
 

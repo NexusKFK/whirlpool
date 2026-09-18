@@ -1,6 +1,6 @@
 import AppKit
 
-struct PriceFlashTests {
+struct TickFlashTests {
     func testSuffixIncludesUnchangedLowerPlaces() throws {
         for (old, new, prefix, suffix) in [
             (81.20, 81.30, "81.", "30"),
@@ -12,7 +12,7 @@ struct PriceFlashTests {
             (100.90, 99.90, "", "99.90"),
             (1000.01, 1000.02, "1000.0", "2")
         ] {
-            let flash = try unwrap(PriceFlash.between(old, and: new, redUp: false))
+            let flash = try unwrap(TickFlash.between(old, and: new, redUp: false))
             expectEqual(flash.prefix, prefix)
             expectEqual(flash.suffix, suffix)
             expectEqual(flash.color, new > old ? .green : .red)
@@ -20,16 +20,16 @@ struct PriceFlashTests {
     }
 
     func testFirstQuoteUnchangedAndInvisibleChangesDoNotFlash() {
-        expectNil(PriceFlash.between(nil, and: 81.20, redUp: false))
-        expectNil(PriceFlash.between(81.20, and: 81.20, redUp: false))
-        expectNil(PriceFlash.between(81.201, and: 81.204, redUp: false))
-        expectNil(PriceFlash.between(.nan, and: 81.20, redUp: false))
-        expectNil(PriceFlash.between(81.20, and: .infinity, redUp: false))
+        expectNil(TickFlash.between(nil, and: 81.20, redUp: false))
+        expectNil(TickFlash.between(81.20, and: 81.20, redUp: false))
+        expectNil(TickFlash.between(81.201, and: 81.204, redUp: false))
+        expectNil(TickFlash.between(.nan, and: 81.20, redUp: false))
+        expectNil(TickFlash.between(81.20, and: .infinity, redUp: false))
     }
 
     func testMarketDirectionPreference() {
-        expectEqual(PriceFlash.between(81.20, and: 81.30, redUp: true)?.color, .red)
-        expectEqual(PriceFlash.between(81.30, and: 81.20, redUp: true)?.color, .green)
+        expectEqual(TickFlash.between(81.20, and: 81.30, redUp: true)?.color, .red)
+        expectEqual(TickFlash.between(81.30, and: 81.20, redUp: true)?.color, .green)
     }
 
     func testMarqueeUsesTickDirectionIndependentOfDayChange() {
@@ -63,7 +63,7 @@ struct PriceFlashTests {
         expectEqual(rows.first?.price, "1000.02")
     }
 
-    func testOffscreenPriceFlashesWhenItBecomesReadableAndOnlyOnce() {
+    func testOffscreenTickFlashesWhenItBecomesReadableAndOnlyOnce() {
         var flashes = ScrollFlashes(columns: Dictionary(uniqueKeysWithValues: (90..<102).map { ($0, LEDColor.green) }))
         expectTrue(flashes.colors(offset: 0, visibleColumns: 60, roundLength: 180, now: 0).isEmpty)
         // Still inside the right-edge fade: wait for the entire suffix to be readable.
@@ -121,7 +121,7 @@ struct PriceFlashTests {
                 }
             }
         }
-        if let directory = ProcessInfo.processInfo.environment["PINWHEEL_SNAPSHOT_DIR"] {
+        if let directory = ProcessInfo.processInfo.environment["WHIRLPOOL_SNAPSHOT_DIR"] {
             let url = URL(fileURLWithPath: directory, isDirectory: true)
             try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
             for (name, rep) in [("normal", normalRep), ("pulse", pulseRep), ("restored", restoredRep)] {
@@ -168,9 +168,9 @@ private func unwrap<T>(_ value: T?, file: StaticString = #file, line: UInt = #li
 }
 
 @main
-struct PriceFlashTestRunner {
+struct TickFlashTestRunner {
     static func main() throws {
-        let tests = PriceFlashTests()
+        let tests = TickFlashTests()
         let cases: [(String, () throws -> Void)] = [
             ("changed suffix includes unchanged lower digits", tests.testSuffixIncludesUnchangedLowerPlaces),
             ("first, unchanged and rounded quotes stay neutral", tests.testFirstQuoteUnchangedAndInvisibleChangesDoNotFlash),
@@ -178,7 +178,7 @@ struct PriceFlashTestRunner {
             ("tick direction is independent of daily change", tests.testMarqueeUsesTickDirectionIndependentOfDayChange),
             ("percent-only updates and disabled animation", tests.testOnlyPercentChangeAndDisabledAnimationDoNotFlashPrice),
             ("consistent price precision", tests.testPricePrecisionMatchesBetweenDisplays),
-            ("offscreen timing and single pulse per cycle", tests.testOffscreenPriceFlashesWhenItBecomesReadableAndOnlyOnce),
+            ("offscreen timing and single pulse per cycle", tests.testOffscreenTickFlashesWhenItBecomesReadableAndOnlyOnce),
             ("independent pulse clocks", tests.testEachPriceHasItsOwnClock),
             ("rendered suffix pixels and color restoration", tests.testRenderedPulseColorsTheSuffixAndRestoresOriginalPixels),
             ("short streams and oversized groups", tests.testShortStreamAndOversizedFlashStayBounded),

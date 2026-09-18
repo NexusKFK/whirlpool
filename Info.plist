@@ -3,19 +3,19 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleIdentifier</key>
-    <string>local.pinwheel</string>
+    <string>local.whirlpool</string>
     <key>CFBundleName</key>
-    <string>Pinwheel</string>
+    <string>Whirlpool</string>
     <key>CFBundleVersion</key>
     <string>1.6.0</string>
     <key>CFBundleShortVersionString</key>
     <string>1.6.0</string>
     <key>CFBundleExecutable</key>
-    <string>pinwheel</string>
+    <string>whirlpool</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleIconFile</key>
-    <string>pinwheel</string>
+    <string>whirlpool</string>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
     <key>LSMinimumSystemVersion</key>
