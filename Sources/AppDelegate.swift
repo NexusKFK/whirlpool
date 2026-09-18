@@ -27,7 +27,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var cycleInFlight = false
     private var prefetchArmed = true   // 每轮只预取一次;预取窗口比轮尾长,不设闸会连环重拉
     private var lastParts: [String: String] = [:]   // symbol → 上轮核心串(价格+涨跌)
-    private var blinkCols: Set<Int> = []             // 本轮要闪的列(流内索引)
+    private var lastTicks: [String: Double] = [:]   // symbol → 上轮价格(判跳动方向)
+    private var blinkCols: [Int: LEDColor] = [:]     // 本轮要闪的列(流内索引)→ 闪现色
     private var blinkStart: Date? = nil
     private var board: BoardWindow?
     private var boardTimer: Timer?
@@ -615,17 +616,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showScrollFrame(blank: Bool = false) {
         // 换数提示:变化段闪两下纯白高亮(亮-常-亮各 0.25s),字形不变全程可读
-        var flash: Set<Int> = []
+        var flash: [Int: LEDColor] = [:]
         if let bs = blinkStart, !blinkCols.isEmpty, roundLen > 0 {
             let elapsed = Date().timeIntervalSince(bs)
             if elapsed < 0.3 {
-                if true {
-                    let vc = visCols(displayWidth: displayWidth)
-                    for ci in 0..<vc {
-                        let si = scrollOffset + ci
-                        if si >= 0, si < canvas.count, blinkCols.contains(si % roundLen) {
-                            flash.insert(si)
-                        }
+                let vc = visCols(displayWidth: displayWidth)
+                for ci in 0..<vc {
+                    let si = scrollOffset + ci
+                    if si >= 0, si < canvas.count, let c = blinkCols[si % roundLen] {
+                        flash[si] = c
                     }
                 }
             } else {
@@ -717,8 +716,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                                                     separator: self.config.marqueeSeparator,
                                                     changeArrows: self.config.changeArrows,
                                                     blinkChanged: self.config.marqueeBlink,
-                                                    previousParts: self.lastParts)
+                                                    previousParts: self.lastParts,
+                                                    previousTicks: self.lastTicks)
                 self.lastParts = built.parts
+                self.lastTicks = entries.reduce(into: [:]) { acc, e in
+                    if let q = quotes[e.symbol] { acc[e.symbol] = q.price }
+                }
                 self.enqueue(TickerMessage(kind: .scroll, text: built.text, priority: .normal,
                                            duration: 0, onClickCommand: nil, width: nil))
                 self.startTimer()

@@ -51,7 +51,7 @@ struct PauseMarker {
 struct ScrollStream {
     let columns: [ColoredColumn]
     let pauses:  [PauseMarker]
-    let blinkCols: Set<Int>   // 换数闪烁的列(流内索引)
+    let blinkCols: [Int: LEDColor]   // 换数闪烁的列(流内索引)→ 闪现色(跳动方向色)
 }
 
 // ── Parser ─────────────────────────────────────────────────────────────────────
@@ -61,8 +61,9 @@ func buildScrollStream(text: String, defaultColor: LEDColor,
                        customChars: [String: [UInt8]] = [:]) -> ScrollStream {
     var columns: [ColoredColumn] = []
     var pauses:  [PauseMarker]   = []
-    var blinkCols: Set<Int> = []
+    var blinkCols: [Int: LEDColor] = [:]
     var blinking = false
+    var blinkColor: LEDColor? = nil
     var color    = defaultColor
     var i        = text.startIndex
 
@@ -75,8 +76,9 @@ func buildScrollStream(text: String, defaultColor: LEDColor,
                     switch code {
                     case .color(let c):
                         color = c ?? defaultColor
-                    case .blink(let on):
+                    case .blink(let on, let c):
                         blinking = on
+                        blinkColor = on ? c : nil
                     case .pause(var k):
                         if case .sticky(nil, let b) = k, let cmd = onClickCommand {
                             k = .sticky(onClickCommand: cmd, blinks: b)
@@ -108,7 +110,9 @@ func buildScrollStream(text: String, defaultColor: LEDColor,
             while padded.count < 6 { padded.append(0x00) }
 
             for v in padded {
-                if blinking { blinkCols.insert(columns.count) }
+                if blinking {
+                    blinkCols[columns.count] = blinkColor ?? color
+                }
                 columns.append(ColoredColumn(value: v, color: color))
             }
         }
@@ -122,7 +126,7 @@ private enum ParsedCode {
     case color(LEDColor?)   // nil = zurück zur Grundfarbe der Nachricht
     case pause(PauseKind)
     case glyph(String)
-    case blink(Bool)        // \b[1]/\b[0]: 后续列进入/退出换数闪烁组
+    case blink(Bool, LEDColor?)   // \b[1]/\b[1:green]/\b[0]: 进入(带闪现色)/退出换数闪烁组
 }
 
 private func parseCode(_ text: String, from start: String.Index) -> (ParsedCode, String.Index)? {
@@ -147,7 +151,12 @@ private func parseCode(_ text: String, from start: String.Index) -> (ParsedCode,
         }
         if let s = Double(content) { return (.pause(.timed(seconds: s)), i) }
     case "g": return (.glyph(content.lowercased()), i)
-    case "b": return (.blink(content == "1"), i)
+    case "b":
+        if content.hasPrefix("1:") {
+            let cname = String(content.dropFirst(2)).lowercased()
+            return (.blink(true, LEDColor(rawValue: cname)), i)
+        }
+        return (.blink(content == "1", nil), i)
     default: break
     }
     return nil

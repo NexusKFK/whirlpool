@@ -44,7 +44,8 @@ enum QuoteEngine {
                             redUpMarkets: [String], pausePerSymbol: Double,
                             separator: String = "   ", changeArrows: Bool = true,
                             blinkChanged: Bool = true,
-                            previousParts: [String: String] = [:])
+                            previousParts: [String: String] = [:],
+                            previousTicks: [String: Double] = [:])
         -> (text: String, parts: [String: String]) {
         var parts: [String] = []
         var newCores: [String: String] = [:]

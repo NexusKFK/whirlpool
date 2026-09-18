@@ -89,7 +89,7 @@ func visCols(displayWidth: Int) -> Int {
 
 private func renderFrame(columns: [ColoredColumn], offset: Int, visibleCols: Int,
                          width: Int, height: Int, yPad: Int,
-                         fadeEdges: Bool = false, flash: Set<Int> = []) -> NSImage {
+                         fadeEdges: Bool = false, flash: [Int: LEDColor] = [:]) -> NSImage {
     let s    = max(1, renderScale)
     let pw   = width  * s
     let ph   = height * s
@@ -119,7 +119,7 @@ private func renderFrame(columns: [ColoredColumn], offset: Int, visibleCols: Int
     for ci in 0..<visibleCols {
         let si = offset + ci
         guard si >= 0, si < columns.count else { continue }
-        let flashing = flash.contains(si)
+        let flashColor = flash[si]
         let col = columns[si]
         let x0  = (paddingH + ci * colW) * s
         for bit in 0..<ledRows {
@@ -127,12 +127,12 @@ private func renderFrame(columns: [ColoredColumn], offset: Int, visibleCols: Int
             var v: UInt32
             if renderTransparent {
                 guard on else { continue }          // unbeleuchtete Punkte bleiben transparent
-                // 换数提示=高亮闪:命中列用白色,字形不变、全程可读
-                let c = flashing ? LEDColor.white : col.color
+                // 换数提示=跳动方向色单次闪:命中列闪现色→回原色,无空帧
+                let c = flashColor ?? col.color
                 v = renderColoredTransparent ? (packedOn[c] ?? packedTemplate)
                                              : packedTemplate
             } else {
-                let c = flashing ? LEDColor.white : col.color
+                let c = flashColor ?? col.color
                 v = on ? (packedOn[c] ?? packedTemplate) : packedOff
             }
             // 两缘渐隐仅用于滚动帧;idle/standby 小图标不吃,否则 5 列宽的
@@ -163,7 +163,7 @@ private func renderFrame(columns: [ColoredColumn], offset: Int, visibleCols: Int
 // ── Scroll-Frame ───────────────────────────────────────────────────────────────
 
 func renderScrollFrame(columns: [ColoredColumn], offset: Int,
-                       displayWidth: Int, blank: Bool = false, flash: Set<Int> = []) -> NSImage {
+                       displayWidth: Int, blank: Bool = false, flash: [Int: LEDColor] = [:]) -> NSImage {
     renderFrame(columns:    columns,
                 offset:     offset,
                 visibleCols: blank ? 0 : visCols(displayWidth: displayWidth),
