@@ -177,11 +177,14 @@ func renderScrollFrame(columns: [ColoredColumn], offset: Int,
 // ── Idle-Icon (< aus LED-Punkten) ─────────────────────────────────────────────
 
 func renderIdleIcon(color: LEDColor) -> NSImage {
-    let cols = FONT[Character("<")] ?? Array(repeating: 0, count: 5)
+    // 收起态:<W — 每字符 5 列字面 + 1 空隙列
+    let glyphs = ["<", "w"].map { FONT[$0] ?? Array(repeating: 0, count: 5) }
+    var cols: [UInt8] = []
+    for g in glyphs { cols += g }
     return renderFrame(columns:     cols.map { ColoredColumn(value: $0, color: color) },
                        offset:      0,
-                       visibleCols: 5,
-                       width:       paddingH * 2 + 5 * colW - ledGap,
+                       visibleCols: cols.count,
+                       width:       paddingH * 2 + cols.count * colW - ledGap,
                        height:      renderTransparent ? imgHtransparent : imgH,
                        yPad:        renderTransparent ? paddingTop : paddingV)
 }

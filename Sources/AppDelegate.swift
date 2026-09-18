@@ -265,7 +265,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
         NSApp.orderFrontStandardAboutPanel(options: [
             .applicationName: "Whirlpool", .applicationVersion: version,
-            .credits: NSAttributedString(string: L("A quiet desktop ticker for your watchlist.") + "\n\n" + L("Open-source software under the MIT license. Market data remains subject to provider terms."))
+            .credits: NSAttributedString(string: L("A quiet desktop ticker for your watchlist.") + "\n\nmade by KFK with GPT-Astra, for all my lovely besties.")
         ])
     }
 
