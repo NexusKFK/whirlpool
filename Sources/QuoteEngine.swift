@@ -39,7 +39,7 @@ enum QuoteEngine {
 
     /// 拼跑马灯文本。基底色由配置给(默认白),只有涨跌幅段着色,完事 \c[] 复位。
     /// 平盘(|Δ|<0.005):不着色(随基底白),箭头位是一道杠。
-    /// 返回 (文本, 每标的核心串)。核心串变化 = 数字变了,跑马灯给那一段埋 \b 闪烁标记。
+    /// 返回 (文本, 每标的核心串)。核心串变化 = 数字变了,跑马灯给那一段埋 \b 标记,显示层以实心色块闪提示(报价卡同款思路)。
     static func marqueeText(entries: [WatchEntry], quotes: [String: Quote],
                             redUpMarkets: [String], pausePerSymbol: Double,
                             separator: String = "   ", changeArrows: Bool = true,
@@ -62,8 +62,7 @@ enum QuoteEngine {
                     ? "\(up ? "▲" : "▼")\(String(format: "%.2f", abs(q.changePct)))%"
                     : "\(up ? "+" : "")\(String(format: "%.2f", q.changePct))%"
             let pause = pausePerSymbol > 0 ? "\\p[\(pausePerSymbol)]" : ""
-            let gap = changeArrows ? "" : " "
-            let core = "\(price)\(gap)\(flat ? change : "\\c[\(color)]\(change)\\c[]")"
+            let core = "\(price) \(flat ? change : "\\c[\(color)]\(change)\\c[]")"   // 价格与涨跌段之间留一个空格
             // 数字有变:价格+涨跌段埋闪烁标记(代码名不闪);首轮(previousParts 空)不闪
             let changed = blinkChanged && previousParts[e.symbol] != nil
                                   && previousParts[e.symbol] != core
