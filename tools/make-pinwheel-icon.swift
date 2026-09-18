@@ -1,10 +1,10 @@
-// 画 Pinwheel 图标:深色 squircle 底 + 琥珀圆角框 + "<SPX" LED 点阵
+// 画 Pinwheel 图标:深色 squircle 底 + 白色 "<SPX" LED 点阵 + 四角 L 形点阵角括号
 // 用法: swift tools/make-pinwheel-icon.swift [输出目录 icons]
 import AppKit
 
 let outDir = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "icons"
 let S: CGFloat = 1024
-let amber = NSColor(red: 1.0, green: 0.55, blue: 0.0, alpha: 1)
+let white = NSColor.white
 
 let glyphs: [Character: [UInt8]] = [
     "<": [0x08, 0x14, 0x22, 0x41, 0x00, 0x00],
@@ -27,27 +27,40 @@ let dot: CGFloat = 20, gap: CGFloat = 8
 let unit = dot + gap
 let totalW = 24 * unit, totalH = 8 * unit
 
-// "<SPX" 外包的圆角框
-let pad: CGFloat = 70
-let frame = NSBezierPath(
-    roundedRect: NSRect(x: (S - totalW) / 2 - pad, y: (S - totalH) / 2 - pad,
-                        width: totalW + pad * 2, height: totalH + pad * 2),
-    xRadius: 56, yRadius: 56)
-amber.setStroke(); frame.lineWidth = 20; frame.stroke()
+func putDot(_ x: CGFloat, _ y: CGFloat) {
+    let p = NSBezierPath(roundedRect: NSRect(x: x, y: y, width: dot, height: dot),
+                         xRadius: 4, yRadius: 4)
+    white.setFill(); p.fill()
+}
 
 // 画点(bit 0 = 顶行)
 let text = Array("<SPX")
+let tx = (S - totalW) / 2, ty = (S - totalH) / 2
 for (gi, ch) in text.enumerated() {
     guard let g = glyphs[ch] else { continue }
     for c in 0..<6 {
         for r in 0..<8 where g[c] & (1 << UInt8(r)) != 0 {
-            let x = (S - totalW) / 2 + CGFloat(gi * 6 + c) * unit + gap / 2
-            let y = (S - totalH) / 2 + CGFloat(7 - r) * unit + gap / 2
-            let p = NSBezierPath(roundedRect: NSRect(x: x, y: y, width: dot, height: dot),
-                                 xRadius: 4, yRadius: 4)
-            amber.setFill(); p.fill()
+            putDot(tx + CGFloat(gi * 6 + c) * unit + gap / 2,
+                   ty + CGFloat(7 - r) * unit + gap / 2)
         }
     }
+}
+
+// 四角 L 形角括号(HUD 取景框风),臂长 5 点、单点厚
+let off = unit * 1.5
+let bx = tx - off, by = ty - off
+let bw = totalW + off * 2, bh = totalH + off * 2
+let armDots = 5
+for i in 0..<armDots {
+    let d = CGFloat(i) * unit
+    putDot(bx + d,              by)              // 左下横臂
+    putDot(bx,                  by + d)          // 左下竖臂
+    putDot(bx + bw - unit - d,  by)              // 右下横臂
+    putDot(bx + bw - unit,      by + d)          // 右下竖臂
+    putDot(bx + d,              by + bh - unit)  // 左上横臂
+    putDot(bx,                  by + bh - unit - d)
+    putDot(bx + bw - unit - d,  by + bh - unit)
+    putDot(bx + bw - unit,      by + bh - unit - d)
 }
 img.unlockFocus()
 
