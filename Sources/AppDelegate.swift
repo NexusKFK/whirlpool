@@ -614,8 +614,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // ── Darstellung ────────────────────────────────────────────────────────────
 
     private func showScrollFrame(blank: Bool = false) {
-        // 换数提示:变化段以列自身颜色整列点亮,亮-常-亮各 0.25s 共两下,
-        // 滚动照常——报价卡方向色闪的 LED 等价物
+        // 换数提示:变化段闪两下纯白高亮(亮-常-亮各 0.25s),字形不变全程可读
         var flash: Set<Int> = []
         if let bs = blinkStart, !blinkCols.isEmpty, roundLen > 0 {
             let elapsed = Date().timeIntervalSince(bs)

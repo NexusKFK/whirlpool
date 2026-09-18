@@ -123,14 +123,17 @@ private func renderFrame(columns: [ColoredColumn], offset: Int, visibleCols: Int
         let col = columns[si]
         let x0  = (paddingH + ci * colW) * s
         for bit in 0..<ledRows {
-            let on = flashing || (col.value & (1 << bit)) != 0
+            let on = (col.value & (1 << bit)) != 0
             var v: UInt32
             if renderTransparent {
                 guard on else { continue }          // unbeleuchtete Punkte bleiben transparent
-                v = renderColoredTransparent ? (packedOn[col.color] ?? packedTemplate)
+                // 换数提示=高亮闪:命中列用白色,字形不变、全程可读
+                let c = flashing ? LEDColor.white : col.color
+                v = renderColoredTransparent ? (packedOn[c] ?? packedTemplate)
                                              : packedTemplate
             } else {
-                v = on ? (packedOn[col.color] ?? packedTemplate) : packedOff
+                let c = flashing ? LEDColor.white : col.color
+                v = on ? (packedOn[c] ?? packedTemplate) : packedOff
             }
             // 两缘渐隐仅用于滚动帧;idle/standby 小图标不吃,否则 5 列宽的
             // "<" 会被 8 列渐隐区整颗压暗
