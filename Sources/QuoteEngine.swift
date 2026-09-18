@@ -47,7 +47,8 @@ enum QuoteEngine {
             let pause = pausePerSymbol > 0 ? "\\p[\(pausePerSymbol)]" : ""
             return "\(pause)\(e.symbol) \(price)\(gap) \\c[\(color)]\(change)\\c[]"
         }
-        return parts.joined(separator: separator)
+        // 串尾补一份空隙:环绕画布的接缝处(串尾接串头)同宽,否则 % 会粘住下一个 ticker
+        return parts.joined(separator: separator) + separator
     }
 
     static func boardRows(entries: [WatchEntry], quotes: [String: Quote],
