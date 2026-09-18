@@ -12,6 +12,7 @@ struct BoardRow {
     let price: String
     let change: String   // 带符号带 %
     let up: Bool
+    let flat: Bool       // 0.00 平盘:白色 + 一道杠
     let market: String
     let series: [Double]?
 }
@@ -29,22 +30,28 @@ enum QuoteEngine {
     }
 
     /// 拼跑马灯文本。基底色由配置给(默认白),只有涨跌幅段着色,完事 \c[] 复位。
-    /// 箭头模式:价格后不留空格,▲/▼ 本身就是视觉分隔;符号模式保留空格。
+    /// 平盘(|Δ|<0.005):不着色(随基底白),箭头位是一道杠。
     static func marqueeText(entries: [WatchEntry], quotes: [String: Quote],
                             redUpMarkets: [String], pausePerSymbol: Double,
                             separator: String = "   ", changeArrows: Bool = true) -> String {
         let parts = entries.compactMap { e -> String? in
             guard let q = quotes[e.symbol] else { return nil }
             let up    = q.changePct >= 0
+            let flat  = abs(q.changePct) < 0.005
             let redUp = redUpMarkets.contains(e.market)
             let color = up ? (redUp ? "red" : "green") : (redUp ? "green" : "red")
             let price = q.price >= 1000 ? String(format: "%.1f", q.price)
                                         : String(format: "%.2f", q.price)
-            let change = changeArrows
-                ? "\(up ? "▲" : "▼")\(String(format: "%.2f", abs(q.changePct)))%"
-                : "\(up ? "+" : "")\(String(format: "%.2f", q.changePct))%"
-            let gap = changeArrows ? "" : " "
+            let change = flat
+                ? "-0.00%"
+                : changeArrows
+                    ? "\(up ? "▲" : "▼")\(String(format: "%.2f", abs(q.changePct)))%"
+                    : "\(up ? "+" : "")\(String(format: "%.2f", q.changePct))%"
             let pause = pausePerSymbol > 0 ? "\\p[\(pausePerSymbol)]" : ""
+            if flat {
+                return "\(pause)\(e.symbol) \(price) \(change)"
+            }
+            let gap = changeArrows ? "" : " "
             return "\(pause)\(e.symbol) \(price)\(gap) \\c[\(color)]\(change)\\c[]"
         }
         // 串尾补一份空隙:环绕画布的接缝处(串尾接串头)同宽,否则 % 会粘住下一个 ticker
@@ -57,12 +64,15 @@ enum QuoteEngine {
             guard let q = quotes[e.symbol] else { return nil }
             let price  = q.price >= 1000 ? String(format: "%.1f", q.price)
                                          : String(format: "%.2f", q.price)
-            let up = q.changePct >= 0
-            let change = changeArrows
-                ? "\(up ? "▲" : "▼")\(String(format: "%.2f", abs(q.changePct)))%"
-                : "\(up ? "+" : "")\(String(format: "%.2f", q.changePct))%"
+            let up   = q.changePct >= 0
+            let flat = abs(q.changePct) < 0.005
+            let change = flat
+                ? "-0.00%"
+                : changeArrows
+                    ? "\(up ? "▲" : "▼")\(String(format: "%.2f", abs(q.changePct)))%"
+                    : "\(up ? "+" : "")\(String(format: "%.2f", q.changePct))%"
             return BoardRow(symbol: e.symbol, price: price, change: change,
-                            up: up, market: e.market, series: q.series)
+                            up: up, flat: flat, market: e.market, series: q.series)
         }
     }
 }

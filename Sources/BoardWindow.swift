@@ -9,6 +9,7 @@ final class BoardWindow: NSPanel, NSWindowDelegate {
 
     private let container = NSVisualEffectView()
     private var programmaticMove = false
+    private var lastPrices: [String: Double] = [:]   // 上一轮价格,变化行做脉冲动效
 
     var config: TickerConfig {
         didSet { reposition() }
@@ -59,9 +60,15 @@ final class BoardWindow: NSPanel, NSWindowDelegate {
             let y = H - inset - CGFloat(i + 1) * rowH
             let row = NSView(frame: NSRect(x: inset, y: y, width: rowW, height: rowH))
 
-            let color: NSColor = redUpMarkets.contains(r.market)
-                ? (r.up ? .systemRed : .systemGreen)
-                : (r.up ? .systemGreen : .systemRed)
+            // 平盘白,其余按市场习惯红涨绿跌/绿涨红跌
+            let color: NSColor
+            if r.flat {
+                color = .labelColor
+            } else {
+                color = redUpMarkets.contains(r.market)
+                    ? (r.up ? .systemRed : .systemGreen)
+                    : (r.up ? .systemGreen : .systemRed)
+            }
 
             let labelW = rowW - 74
             let label = Self.rowLabel(r, color: color, width: labelW)
@@ -75,7 +82,19 @@ final class BoardWindow: NSPanel, NSWindowDelegate {
                 row.addSubview(spark)
             }
 
+            // 数字变化:该行短促亮度脉冲再回满(LED 换数的味道)
+            if let old = lastPrices[r.symbol], let now = quotes[r.symbol]?.price, old != now {
+                row.alphaValue = 0.25
+                NSAnimationContext.runAnimationGroup({ ctx in
+                    ctx.duration = 0.35
+                    row.animator().alphaValue = 1.0
+                })
+            }
             container.addSubview(row)
+        }
+
+        lastPrices = entries.reduce(into: [:]) { acc, e in
+            if let q = quotes[e.symbol] { acc[e.symbol] = q.price }
         }
 
         // 右角锚定随实际宽度重算(手动拖过的位置不动)
