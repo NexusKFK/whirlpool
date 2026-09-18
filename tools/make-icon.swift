@@ -58,7 +58,7 @@ let tx = (S - lineW) / 2
 let ty = (S - totalH) / 2
 
 drawText("<Whirl", at: NSPoint(x: tx, y: ty + lineH + lineGap))
-drawText("Pool.>", at: NSPoint(x: tx, y: ty))
+drawText(" Pool.", at: NSPoint(x: tx, y: ty))
 img.unlockFocus()
 
 guard let tiff = img.tiffRepresentation,
