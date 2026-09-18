@@ -97,8 +97,13 @@ final class BoardWindow: NSPanel, NSWindowDelegate {
                 let spark = SparklineView(frame: NSRect(x: rowW - 70, y: 3, width: 66, height: rowH - 6))
                 spark.points = pts
                 spark.lineColor = color
-                if let q = quotes[r.symbol], q.changePct > -99 {
-                    spark.baseline = q.price / (1 + q.changePct / 100)   // 昨收
+                if let q = quotes[r.symbol] {
+                    if q.changePct > -99 {
+                        spark.baseline = q.price / (1 + q.changePct / 100)   // 昨收
+                    }
+                    if let st = q.sessionStart, let en = q.sessionEnd {
+                        spark.session = (st, en)
+                    }
                 }
                 row.addSubview(spark)
             }
@@ -222,7 +227,8 @@ final class BoardWindow: NSPanel, NSWindowDelegate {
 
 final class SparklineView: NSView {
 
-    var points: [Double] = [] { didSet { needsDisplay = true } }
+    var points: [SeriesPt] = [] { didSet { needsDisplay = true } }
+    var session: (start: Double, end: Double)? = nil   // 当天时段:x 按真实时间,刚开盘线只画开头一小段
     var lineColor: NSColor = .systemGreen
     var baseline: Double? = nil   // 昨收锚点:波动按真实比例画,平静的日子不夸大成满幅锯齿
 
@@ -231,7 +237,7 @@ final class SparklineView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         guard points.count > 1 else { return }
-        let minV = points.min()!, maxV = points.max()!
+        let minV = points.map(\.v).min()!, maxV = points.map(\.v).max()!
 
         // 以昨收为中心的对称量程;无基准时退回中点自适应
         let ref: Double, span: Double
@@ -264,8 +270,15 @@ final class SparklineView: NSView {
         var first = NSPoint.zero
         var coords: [NSPoint] = []
         for (i, p) in points.enumerated() {
-            let x = inset + (bounds.width - inset * 2) * CGFloat(i) / CGFloat(n - 1)
-            let v = CGFloat((p - (ref - span / 2)) / span)
+            let frac: CGFloat
+            if let se = session, se.end > se.start {
+                let f = (p.t - se.start) / (se.end - se.start)
+                frac = CGFloat(min(1.0, max(0.0, f)))
+            } else {
+                frac = n > 1 ? CGFloat(i) / CGFloat(n - 1) : 0
+            }
+            let x = inset + (bounds.width - inset * 2) * frac
+            let v = CGFloat((p.v - (ref - span / 2)) / span)
             let y = inset + (bounds.height - inset * 2) * (1 - v)   // flipped:低值在下
             let pt = NSPoint(x: x, y: y)
             if i == 0 { first = pt; path.move(to: pt) } else { path.line(to: pt) }
