@@ -168,8 +168,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             stopTimer()
             idleRendered = false
             setIdle()
+            barWindow?.orderOut(nil)   // 收起时底部条一并收,别留一扇空窗
         } else {
-            startTimer()
+            if config.quoteLoop, config.tickerEnabled {
+                clearAllMessages()     // 展开立即拉新行情,不吃旧轮残帧
+            } else {
+                startTimer()
+            }
+            if config.displayMode.contains("bar") {
+                barWindow?.orderFrontRegardless()
+            }
         }
     }
 
