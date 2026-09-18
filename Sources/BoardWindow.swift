@@ -48,7 +48,9 @@ final class BoardWindow: NSPanel, NSWindowDelegate {
                                              changeArrows: changeArrows)
         container.subviews.forEach { $0.removeFromSuperview() }
 
-        let W: CGFloat = 250, inset: CGFloat = 10, rowH: CGFloat = 22
+        let pixel = config.boardPixelFont
+        let W: CGFloat = 250, inset: CGFloat = 10
+        let rowH: CGFloat = pixel ? 30 : 22
         let H = inset * 2 + CGFloat(rowsData.count) * rowH
 
         programmaticMove = true
@@ -71,9 +73,24 @@ final class BoardWindow: NSPanel, NSWindowDelegate {
             }
 
             let labelW = rowW - 74
-            let label = Self.rowLabel(r, color: color, width: labelW)
-            label.frame = NSRect(x: 0, y: 2, width: labelW, height: rowH - 4)
-            row.addSubview(label)
+            if pixel {
+                // 像素字体:三段点阵图,符号左、价格/涨跌右,与跑马灯同款字形
+                let base = NSColor.labelColor
+                let symIV  = Self.pixelIV(r.symbol, base)
+                let pxIV   = Self.pixelIV(r.price, base)
+                let chgIV  = Self.pixelIV(r.change, color)
+                let cy = (rowH - symIV.frame.height) / 2
+                chgIV.frame.origin = NSPoint(x: labelW - chgIV.frame.width, y: cy)
+                pxIV.frame.origin  = NSPoint(x: chgIV.frame.minX - 4 - pxIV.frame.width, y: cy)
+                symIV.frame.origin = NSPoint(x: 0, y: cy)
+                row.addSubview(symIV)
+                row.addSubview(pxIV)
+                row.addSubview(chgIV)
+            } else {
+                let label = Self.rowLabel(r, color: color, width: labelW)
+                label.frame = NSRect(x: 0, y: 2, width: labelW, height: rowH - 4)
+                row.addSubview(label)
+            }
 
             if let pts = r.series, pts.count > 1 {
                 let spark = SparklineView(frame: NSRect(x: rowW - 70, y: 3, width: 66, height: rowH - 6))
@@ -133,18 +150,27 @@ final class BoardWindow: NSPanel, NSWindowDelegate {
     // ── 行渲染 ───────────────────────────────────────────────────────────────
     // 单条 attributed label + 右对齐 tab 站:代码左,价格/涨跌幅右,等宽数字对齐。
 
-    /// 行底闪光:方向色 32% 透明圆角色块 → 0.55s 淡出(Robinhood 式换数提示)
+    /// 行底闪光:方向色 32% 透明圆角垫块(真实子视图,垫在文字下),
+    /// 0.55s alpha 淡出后移除——不依赖 layer 动画时序,不会残留细条
     private static func flash(row: NSView, color: NSColor) {
-        row.wantsLayer = true
-        row.layer?.cornerRadius = 5
-        let from = color.withAlphaComponent(0.32).cgColor
-        let anim = CABasicAnimation(keyPath: "backgroundColor")
-        anim.fromValue = from
-        anim.toValue = NSColor.clear.cgColor
-        anim.duration = 0.55
-        anim.timingFunction = CAMediaTimingFunction(name: .easeOut)
-        row.layer?.backgroundColor = NSColor.clear.cgColor
-        row.layer?.add(anim, forKey: "priceFlash")
+        let pill = NSView(frame: row.bounds)
+        pill.wantsLayer = true
+        pill.layer?.backgroundColor = color.withAlphaComponent(0.32).cgColor
+        pill.layer?.cornerRadius = 5
+        row.addSubview(pill, positioned: .below, relativeTo: row.subviews.first)
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = 0.55
+            ctx.completionHandler = { pill.removeFromSuperview() }
+            pill.animator().alphaValue = 0
+        })
+    }
+
+    private static func pixelIV(_ text: String, _ color: NSColor) -> NSImageView {
+        let img = renderPixelText([(text: text, color: color)])
+        let iv = NSImageView(image: img)
+        iv.imageScaling = .scaleNone
+        iv.frame = NSRect(origin: .zero, size: img.size)
+        return iv
     }
 
     private static func rowLabel(_ r: BoardRow, color: NSColor, width: CGFloat) -> NSTextField {        let para = NSMutableParagraphStyle()
