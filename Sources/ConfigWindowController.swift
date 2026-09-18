@@ -28,6 +28,9 @@ final class ConfigWindowController: NSObject, NSWindowDelegate {
     private let speedValueLabel = NSTextField(labelWithString: "")
     private let arrowsCheck = NSButton(checkboxWithTitle: "涨跌用 ▲/▼(交易所风格)",
                                        target: nil, action: nil)
+    private let widthSlider = NSSlider(value: 20, minValue: 8, maxValue: 60,
+                                       target: nil, action: nil)
+    private let widthValueLabel = NSTextField(labelWithString: "")
     private var config: TickerConfig
 
     init(config: TickerConfig) {
@@ -46,6 +49,8 @@ final class ConfigWindowController: NSObject, NSWindowDelegate {
         refreshField.stringValue = String(Int(config.boardRefresh))
         speedSlider.doubleValue = min(0.1, max(0.02, config.scrollSpeed))
         updateSpeedLabel()
+        widthSlider.doubleValue = Double(min(60, max(8, config.defaultWidth)))
+        updateWidthLabel()
         arrowsCheck.state = config.changeArrows ? .on : .off
         window?.center()
         NSApp.activate(ignoringOtherApps: true)
@@ -109,6 +114,17 @@ final class ConfigWindowController: NSObject, NSWindowDelegate {
         speedRow.orientation = .horizontal
         speedRow.spacing = 8
 
+        let widthLabel = NSTextField(labelWithString: "显示宽度(字符)")
+        widthSlider.isContinuous = true
+        widthSlider.target = self
+        widthSlider.action = #selector(widthChanged)
+        widthSlider.widthAnchor.constraint(equalToConstant: 150).isActive = true
+        widthValueLabel.textColor = .secondaryLabelColor
+        widthValueLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        let widthRow = NSStackView(views: [widthLabel, widthSlider, widthValueLabel])
+        widthRow.orientation = .horizontal
+        widthRow.spacing = 8
+
         arrowsCheck.translatesAutoresizingMaskIntoConstraints = false
 
         let resetBtn = NSButton(title: "报价卡归位(清除拖动记忆)", target: self,
@@ -131,8 +147,8 @@ final class ConfigWindowController: NSObject, NSWindowDelegate {
         btnRow.alignment = .centerY
 
         let form = NSStackView(views: [title, scroll, addBtn, separator,
-                                       modeRow, refreshRow, speedRow, arrowsCheck,
-                                       resetBtn, btnRow])
+                                       modeRow, refreshRow, speedRow, widthRow,
+                                       arrowsCheck, resetBtn, btnRow])
         form.orientation = .vertical
         form.alignment = .leading
         form.spacing = 10
@@ -201,6 +217,13 @@ final class ConfigWindowController: NSObject, NSWindowDelegate {
         speedValueLabel.stringValue = String(format: "%.0f 列/秒", perSec)
     }
 
+    @objc private func widthChanged() { updateWidthLabel() }
+
+    private func updateWidthLabel() {
+        let pt = widthSlider.doubleValue * 18 + 8
+        widthValueLabel.stringValue = String(format: "≈%.0fpt", pt)
+    }
+
     @objc private func save() {
         var entries: [WatchEntry] = []
         for rv in rowViews {
@@ -219,6 +242,7 @@ final class ConfigWindowController: NSObject, NSWindowDelegate {
         }
         config.scrollSpeed = min(0.5, max(0.02, speedSlider.doubleValue))
         config.changeArrows = (arrowsCheck.state == .on)
+        config.defaultWidth = min(60, max(8, Int(widthSlider.doubleValue)))
 
         saveConfig(config)
         onApplied?(config)

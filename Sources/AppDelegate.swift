@@ -83,7 +83,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         item.button?.title = ""
         item.button?.action = #selector(statusItemClicked)
         item.button?.target = self
-        item.button?.sendAction(on: [.leftMouseUp])
+        item.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
         statusItem = item
     }
 
@@ -152,10 +152,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
             phase = .scrolling
             startTimer()
-        } else {
+        } else if NSApp.currentEvent?.type == .rightMouseUp {
             statusItem.menu = buildMenu()
             statusItem.button?.performClick(nil)
             statusItem.menu = nil
+        } else {
+            // 左键 = 弹出配置窗(松手常驻);右键才是菜单
+            openConfigWindow()
         }
     }
 
@@ -669,6 +672,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // bar/board 模式下状态栏图标让位,控制菜单移到各自右键。
 
     private func applyDisplayMode() {
+        displayWidth = config.defaultWidth   // GUI 宽度保存后即时同步(marquee/bar 同宽)
         let m = config.displayMode
         let marqueeOn = m.contains("marquee") || m == "both"
         let boardOn   = m.contains("board")   || m == "both"
