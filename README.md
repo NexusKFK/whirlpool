@@ -47,14 +47,14 @@ board 模式下状态栏图标让位;跑马灯模式和 board 各自独立刷新
 | `boardOrigin` | 手动拖动后自动写入的位置,不用手填 |
 | `boardRefresh` | board 刷新间隔秒数,默认 30 |
 
-## 接真实行情
+## 行情源
 
-编辑 `Sources/RealProvider.swift`,把 API 填进 `fetch()`,协议只有一个方法。本机已验证过的两条免费链供参考:
+配置 `provider` 二选一:
 
-- A股 腾讯:`https://qt.gtimg.cn/q=sh600519,sz510300`(GBK 编码)
-- 美股 Yahoo:`https://query1.finance.yahoo.com/v8/finance/chart/AAPL?interval=1m&range=1d`(偶尔要 UA 头)
+- **real**(推荐):内置免 key 双链——美股/指数/加密走 Yahoo 公开 chart 端点(yfinance 同源),A股/港股走腾讯 `qt.gtimg.cn` 实时链。任一腿失败不影响另一腿;全挂则空回调,显示层 15s 自动重试。A 股代码按首位自动配 sh/sz 前缀(6/5/9→sh,其余→sz),港股 symbol 自动补零到 5 位。
+- **demo**:本地随机游走假数据,无网络依赖。
 
-改完 `swift build` 即可。轮询节奏不用自己控:一轮滚动结束才会触发下一次拉取,滚动周期 = 行情刷新周期,天然同步。拉取失败自动停在 idle,15 秒后重试。
+两条链都免费、无需注册;Yahoo 腿偶发限流(yfinance 同款坑),失败静默重试即可。
 
 ## CLI(与上游一致)
 
@@ -76,6 +76,6 @@ pinwheel --status / --clear / --quit
 
 ## Roadmap
 
-- [ ] RealProvider 接真实 API(腾讯 + Yahoo 双链)
+- [x] RealProvider 接真实 API(腾讯 + Yahoo 双链,2026-09-18 验证)
 - [ ] 收盘时段自动降频(A股/美股休市时拉取间隔拉长)
 - [ ] 与 Shepherd 联动:盯盘提醒直接 `--very-urgent` 推上跑马灯
