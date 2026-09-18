@@ -25,6 +25,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var config:     TickerConfig!
     private var quoteProvider: QuoteProvider = DemoProvider()
     private var cycleInFlight = false
+    private var prefetchArmed = true   // 每轮只预取一次;预取窗口比轮尾长,不设闸会连环重拉
     private var board: BoardWindow?
     private var boardTimer: Timer?
     private var barWindow: BarWindow?
@@ -482,17 +483,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 return
             }
 
-            // 预取:离本轮结束还有约一屏时提前拉下一轮,
+            // 预取:离本轮结束还有约一屏时提前拉下一轮(每轮只发一次),
             // 滚到头时新数据已入队,消除轮尾的冻结停顿感。
-            if config.quoteLoop, config.tickerEnabled, !userPaused, !cycleInFlight,
-               roundLen > 0,
+            if prefetchArmed, config.quoteLoop, config.tickerEnabled, !userPaused,
+               !cycleInFlight, roundLen > 0,
                scrollOffset >= roundLen - visCols(displayWidth: displayWidth) {
+                prefetchArmed = false
                 fetchNextQuoteCycle()
             }
 
-            // 一轮 = 一份完整串。画布是双拼环绕,窗口末端恰是"串尾接串头",
-            // 走完一份即换下一轮——轮与轮之间没有整屏空白垫。
+            // 一轮 = 一份完整串。画布是双拼环绕,窗口末端恰是"串尾接串头"。
             if roundLen > 0, scrollOffset >= roundLen {
+                // 队列里已有下一轮:同 tick 直接接线渲染,零冻结
+                if let next = dequeueNext() {
+                    startMessage(next)
+                    return
+                }
                 phase = .idle
                 if config.quoteLoop, config.tickerEnabled, !userPaused, !cycleInFlight {
                     fetchNextQuoteCycle()   // 保险:预取没赶上时兜底
@@ -560,6 +566,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             canvas       = wrapCanvas(stream.columns)
             roundLen     = stream.columns.count
             scrollOffset = 0
+            prefetchArmed = config.quoteLoop   // 新一轮重新武装预取
 
             var pauses = stream.pauses.map { PauseMarker(at: $0.at, kind: $0.kind) }
             if config.defaultPause > 0, !pauses.contains(where: { $0.at == 0 }) {
