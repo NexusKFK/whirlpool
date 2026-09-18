@@ -89,7 +89,7 @@ func visCols(displayWidth: Int) -> Int {
 
 private func renderFrame(columns: [ColoredColumn], offset: Int, visibleCols: Int,
                          width: Int, height: Int, yPad: Int,
-                         fadeEdges: Bool = false) -> NSImage {
+                         fadeEdges: Bool = false, hide: Set<Int> = []) -> NSImage {
     let s    = max(1, renderScale)
     let pw   = width  * s
     let ph   = height * s
@@ -118,7 +118,7 @@ private func renderFrame(columns: [ColoredColumn], offset: Int, visibleCols: Int
     let dot = ledSize * s
     for ci in 0..<visibleCols {
         let si = offset + ci
-        guard si >= 0, si < columns.count else { break }
+        guard si >= 0, si < columns.count, !hide.contains(si) else { continue }
         let col = columns[si]
         let x0  = (paddingH + ci * colW) * s
         for bit in 0..<ledRows {
@@ -159,14 +159,15 @@ private func renderFrame(columns: [ColoredColumn], offset: Int, visibleCols: Int
 // ── Scroll-Frame ───────────────────────────────────────────────────────────────
 
 func renderScrollFrame(columns: [ColoredColumn], offset: Int,
-                       displayWidth: Int, blank: Bool = false) -> NSImage {
+                       displayWidth: Int, blank: Bool = false, hide: Set<Int> = []) -> NSImage {
     renderFrame(columns:    columns,
                 offset:     offset,
                 visibleCols: blank ? 0 : visCols(displayWidth: displayWidth),
                 width:      imgWidth(displayWidth: displayWidth),
                 height:     renderTransparent ? imgHtransparent : imgH,
                 yPad:       renderTransparent ? paddingTop : paddingV,
-                fadeEdges:  true)
+                fadeEdges:  true,
+                hide:       hide)
 }
 
 // ── Idle-Icon (< aus LED-Punkten) ─────────────────────────────────────────────

@@ -39,11 +39,17 @@ enum QuoteEngine {
 
     /// 拼跑马灯文本。基底色由配置给(默认白),只有涨跌幅段着色,完事 \c[] 复位。
     /// 平盘(|Δ|<0.005):不着色(随基底白),箭头位是一道杠。
+    /// 返回 (文本, 每标的核心串)。核心串变化 = 数字变了,跑马灯给那一段埋 \b 闪烁标记。
     static func marqueeText(entries: [WatchEntry], quotes: [String: Quote],
                             redUpMarkets: [String], pausePerSymbol: Double,
-                            separator: String = "   ", changeArrows: Bool = true) -> String {
-        let parts = entries.compactMap { e -> String? in
-            guard let q = quotes[e.symbol] else { return nil }
+                            separator: String = "   ", changeArrows: Bool = true,
+                            blinkChanged: Bool = true,
+                            previousParts: [String: String] = [:])
+        -> (text: String, parts: [String: String]) {
+        var parts: [String] = []
+        var newCores: [String: String] = [:]
+        for e in entries {
+            guard let q = quotes[e.symbol] else { continue }
             let up    = q.changePct >= 0
             let flat  = abs(q.changePct) < 0.005
             let redUp = redUpMarkets.contains(e.market)
@@ -56,14 +62,18 @@ enum QuoteEngine {
                     ? "\(up ? "▲" : "▼")\(String(format: "%.2f", abs(q.changePct)))%"
                     : "\(up ? "+" : "")\(String(format: "%.2f", q.changePct))%"
             let pause = pausePerSymbol > 0 ? "\\p[\(pausePerSymbol)]" : ""
-            if flat {
-                return "\(pause)\(e.symbol) \(price) \(change)"
-            }
             let gap = changeArrows ? "" : " "
-            return "\(pause)\(e.symbol) \(price)\(gap) \\c[\(color)]\(change)\\c[]"
+            let core = "\(price)\(gap)\(flat ? change : "\\c[\(color)]\(change)\\c[]")"
+            // 数字有变:价格+涨跌段埋闪烁标记(代码名不闪);首轮(previousParts 空)不闪
+            let changed = blinkChanged && previousParts[e.symbol] != nil
+                                  && previousParts[e.symbol] != core
+            let bOn = changed ? "\\b[1]" : ""
+            let bOff = changed ? "\\b[0]" : ""
+            parts.append("\(pause)\(e.symbol) \(bOn)\(core)\(bOff)")
+            newCores[e.symbol] = core
         }
-        // 串尾补一份空隙:环绕画布的接缝处(串尾接串头)同宽,否则 % 会粘住下一个 ticker
-        return parts.joined(separator: separator) + separator
+        // 串尾补一份空隙:环绕接缝处同宽,否则 % 会粘住下一个 ticker
+        return (parts.joined(separator: separator) + separator, newCores)
     }
 
     static func boardRows(entries: [WatchEntry], quotes: [String: Quote],
