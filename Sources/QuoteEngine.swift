@@ -27,9 +27,12 @@ struct BoardRow {
 
 protocol QuoteProvider {
     var name: String { get }
+    var cooldownUntil: Date? { get }
     /// 拉一轮行情,任意线程回调;空字典 = 本轮放弃(显示层保持 idle)。
     func quotes(for entries: [WatchEntry], completion: @escaping ([String: Quote]) -> Void)
 }
+
+extension QuoteProvider { var cooldownUntil: Date? { nil } }
 
 enum QuoteEngine {
 
@@ -39,24 +42,23 @@ enum QuoteEngine {
 
     /// 拼跑马灯文本。基底色由配置给(默认白),只有涨跌幅段着色,完事 \c[] 复位。
     /// 平盘(|Δ|<0.005):不着色(随基底白),箭头位是一道杠。
-    /// 返回 (文本, 每标的核心串)。核心串变化 = 数字变了,跑马灯给那一段埋 \b 标记,显示层以实心色块闪提示(报价卡同款思路)。
+    /// 价格按上一笔报价决定闪色,从最高变化位到末尾连续着色;涨跌幅保持当日方向色。
     static func marqueeText(entries: [WatchEntry], quotes: [String: Quote],
                             redUpMarkets: [String], pausePerSymbol: Double,
                             separator: String = "   ", changeArrows: Bool = true,
                             blinkChanged: Bool = true,
-                            previousParts: [String: String] = [:],
-                            previousTicks: [String: Double] = [:])
-        -> (text: String, parts: [String: String]) {
+                            previousTicks: [String: Double] = [:]) -> String {
         var parts: [String] = []
-        var newCores: [String: String] = [:]
         for e in entries {
             guard let q = quotes[e.symbol] else { continue }
             let up    = q.changePct >= 0
             let flat  = abs(q.changePct) < 0.005
             let redUp = redUpMarkets.contains(e.market)
             let color = up ? (redUp ? "red" : "green") : (redUp ? "green" : "red")
-            let price = q.price >= 1000 ? String(format: "%.1f", q.price)
-                                        : String(format: "%.2f", q.price)
+            var price = PriceFlash.priceText(q.price)
+            if blinkChanged, let flash = PriceFlash.between(previousTicks[e.symbol], and: q.price, redUp: redUp) {
+                price = "\(flash.prefix)\\b[1:\(flash.color.rawValue)]\(flash.suffix)\\b[0]"
+            }
             let change = flat
                 ? "-0.00%"
                 : changeArrows
@@ -64,24 +66,17 @@ enum QuoteEngine {
                     : "\(up ? "+" : "")\(String(format: "%.2f", q.changePct))%"
             let pause = pausePerSymbol > 0 ? "\\p[\(pausePerSymbol)]" : ""
             let core = "\(price) \(flat ? change : "\\c[\(color)]\(change)\\c[]")"   // 价格与涨跌段之间留一个空格
-            // 数字有变:价格+涨跌段埋闪烁标记(代码名不闪);首轮(previousParts 空)不闪
-            let changed = blinkChanged && previousParts[e.symbol] != nil
-                                  && previousParts[e.symbol] != core
-            let bOn = changed ? "\\b[1]" : ""
-            let bOff = changed ? "\\b[0]" : ""
-            parts.append("\(pause)\(e.symbol) \(bOn)\(core)\(bOff)")
-            newCores[e.symbol] = core
+            parts.append("\(pause)\(e.symbol) \(core)")
         }
         // 串尾补一份空隙:环绕接缝处同宽,否则 % 会粘住下一个 ticker
-        return (parts.joined(separator: separator) + separator, newCores)
+        return parts.joined(separator: separator) + separator
     }
 
     static func boardRows(entries: [WatchEntry], quotes: [String: Quote],
                           changeArrows: Bool = true) -> [BoardRow] {
         entries.compactMap { e in
             guard let q = quotes[e.symbol] else { return nil }
-            let price  = q.price >= 1000 ? String(format: "%.1f", q.price)
-                                         : String(format: "%.2f", q.price)
+            let price = PriceFlash.priceText(q.price)
             let up   = q.changePct >= 0
             let flat = abs(q.changePct) < 0.005
             let change = flat

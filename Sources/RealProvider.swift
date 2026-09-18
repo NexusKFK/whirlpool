@@ -9,12 +9,8 @@ import Foundation
 final class RealProvider: QuoteProvider {
     var name: String { "real" }
 
-    private let session: URLSession = {
-        let cfg = URLSessionConfiguration.ephemeral
-        cfg.timeoutIntervalForRequest = 8
-        cfg.timeoutIntervalForResource = 12
-        return URLSession(configuration: cfg)
-    }()
+    private let client = QuoteHTTPClient()
+    var cooldownUntil: Date? { client.cooldownUntil }
 
     func quotes(for entries: [WatchEntry], completion: @escaping ([String: Quote]) -> Void) {
         let cnSide    = entries.filter { $0.market == "cn" || $0.market == "hk" }
@@ -47,14 +43,14 @@ final class RealProvider: QuoteProvider {
     // 分钟线走 ifzq 端点,每标的一个附加请求。
 
     private func fetchTencent(_ entries: [WatchEntry], completion: @escaping ([String: Quote]) -> Void) {
-        let codeToSymbol = Dictionary(uniqueKeysWithValues: entries.map { (tencentCode($0), $0.symbol) })
+        let codeToSymbol = Dictionary(entries.map { (tencentCode($0), $0.symbol) }, uniquingKeysWith: { first, _ in first })
         let codes = codeToSymbol.keys.joined(separator: ",")
         guard let url = URL(string: "https://qt.gtimg.cn/q=\(codes)") else {
             completion([:]); return
         }
         var req = URLRequest(url: url)
         req.setValue("Mozilla/5.0 (Macintosh)", forHTTPHeaderField: "User-Agent")
-        session.dataTask(with: req) { data, resp, _ in
+        client.fetch(req) { data, resp, _ in
             guard let data, self.httpOK(resp),
                   let text = String(data: data, encoding: .gb18030)
                           ?? String(data: data, encoding: .utf8)
@@ -91,26 +87,26 @@ final class RealProvider: QuoteProvider {
                 }
             }
             seriesGroup.notify(queue: .global()) { completion(out) }
-        }.resume()
+        }
     }
 
     /// 返回 (腾讯代码 如 "sh600519", 报价)
-    private func parseTencentLine(_ line: String) -> (String, Quote)? {
+    func parseTencentLine(_ line: String) -> (String, Quote)? {
         guard let eq = line.firstIndex(of: "=") else { return nil }
-        let key = String(line[line.startIndex..<eq]).replacingOccurrences(of: "v_", with: "")
+        let key = String(line[line.startIndex..<eq]).trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "v_", with: "")
         let inner = line[line.index(after: eq)...].trimmingCharacters(in: CharacterSet(charactersIn: "\" \n"))
         let parts = inner.components(separatedBy: "~")
         guard parts.count > 32,
               let px = Double(parts[3]),
-              let pct = Double(parts[32])
+              let pct = Double(parts[32]), px.isFinite, px > 0, pct.isFinite
         else { return nil }
         return (key, Quote(price: px, changePct: pct, series: nil,
                            sessionStart: nil, sessionEnd: nil))
     }
 
-    private func tencentCode(_ e: WatchEntry) -> String {
+    func tencentCode(_ e: WatchEntry) -> String {
         if e.market == "hk" {
-            return "hk" + e.symbol.padding(toLength: 5, withPad: "0", startingAt: 0)
+            return "hk" + String(repeating: "0", count: max(0, 5 - e.symbol.count)) + e.symbol
         }
         let sh = e.symbol.hasPrefix("6") || e.symbol.hasPrefix("5") || e.symbol.hasPrefix("9")
         return (sh ? "sh" : "sz") + e.symbol
@@ -124,7 +120,7 @@ final class RealProvider: QuoteProvider {
         }
         var req = URLRequest(url: url)
         req.setValue("Mozilla/5.0 (Macintosh)", forHTTPHeaderField: "User-Agent")
-        session.dataTask(with: req) { data, resp, _ in
+        client.fetch(req) { data, resp, _ in
             guard let data, self.httpOK(resp),
                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let dataNode = obj["data"] as? [String: Any],
@@ -140,7 +136,7 @@ final class RealProvider: QuoteProvider {
                 return SeriesPt(t: Double(hh * 3600 + mm * 60), v: v)
             }
             completion(pts.count > 2 ? pts : nil)
-        }.resume()
+        }
     }
 
     // ── Yahoo(美股/指数/加密) ─────────────────────────────────────────────────
@@ -160,7 +156,7 @@ final class RealProvider: QuoteProvider {
             var req = URLRequest(url: url)
             req.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15",
                          forHTTPHeaderField: "User-Agent")
-            session.dataTask(with: req) { data, resp, _ in
+            client.fetch(req) { data, resp, _ in
                 defer { group.leave() }
                 guard let data, self.httpOK(resp),
                       let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -169,7 +165,7 @@ final class RealProvider: QuoteProvider {
                       let meta = result["meta"] as? [String: Any],
                       let px = meta["regularMarketPrice"] as? Double,
                       let prev = meta["chartPreviousClose"] as? Double,
-                      prev != 0
+                      prev > 0, prev.isFinite, px.isFinite, px > 0
                 else { return }
 
                 // 分钟线带时间戳,只留当天;x 轴按真实时段画,不降采样
@@ -198,7 +194,7 @@ final class RealProvider: QuoteProvider {
                 out[e.symbol] = Quote(price: px, changePct: (px - prev) / prev * 100,
                                       series: series, sessionStart: sStart, sessionEnd: sEnd)
                 lock.unlock()
-            }.resume()
+            }
         }
 
         group.notify(queue: .global()) { completion(out) }

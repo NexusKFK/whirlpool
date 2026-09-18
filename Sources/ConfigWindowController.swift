@@ -1,318 +1,282 @@
 import AppKit
 
-// 简易配置窗:自选池增删改 + 显示模式 + 卡片刷新间隔 + 卡片归位。
-// 保存即写盘并回调热应用——两处显示(marquee/board)下一轮刷新自动用新自选池。
-// 附属于 accessory 应用,窗口照常可输入;CLI `pinwheel --settings` 也能唤出。
-final class ConfigWindowController: NSObject, NSWindowDelegate {
-
+/// A draft-based, keyboard-accessible settings window. Cancel never writes config.
+final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataSource, NSTableViewDelegate, NSTextFieldDelegate {
     var onApplied: ((TickerConfig) -> Void)?
-
-    static let markets: [(key: String, label: String)] = [
-        ("us", "美股"), ("cn", "A股"), ("hk", "港股"), ("crypto", "加密"),
-    ]
-    private static let modes: [(key: String, label: String)] = [
-        ("marquee", "跑马灯(菜单栏)"),
-        ("board", "报价卡(程序坞旁)"),
-        ("bar", "底部条(屏幕下缘)"),
-        ("marquee,board", "跑马灯+报价卡"),
-        ("marquee,bar", "跑马灯+底部条"),
-    ]
-
-    private var window: NSWindow?
-    private let rowsStack = NSStackView()
-    private var rowViews: [WatchlistRow] = []
-    private let modePopup = NSPopUpButton()
-    private let refreshField = NSTextField()
-    private let speedSlider = NSSlider(value: 0.0222, minValue: 0.02, maxValue: 0.1,
-                                       target: nil, action: nil)
-    private let speedValueLabel = NSTextField(labelWithString: "")
-    private let arrowsCheck = NSButton(checkboxWithTitle: "涨跌用 ▲/▼(交易所风格)",
-                                       target: nil, action: nil)
-    private let pixelFontCheck = NSButton(checkboxWithTitle: "报价卡像素字体(与跑马灯同款)",
-                                          target: nil, action: nil)
-    private let marqueeBlinkCheck = NSButton(checkboxWithTitle: "跑马灯换数闪烁(只闪变化的数字)",
-                                             target: nil, action: nil)
-    private let widthSlider = NSSlider(value: 20, minValue: 8, maxValue: 60,
-                                       target: nil, action: nil)
-    private let widthValueLabel = NSTextField(labelWithString: "")
     private var config: TickerConfig
+    private var entries: [WatchEntry] = []
+    private var window: NSWindow?
+    private let table = NSTableView()
+    private let mode = NSPopUpButton()
+    private let source = NSPopUpButton()
+    private let language = NSPopUpButton()
+    private let refresh = NSTextField()
+    private let speed = NSSlider(value: 30, minValue: 10, maxValue: 50, target: nil, action: nil)
+    private let width = NSSlider(value: 20, minValue: 8, maxValue: 60, target: nil, action: nil)
+    private let speedValue = NSTextField(labelWithString: "")
+    private let widthValue = NSTextField(labelWithString: "")
+    private let arrows = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    private let pixels = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    private let flashes = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    private let redUp = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    private let resetNote = NSTextField(labelWithString: "")
+    private var resetPositions = false
+    private var lastLanguage = ""
 
-    init(config: TickerConfig) {
-        self.config = config
-        super.init()
+    static var markets: [(key: String, label: String)] {
+        [("us", L("US / Global")), ("cn", L("China A-shares")),
+         ("hk", L("Hong Kong")), ("crypto", L("Crypto"))]
     }
 
-    func reload(config: TickerConfig) {
-        self.config = config
-    }
+    init(config: TickerConfig) { self.config = config; super.init() }
+    func reload(config: TickerConfig) { self.config = config }
 
     func show() {
-        if window == nil { buildWindow() }
-        rebuildRows()
-        modePopup.selectItem(at: Self.modes.firstIndex { $0.key == config.displayMode } ?? 0)
-        refreshField.stringValue = String(Int(config.boardRefresh))
-        speedSlider.doubleValue = min(0.1, max(0.02, config.scrollSpeed))
-        updateSpeedLabel()
-        widthSlider.doubleValue = Double(min(60, max(8, config.defaultWidth)))
-        updateWidthLabel()
-        arrowsCheck.state = config.changeArrows ? .on : .off
-        pixelFontCheck.state = config.boardPixelFont ? .on : .off
-        marqueeBlinkCheck.state = config.marqueeBlink ? .on : .off
+        if window?.isVisible == true { window?.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true); return }
+        if window == nil || lastLanguage != L10n.language {
+            window?.close()
+            buildWindow()
+            lastLanguage = L10n.language
+        }
+        entries = config.watchlist
+        table.reloadData()
+        mode.selectItem(at: TickerConfig.displayModes.firstIndex { $0.key == config.displayMode } ?? 0)
+        source.selectItem(at: config.provider == "real" ? 0 : 1)
+        language.selectItem(at: ["system", "en", "zh-Hans"].firstIndex(of: config.language) ?? 0)
+        refresh.stringValue = String(Int(config.boardRefresh))
+        speed.doubleValue = 1 / config.scrollSpeed
+        width.integerValue = config.defaultWidth
+        arrows.state = config.changeArrows ? .on : .off
+        pixels.state = config.boardPixelFont ? .on : .off
+        flashes.state = config.marqueeBlink ? .on : .off
+        redUp.state = config.redUpMarkets.contains("cn") && config.redUpMarkets.contains("hk") ? .on : .off
+        resetPositions = false
+        resetNote.stringValue = ""
+        updateValues()
         window?.center()
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
     }
 
-    // ── 构建 ─────────────────────────────────────────────────────────────────
-
     private func buildWindow() {
-        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 470),
-                         styleMask: [.titled, .closable], backing: .buffered, defer: false)
-        w.title = "Pinwheel 设置"
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 660, height: 550),
+                         styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+        w.title = L("Pinwheel Settings")
+        w.minSize = NSSize(width: 660, height: 550)
         w.isReleasedWhenClosed = false
-        w.level = .floating   // accessory 应用的窗,不置顶会被别的窗口挡住
         w.delegate = self
+        w.setFrameAutosaveName("PinwheelSettings")
         window = w
+        let tabs = NSTabView()
+        for (title, view) in [(L("Watchlist"), watchlistTab()), (L("Display"), displayTab()), (L("General"), generalTab())] {
+            let tab = NSTabViewItem(identifier: title)
+            tab.label = title
+            tab.view = view
+            tabs.addTabViewItem(tab)
+        }
+        let cancel = button("Cancel", #selector(cancel))
+        cancel.keyEquivalent = "\u{1b}"
+        let save = button("Save", #selector(save))
+        save.keyEquivalent = "\r"
+        w.defaultButtonCell = save.cell as? NSButtonCell
+        let footer = NSStackView(views: [NSView(), cancel, save])
+        footer.orientation = .horizontal
+        footer.spacing = 10
+        let root = NSView()
+        for view in [tabs, footer] { view.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(view) }
+        w.contentView = root
+        NSLayoutConstraint.activate([
+            tabs.topAnchor.constraint(equalTo: root.topAnchor, constant: 18),
+            tabs.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 18),
+            tabs.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -18),
+            tabs.bottomAnchor.constraint(equalTo: footer.topAnchor, constant: -16),
+            footer.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 18),
+            footer.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -18),
+            footer.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -16),
+            footer.heightAnchor.constraint(equalToConstant: 32)
+        ])
+    }
 
-        let title = NSTextField(labelWithString: "自选池(顺序即显示顺序)")
-        title.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
-
-        rowsStack.orientation = .vertical
-        rowsStack.alignment = .leading
-        rowsStack.spacing = 6
-        rowsStack.edgeInsets = NSEdgeInsets(top: 10, left: 10, bottom: 10, right: 10)
-        rowsStack.translatesAutoresizingMaskIntoConstraints = false
-
+    private func watchlistTab() -> NSView {
+        // This table is reused when changing language; remove old columns first.
+        for column in table.tableColumns { table.removeTableColumn(column) }
+        let symbol = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("symbol"))
+        symbol.title = L("Symbol"); symbol.width = 325; symbol.minWidth = 200
+        let market = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("market"))
+        market.title = L("Market"); market.width = 205; market.minWidth = 180
+        table.addTableColumn(symbol); table.addTableColumn(market)
+        table.delegate = self; table.dataSource = self
+        table.usesAlternatingRowBackgroundColors = true
+        table.rowHeight = 34
+        table.allowsMultipleSelection = false
+        table.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
+        table.setAccessibilityLabel(L("Watchlist"))
         let scroll = NSScrollView()
-        scroll.translatesAutoresizingMaskIntoConstraints = false
-        scroll.documentView = rowsStack
-        scroll.hasVerticalScroller = true
-        scroll.wantsLayer = true
-        scroll.layer?.cornerRadius = 8
-        scroll.layer?.borderWidth = 1
-        scroll.layer?.borderColor = NSColor.separatorColor.cgColor
-
-        let addBtn = NSButton(title: "+ 添加标的", target: self, action: #selector(addRow))
-        addBtn.bezelStyle = .rounded
-
-        let modeLabel = NSTextField(labelWithString: "显示模式")
-        modePopup.addItems(withTitles: Self.modes.map(\.label))
-        let modeRow = NSStackView(views: [modeLabel, modePopup])
-        modeRow.orientation = .horizontal
-        modeRow.spacing = 8
-
-        let refreshLabel = NSTextField(labelWithString: "卡片刷新(秒)")
-        refreshField.bezelStyle = .roundedBezel
-        refreshField.isBezeled = true
-        refreshField.widthAnchor.constraint(equalToConstant: 60).isActive = true
-        let refreshRow = NSStackView(views: [refreshLabel, refreshField])
-        refreshRow.orientation = .horizontal
-        refreshRow.spacing = 8
-
-        let speedLabel = NSTextField(labelWithString: "跑马灯速度")
-        speedSlider.isContinuous = true
-        speedSlider.target = self
-        speedSlider.action = #selector(speedChanged)
-        speedSlider.widthAnchor.constraint(equalToConstant: 150).isActive = true
-        speedValueLabel.textColor = .secondaryLabelColor
-        speedValueLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
-        let speedRow = NSStackView(views: [speedLabel, speedSlider, speedValueLabel])
-        speedRow.orientation = .horizontal
-        speedRow.spacing = 8
-
-        let widthLabel = NSTextField(labelWithString: "显示宽度(字符)")
-        widthSlider.isContinuous = true
-        widthSlider.target = self
-        widthSlider.action = #selector(widthChanged)
-        widthSlider.widthAnchor.constraint(equalToConstant: 150).isActive = true
-        widthValueLabel.textColor = .secondaryLabelColor
-        widthValueLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
-        let widthRow = NSStackView(views: [widthLabel, widthSlider, widthValueLabel])
-        widthRow.orientation = .horizontal
-        widthRow.spacing = 8
-
-        arrowsCheck.translatesAutoresizingMaskIntoConstraints = false
-        pixelFontCheck.translatesAutoresizingMaskIntoConstraints = false
-        marqueeBlinkCheck.translatesAutoresizingMaskIntoConstraints = false
-
-        let resetBtn = NSButton(title: "报价卡归位(清除拖动记忆)", target: self,
-                                action: #selector(resetBoardOrigin))
-        resetBtn.bezelStyle = .inline
-        resetBtn.controlSize = .small
-
-        let separator = NSBox()
-        separator.boxType = .separator
-
-        let cancelBtn = NSButton(title: "取消", target: self, action: #selector(cancel))
-        cancelBtn.keyEquivalent = "\u{1b}"
-        let saveBtn = NSButton(title: "保存", target: self, action: #selector(save))
-        saveBtn.bezelStyle = .rounded
-        saveBtn.keyEquivalent = "\r"
-        w.defaultButtonCell = saveBtn.cell as? NSButtonCell
-        let btnRow = NSStackView(views: [cancelBtn, saveBtn])
-        btnRow.orientation = .horizontal
-        btnRow.spacing = 10
-        btnRow.alignment = .centerY
-
-        let form = NSStackView(views: [title, scroll, addBtn, separator,
-                                       modeRow, refreshRow, speedRow, widthRow,
-                                       arrowsCheck, pixelFontCheck, marqueeBlinkCheck, resetBtn, btnRow])
-        form.orientation = .vertical
-        form.alignment = .leading
-        form.spacing = 10
-        form.edgeInsets = NSEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)
-        form.translatesAutoresizingMaskIntoConstraints = false
-
-        let container = NSView()
-        container.addSubview(form)
-        w.contentView = container
-
-        NSLayoutConstraint.activate([
-            form.topAnchor.constraint(equalTo: container.topAnchor),
-            form.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            form.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            form.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-            scroll.heightAnchor.constraint(equalToConstant: 190),
-            modePopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 180),
-        ])
-
-        // 滚动区内容宽随可视宽,超高滚动
-        let clip = scroll.contentView
-        NSLayoutConstraint.activate([
-            rowsStack.leadingAnchor.constraint(equalTo: clip.leadingAnchor),
-            rowsStack.trailingAnchor.constraint(lessThanOrEqualTo: clip.trailingAnchor),
-            rowsStack.topAnchor.constraint(equalTo: clip.topAnchor),
-            rowsStack.bottomAnchor.constraint(greaterThanOrEqualTo: clip.bottomAnchor),
-        ])
+        scroll.documentView = table; scroll.hasVerticalScroller = true; scroll.borderType = .bezelBorder
+        let actions = NSStackView(views: [button("Add", #selector(add)), button("Remove", #selector(remove)),
+                                         button("Move Up", #selector(up)), button("Move Down", #selector(down))])
+        actions.orientation = .horizontal; actions.spacing = 8
+        let content = stack([note("Symbols scroll in this order. Double-click a symbol to edit it."), scroll, actions,
+                             note("Examples: AAPL, ^GSPC, 600519, 00700, BTC-USD")])
+        scroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 230).isActive = true
+        return content
     }
 
-    // ── 行管理 ───────────────────────────────────────────────────────────────
-
-    private func rebuildRows() {
-        rowViews.forEach { $0.removeFromSuperview() }
-        rowViews.removeAll()
-        config.watchlist.forEach { add(row: $0) }
+    private func displayTab() -> NSView {
+        mode.removeAllItems(); mode.addItems(withTitles: TickerConfig.displayModes.map(\.label))
+        mode.setAccessibilityLabel(L("Display mode"))
+        speed.target = self; speed.action = #selector(sliderChanged); speed.isContinuous = true
+        width.target = self; width.action = #selector(sliderChanged); width.isContinuous = true
+        speed.setAccessibilityLabel(L("Scroll speed")); width.setAccessibilityLabel(L("Display width"))
+        for control in [speed, width] { control.widthAnchor.constraint(equalToConstant: 210).isActive = true }
+        arrows.title = L("Use ▲ / ▼ for price changes")
+        pixels.title = L("Use pixel font on the quote board")
+        flashes.title = L("Flash changed price suffixes")
+        resetNote.font = .systemFont(ofSize: 11); resetNote.textColor = .secondaryLabelColor
+        return stack([formRow("Display mode", [mode]), formRow("Scroll speed", [speed, speedValue]),
+                      formRow("Display width", [width, widthValue]), arrows, pixels, flashes,
+                      note("Flash color follows the previous quote; daily change keeps its own color."),
+                      button("Reset Floating Windows", #selector(resetWindows)), resetNote, NSView()])
     }
 
-    @objc private func addRow() { add(row: WatchEntry(symbol: "", market: "us")) }
+    private func generalTab() -> NSView {
+        source.removeAllItems(); source.addItems(withTitles: [L("Yahoo / Tencent"), L("Demo (simulated prices)")])
+        language.removeAllItems(); language.addItems(withTitles: [L("System Default"), "English", "简体中文"])
+        refresh.widthAnchor.constraint(equalToConstant: 80).isActive = true
+        refresh.setAccessibilityLabel(L("Refresh interval"))
+        source.setAccessibilityLabel(L("Data source")); language.setAccessibilityLabel(L("Language"))
+        redUp.title = L("Red means up in China / Hong Kong")
+        return stack([formRow("Language", [language]), note("Language changes apply after saving."),
+                      formRow("Data source", [source]), formRow("Refresh interval", [refresh, NSTextField(labelWithString: L("seconds"))]),
+                      note("30 seconds is recommended. Short intervals may be rate-limited. All displays share one request cycle."),
+                      redUp, note("Your watchlist stays on this device. Symbols are sent only to the selected quote provider."), NSView()])
+    }
 
-    private func add(row entry: WatchEntry) {
-        let row = WatchlistRow(symbol: entry.symbol, market: entry.market)
-        row.onRemove = { [weak self, weak row] in
-            guard let self, let row else { return }
-            rowViews.removeAll { $0 == row }
-            rowsStack.removeArrangedSubview(row)
-            row.removeFromSuperview()
+    private func stack(_ views: [NSView]) -> NSStackView {
+        let result = NSStackView(views: views)
+        result.orientation = .vertical; result.alignment = .leading; result.spacing = 14
+        result.edgeInsets = NSEdgeInsets(top: 20, left: 20, bottom: 20, right: 20)
+        for view in views {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            if view is NSScrollView { view.widthAnchor.constraint(equalTo: result.widthAnchor, constant: -40).isActive = true }
         }
-        rowViews.append(row)
-        rowsStack.addArrangedSubview(row)
+        return result
+    }
+    private func formRow(_ title: String, _ controls: [NSView]) -> NSStackView {
+        let label = NSTextField(labelWithString: L(title))
+        label.widthAnchor.constraint(equalToConstant: 132).isActive = true
+        let row = NSStackView(views: [label] + controls)
+        row.orientation = .horizontal; row.alignment = .centerY; row.spacing = 10
+        return row
+    }
+    private func note(_ title: String) -> NSTextField {
+        let label = NSTextField(wrappingLabelWithString: L(title))
+        label.font = .systemFont(ofSize: 12); label.textColor = .secondaryLabelColor
+        label.preferredMaxLayoutWidth = 560
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return label
+    }
+    private func button(_ title: String, _ action: Selector) -> NSButton {
+        let result = NSButton(title: L(title), target: self, action: action)
+        result.bezelStyle = .rounded
+        return result
     }
 
-    // ── 动作 ─────────────────────────────────────────────────────────────────
-
-    @objc private func resetBoardOrigin() {
-        config.boardOrigin = nil
-        saveConfig(config)
-        onApplied?(config)
+    func numberOfRows(in tableView: NSTableView) -> Int { entries.count }
+    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        if tableColumn?.identifier.rawValue == "symbol" {
+            let field = NSTextField(string: entries[row].symbol)
+            field.isBordered = false; field.drawsBackground = false
+            field.font = .monospacedSystemFont(ofSize: 13, weight: .medium)
+            field.delegate = self
+            field.tag = row; field.target = self; field.action = #selector(symbolEdited(_:))
+            field.setAccessibilityLabel(L("Symbol"))
+            return field
+        }
+        let popup = NSPopUpButton()
+        popup.addItems(withTitles: Self.markets.map(\.label))
+        popup.selectItem(at: Self.markets.firstIndex { $0.key == entries[row].market } ?? 0)
+        popup.tag = row; popup.target = self; popup.action = #selector(marketEdited(_:))
+        popup.setAccessibilityLabel(L("Market"))
+        return popup
     }
-
+    func controlTextDidEndEditing(_ notification: Notification) {
+        if let field = notification.object as? NSTextField { symbolEdited(field) }
+    }
+    @objc private func symbolEdited(_ field: NSTextField) {
+        if entries.indices.contains(field.tag) { entries[field.tag].symbol = field.stringValue }
+    }
+    @objc private func marketEdited(_ popup: NSPopUpButton) {
+        if entries.indices.contains(popup.tag) { entries[popup.tag].market = Self.markets[popup.indexOfSelectedItem].key }
+    }
+    private func finishEditing() { window?.makeFirstResponder(nil) }
+    @objc private func add() {
+        finishEditing(); entries.append(WatchEntry(symbol: "", market: "us")); table.reloadData()
+        table.selectRowIndexes(IndexSet(integer: entries.count - 1), byExtendingSelection: false)
+        table.scrollRowToVisible(entries.count - 1)
+        if let field = table.view(atColumn: 0, row: entries.count - 1, makeIfNecessary: true) as? NSTextField { window?.makeFirstResponder(field) }
+    }
+    @objc private func remove() {
+        finishEditing(); let row = table.selectedRow
+        guard entries.indices.contains(row) else { return }
+        entries.remove(at: row); table.reloadData()
+    }
+    private func move(_ delta: Int) {
+        finishEditing(); let row = table.selectedRow, next = row + delta
+        guard entries.indices.contains(row), entries.indices.contains(next) else { return }
+        entries.swapAt(row, next); table.reloadData()
+        table.selectRowIndexes(IndexSet(integer: next), byExtendingSelection: false)
+    }
+    @objc private func up() { move(-1) }
+    @objc private func down() { move(1) }
+    @objc private func sliderChanged() { updateValues() }
+    private func updateValues() {
+        speedValue.stringValue = "\(Int(speed.doubleValue)) \(L("columns / sec"))"
+        widthValue.stringValue = "\(width.integerValue) \(L("characters"))"
+    }
+    @objc private func resetWindows() { resetPositions = true; resetNote.stringValue = L("Window positions will reset after you save.") }
     @objc private func cancel() { window?.close() }
-
-    @objc private func speedChanged() { updateSpeedLabel() }
-
-    private func updateSpeedLabel() {
-        let perSec = 1.0 / max(0.02, speedSlider.doubleValue)
-        speedValueLabel.stringValue = String(format: "%.0f 列/秒", perSec)
+    private func error(_ message: String, title: String = "Invalid Settings") {
+        let alert = NSAlert(); alert.messageText = L(title); alert.informativeText = L(message)
+        if let window { alert.beginSheetModal(for: window) } else { alert.runModal() }
     }
-
-    @objc private func widthChanged() { updateWidthLabel() }
-
-    private func updateWidthLabel() {
-        let pt = widthSlider.doubleValue * 18 + 8
-        widthValueLabel.stringValue = String(format: "≈%.0fpt", pt)
-    }
-
     @objc private func save() {
-        var entries: [WatchEntry] = []
-        for rv in rowViews {
-            let s = rv.symbolField.stringValue.trimmingCharacters(in: .whitespaces).uppercased()
-            guard !s.isEmpty else { continue }
-            entries.append(WatchEntry(symbol: s, market: rv.selectedMarket))
+        finishEditing()
+        let cleaned = entries.map { WatchEntry(symbol: $0.symbol.trimmingCharacters(in: .whitespacesAndNewlines).uppercased(), market: $0.market) }
+        guard !cleaned.isEmpty else { error("Add at least one symbol."); return }
+        guard Self.validEntries(cleaned) else { error("Use unique symbols with valid market codes."); return }
+        guard let interval = Double(refresh.stringValue), interval.isFinite, (5...3600).contains(interval) else {
+            error("Enter a refresh interval from 5 to 3600 seconds."); return
         }
-        guard !entries.isEmpty else { NSSound.beep(); return }   // 空自选池视作误操作
-
-        config.watchlist = entries
-        if Self.modes.indices.contains(modePopup.indexOfSelectedItem) {
-            config.displayMode = Self.modes[modePopup.indexOfSelectedItem].key
-        }
-        if let secs = Double(refreshField.stringValue) {
-            config.boardRefresh = min(3600, max(5, secs))
-        }
-        config.scrollSpeed = min(0.5, max(0.02, speedSlider.doubleValue))
-        config.changeArrows = (arrowsCheck.state == .on)
-        config.boardPixelFont = (pixelFontCheck.state == .on)
-        config.marqueeBlink = (marqueeBlinkCheck.state == .on)
-        config.defaultWidth = min(60, max(8, Int(widthSlider.doubleValue)))
-
-        saveConfig(config)
-        onApplied?(config)
-        window?.close()
+        var draft = config
+        draft.watchlist = cleaned
+        draft.displayMode = TickerConfig.displayModes[mode.indexOfSelectedItem].key
+        draft.provider = source.indexOfSelectedItem == 0 ? "real" : "demo"
+        draft.language = ["system", "en", "zh-Hans"][language.indexOfSelectedItem]
+        draft.boardRefresh = interval
+        draft.scrollSpeed = 1 / speed.doubleValue
+        draft.defaultWidth = width.integerValue
+        draft.changeArrows = arrows.state == .on
+        draft.boardPixelFont = pixels.state == .on
+        draft.marqueeBlink = flashes.state == .on
+        draft.redUpMarkets.removeAll { ["cn", "hk"].contains($0) }
+        if redUp.state == .on { draft.redUpMarkets += ["cn", "hk"] }
+        if resetPositions { draft.boardOrigin = nil; draft.barOrigin = nil }
+        guard saveConfig(draft) else { error(configPath(), title: "Could Not Save Settings"); return }
+        config = draft; onApplied?(draft); window?.close()
     }
-}
-
-// ── 单行:[代码输入框] [市场下拉] [−] ─────────────────────────────────────────
-
-private final class WatchlistRow: NSView {
-
-    let symbolField = NSTextField()
-    let marketPopup = NSPopUpButton()
-    var onRemove: (() -> Void)?
-
-    init(symbol: String, market: String) {
-        super.init(frame: .zero)
-
-        symbolField.stringValue = symbol
-        symbolField.isBezeled = true
-        symbolField.bezelStyle = .roundedBezel
-        symbolField.font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .regular)
-        symbolField.placeholderString = "AAPL / 600519 / 00700"
-        symbolField.translatesAutoresizingMaskIntoConstraints = false
-
-        marketPopup.addItems(withTitles: ConfigWindowController.markets.map(\.label))
-        if let idx = ConfigWindowController.markets.firstIndex(where: { $0.key == market }) {
-            marketPopup.selectItem(at: idx)
+    static func validEntries(_ entries: [WatchEntry]) -> Bool {
+        var seen = Set<String>()
+        return entries.allSatisfy { entry in
+            let pattern: String
+            switch entry.market {
+            case "cn": pattern = "^[0-9]{6}$"
+            case "hk": pattern = "^[0-9]{1,5}$"
+            case "us", "crypto": pattern = "^[A-Z0-9^][A-Z0-9.^=_-]{0,31}$"
+            default: return false
+            }
+            let identity = entry.market == "hk" ? String(repeating: "0", count: max(0, 5 - entry.symbol.count)) + entry.symbol : entry.symbol
+            return seen.insert(identity).inserted && entry.symbol.range(of: pattern, options: .regularExpression) != nil
         }
-        marketPopup.translatesAutoresizingMaskIntoConstraints = false
-        marketPopup.controlSize = .small
-
-        let removeBtn = NSButton(title: "−", target: self, action: #selector(removeSelf))
-        removeBtn.bezelStyle = .inline
-        removeBtn.controlSize = .small
-        removeBtn.translatesAutoresizingMaskIntoConstraints = false
-
-        let stack = NSStackView(views: [symbolField, marketPopup, removeBtn])
-        stack.orientation = .horizontal
-        stack.spacing = 6
-        stack.alignment = .centerY
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(stack)
-
-        NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: topAnchor, constant: 2),
-            stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -2),
-            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
-            stack.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
-            symbolField.widthAnchor.constraint(equalToConstant: 170),
-            marketPopup.widthAnchor.constraint(equalToConstant: 90),
-        ])
     }
-
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-
-    var selectedMarket: String {
-        let title = marketPopup.titleOfSelectedItem ?? "美股"
-        return ConfigWindowController.markets.first { $0.label == title }?.key ?? "us"
-    }
-
-    @objc private func removeSelf() { onRemove?() }
 }

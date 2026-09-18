@@ -7,9 +7,9 @@
     <key>CFBundleName</key>
     <string>Pinwheel</string>
     <key>CFBundleVersion</key>
-    <string>1.5.1</string>
+    <string>1.6.0</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.5.1</string>
+    <string>1.6.0</string>
     <key>CFBundleExecutable</key>
     <string>pinwheel</string>
     <key>CFBundlePackageType</key>
@@ -20,6 +20,10 @@
     <string>NSApplication</string>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleLocalizations</key>
+    <array><string>en</string><string>zh-Hans</string></array>
     <key>LSUIElement</key>
     <true/>
 </dict>

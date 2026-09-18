@@ -1,95 +1,105 @@
-# Pinwheel 风车星系
+# Pinwheel
 
-macOS 状态栏行情跑马灯。LED 点阵风格,自选池循环滚动,一轮滚完自动拉新行情再来一轮——风车周而复始地转,和 M101 同名同构。
+[简体中文](README.zh-CN.md) · English
 
-显示引擎 fork 自 [rhsev/ticker](https://github.com/rhsev/ticker)(MIT,致谢见 ATTRIBUTION.md);本仓新增的是行情层:QuoteEngine + QuoteProvider。
+A quiet desktop ticker for your watchlist. Pinwheel displays a scrolling LED ticker and a compact quote board, with price changes highlighted from the highest changed digit through the end of the price.
 
-## 快速开始
+## Platforms
 
-```bash
+| | macOS | Windows preview |
+|---|---|---|
+| System integration | Menu bar + floating ticker + quote board | System tray + floating ticker + quote board |
+| Language | English / Simplified Chinese / system default | English / Simplified Chinese / system default |
+| Quotes | Yahoo Finance / Tencent, or clearly labeled demo data | Yahoo Finance / Tencent, or clearly labeled demo data |
+| Display | LED ticker; pixel or system-font board; intraday chart | LED ticker; native quote list |
+| Configuration | Native tabbed settings, ordered watchlist | Native tabbed settings, ordered watchlist |
+| Minimum system | macOS 13 | Windows 10/11 x64 with .NET 10 OS support |
+
+Windows is a preview port. A successful cross-build and core tests do **not** constitute Windows GUI validation. See [the Windows test checklist](docs/WINDOWS-TESTING.md). The macOS CLI and mini charts are not included in the Windows preview.
+
+## Use
+
+On macOS, open `Pinwheel.app`. Right-click the menu-bar ticker, floating ticker, or quote board for **Settings…**. Left-click the menu-bar icon to pause/collapse or resume. Drag floating windows to position them. A small menu-bar icon remains available in board-only mode. Settings are grouped into **Watchlist**, **Display**, and **General**; changes apply after **Save**, while **Cancel** leaves them untouched.
+
+On Windows, extract the whole ZIP, run `Pinwheel.exe`, and use its system-tray menu. The portable build includes its runtime; no separate .NET installation is needed. Drag the floating ticker with the left mouse button. Closing the quote board hides it; **Quit Pinwheel** in the tray menu exits the app.
+
+Choose your data source in General. Demo prices are simulated and identified in the status menu. Symbols include `AAPL`, `^GSPC`, `600519`, `00700`, and `BTC-USD`. Stock symbols must be unique. Mainland China codes use six digits; Hong Kong codes use one to five digits and are left-padded for requests.
+
+### Price flashes
+
+`81.20 → 81.30` flashes **30**, including the unchanged final zero. Color follows the previous quote rather than the daily percentage change. The pulse lasts 0.55 seconds, then restores the original text color. Each scrolling suffix starts its own pulse when readable; wrapping does not replay a pulse. First quotes and changes hidden by rounding do not flash. Prices retain two decimal places, including above 1,000. Market color preferences apply to both quote direction and daily change.
+
+### Refreshing and rate limits
+
+The default refresh interval is **30 seconds**. All displays share one cached snapshot and one in-flight fetch. The configured interval is the minimum delay between completed fetches, not a promise of streaming market data. Scrolling continues independently; the ticker adopts updated data at its next cycle. A manual refresh does not bypass provider backoff or the five-second minimum between attempts.
+
+Yahoo requests are per symbol. Four symbols every five seconds would be approximately **48 requests/minute / 2,880 per hour**, before retries or other apps sharing the same IP. There is no fixed public allowance that Pinwheel can guarantee. Short intervals can trigger HTTP 429 even if they worked previously. Pinwheel retains the latest known prices, merges partial results, honors `Retry-After`, and backs off from 30 seconds up to 15 minutes on repeated failures. The menu shows unavailable/stale/rate-limited state and the last successful update time. Data may be delayed by its provider or market.
+
+Pinwheel uses native HTTP requests to public Yahoo/Tencent endpoints; it does **not** depend on Python or yfinance. The [yfinance project](https://ranaroussi.github.io/yfinance/) uses related Yahoo endpoints and [handles HTTP 429](https://github.com/ranaroussi/yfinance/blob/main/yfinance/data.py); it is not an official Yahoo service. The application's MIT license does not grant rights to redistribute market data. Review each provider's applicable terms for your use.
+
+## Build
+
+### macOS
+
+Requires Swift 5.7+ and Apple Command Line Tools or Xcode.
+
+```sh
 swift build
-.build/debug/pinwheel        # 直接跑,demo 行情源,无需网络
+.build/debug/pinwheel
+bash tools/test-price-flash.sh
+bash build-app.sh
+# Optional universal app (Apple Silicon + Intel):
+bash build-app.sh --arch arm64 --arch x86_64
 ```
 
-或打包成 app(可拖进应用程序、设登录项):
+The app is locally ad-hoc signed. Developer ID signing/notarization requires the maintainer's own Apple credentials and is not supplied by this repository.
 
-```bash
-./build-app.sh               # → Pinwheel.app,ad-hoc 签名
+### Windows (also cross-buildable from macOS/Linux)
+
+Requires the .NET 10 SDK **for building**. The shipped app includes its runtime.
+
+```sh
+dotnet run --project Windows/Pinwheel.Core.Tests -c Release
+dotnet publish Windows/Pinwheel.Windows -c Release -r win-x64 --self-contained true \
+  -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true \
+  -p:EnableCompressionInSingleFile=true -p:DebugType=None -o dist/windows-x64
 ```
 
-默认 `provider = "demo"`:本地随机游走的假数据,只为了让屏幕上有东西滚。接真实行情见下文。
+`EnableWindowsTargeting` is set in the Windows project. GUI execution still requires Windows. The GitHub Actions workflow builds both platforms, runs core tests, and includes a Windows control-creation/render smoke test. Local release packaging is described in [CONTRIBUTING.md](CONTRIBUTING.md).
 
-## 两种显示模式
+## Configuration and privacy
 
-日常配置走 GUI:菜单 **Configure…**(跑马灯模式点状态栏图标 / 报价卡模式右键卡片,或 CLI `pinwheel --settings`),自选池增删改、切显示模式、调刷新间隔、报价卡归位,保存即热生效。
+- macOS: `~/.config/pinwheel/config.json` (the existing path is retained for upgrades).
+- Windows: `%APPDATA%\Pinwheel\config.json`.
+- No account, telemetry, analytics, or cloud sync. Watchlists/settings stay on the device. Requested symbols and network metadata are sent to Yahoo/Tencent when using live data. Demo mode makes no quote requests.
+- Saving is atomic. Missing fields receive defaults; malformed files are not silently replaced on startup. No private watchlist/configuration is included in this repository.
+- Use **Advanced → Show Configuration File…** on macOS or **Show Configuration File…** in the Windows tray menu for the file location.
 
-菜单里 `Mode` 也可直接切换,三种取值:
+## macOS CLI
 
-- **marquee**(默认):状态栏 LED 点阵跑马灯,循环滚动。
-- **board**:程序坞两端空位的报价小卡,`boardRefresh` 秒一刷(默认 30)。程序坞本体不容第三方塞内容,浮层小窗占在底部条两端的空白处,视觉上就是坞的延伸。左键整卡拖动(位置自动记忆),右键出菜单(模式切换/编辑配置/退出)。
-- **bar**:屏幕下缘的置顶跑马灯条,与状态栏跑马灯同一引擎同一渲染——为竖屏/菜单栏放不下宽条的屏幕准备,拖到哪块屏常驻哪块屏,位置记忆。
-- 组合:`displayMode` 支持逗号分隔(如 `marquee,bar` = 大屏菜单栏 + 竖屏底部条同时开),GUI/菜单给五个常用组合。
+The application binary is also a local client:
 
-board 模式下状态栏图标让位;跑马灯模式和 board 各自独立刷新(共用同一个 provider);跑马灯在离本轮结束约一屏时**预取**下一轮行情,轮间无缝不冻结。
-
-平盘(|涨跌幅|<0.005)显示白色 `-0.00%`(不着红绿);board 卡数字变化时该行做一次 0.35s 亮度脉冲。
-
-交互约定:菜单栏图标**左键单击=收起/展开**(收起时缩成 `<` 小图标),**右键=菜单**(Configure… 在里面,也可 `pinwheel --settings`);bar/board 左键拖动、右键菜单。图标 = 深底白色 `<SPX` 点阵 + 四角取景括号(tools/make-pinwheel-icon.swift 可重画)。
-
-## 版本
-
-**v1.0.0**(2026-09-18):首个定版——跑马灯/报价卡/底部条三显示可组合、免 key 双数据链(Yahoo+腾讯)、配置 GUI、CLI 遥控、无缝环绕滚动、▲/▼ 涨跌、两缘渐隐。v0.1→v1.0 一天内迭代,全部变更见 git log。
-
-## 配置
-
-`~/.config/pinwheel/config.json`(菜单里也有 "Edit config…"):
-
-| 字段 | 说明 |
-|---|---|
-| `watchlist` | 自选池,`{"symbol": "AAPL", "market": "us"}`;market 决定涨跌配色习惯 |
-| `redUpMarkets` | 这些市场红涨绿跌(默认 cn/hk),其余绿涨红跌 |
-| `pausePerSymbol` | >0 时每个标的滚到左缘停留 N 秒(默认 0,连续滚) |
-| `defaultWidth` | 跑马灯宽度(字符,8-60),GUI 有滑块;marquee 与 bar 同宽,保存即调 |
-| `changeArrows` | 涨跌用 ▲/▼ 三角(默认开,交易所风格;关=+/-号) |
-| `marqueeSeparator` | 标的间分隔,默认 3 个空格纯空隙 |
-| `provider` | `demo` \| `real` |
-| `defaultWidth` | 菜单栏显示宽度(字符数),默认 20 |
-| `scrollSpeed` | 每 tick 秒数,默认 0.0222(≈45 列/秒) |
-| `quoteLoop` | 行情循环开关(菜单可切) |
-| `displayMode` | `marquee` \| `board` \| `both`(菜单 Mode 可切) |
-| `boardCorner` | board 卡默认贴程序坞哪端:`left` \| `right` |
-| `boardOrigin` | 手动拖动后自动写入的位置,不用手填 |
-| `boardRefresh` | board 刷新间隔秒数,默认 30 |
-
-## 行情源
-
-配置 `provider` 二选一:
-
-- **real**(推荐):内置免 key 双链——美股/指数/加密走 Yahoo 公开 chart 端点(yfinance 同源),A股/港股走腾讯 `qt.gtimg.cn` 实时链。任一腿失败不影响另一腿;全挂则空回调,显示层 15s 自动重试。A 股代码按首位自动配 sh/sz 前缀(6/5/9→sh,其余→sz),港股 symbol 自动补零到 5 位。
-- **demo**:本地随机游走假数据,无网络依赖。
-
-两条链都免费、无需注册;Yahoo 腿偶发限流(yfinance 同款坑),失败静默重试即可。
-
-## CLI(与上游一致)
-
-同一个二进制,带参数即客户端——外部工具可以往跑马灯推消息:
-
-```bash
-pinwheel --send "TEXT"          # 滚一条(支持 \c[green] 等颜色码、\p[3] 暂停码)
-pinwheel --urgent TEXT          # 插队
-pinwheel --very-urgent TEXT     # 打断当前滚动,播完回放
-pinwheel --standby TEXT -d 10   # 静态显示 10 秒
-pinwheel --status / --clear / --quit
+```sh
+pinwheel --settings
+pinwheel --status
+pinwheel --send 'TEXT'
+pinwheel --urgent 'TEXT'
+pinwheel --very-urgent 'TEXT'
+pinwheel --standby 'TEXT' --duration 10
+pinwheel --width 30
+pinwheel --clear
+pinwheel --quit
 ```
 
-## 设计备注
+Messages support `\c[green]` / `\c[]` colors, `\p[3]` pauses, and `\b[1:green]` / `\b[0]` suffix pulses. The socket is per-user at `/tmp/pinwheel-<uid>.sock`, restricted to that user. `--on-click` intentionally executes a local shell command; use only commands you trust. The CLI is not a network service.
 
-- 一轮 = 一次刷新:利用引擎现成的 end-of-message 相位,滚完拉新行情重新入队,无闪烁。
-- 引擎细节(位图字体、列流预编译、.common RunLoop、直接写像素)见 TECHNICAL.md(上游原文)。
-- 字体为 5×7 点阵大写 ASCII,不支持中文/小写——股票代码场景刚好。
+## Project
 
-## Roadmap
+- [Changelog](CHANGELOG.md)
+- [Contributing, translations, and releases](CONTRIBUTING.md)
+- [Security policy](SECURITY.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [Original renderer notes](TECHNICAL.md)
+- [License](LICENSE) and [attribution](ATTRIBUTION.md)
 
-- [x] RealProvider 接真实 API(腾讯 + Yahoo 双链,2026-09-18 验证)
-- [ ] 收盘时段自动降频(A股/美股休市时拉取间隔拉长)
-- [ ] 与 Shepherd 联动:盯盘提醒直接 `--very-urgent` 推上跑马灯
+Built on the MIT-licensed [rhsev/ticker](https://github.com/rhsev/ticker) display engine. Original copyright notices are retained.
