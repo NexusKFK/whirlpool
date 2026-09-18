@@ -27,7 +27,8 @@ swift build
 
 - **marquee**(默认):状态栏 LED 点阵跑马灯,循环滚动。
 - **board**:程序坞两端空位的报价小卡,`boardRefresh` 秒一刷(默认 30)。程序坞本体不容第三方塞内容,浮层小窗占在底部条两端的空白处,视觉上就是坞的延伸。左键整卡拖动(位置自动记忆),右键出菜单(模式切换/编辑配置/退出)。
-- **both**:两个同时开。
+- **bar**:屏幕下缘的置顶跑马灯条,与状态栏跑马灯同一引擎同一渲染——为竖屏/菜单栏放不下宽条的屏幕准备,拖到哪块屏常驻哪块屏,位置记忆。
+- 组合:`displayMode` 支持逗号分隔(如 `marquee,bar` = 大屏菜单栏 + 竖屏底部条同时开),GUI/菜单给五个常用组合。
 
 board 模式下状态栏图标让位;跑马灯模式和 board 各自独立刷新(共用同一个 provider)。
 
@@ -40,9 +41,11 @@ board 模式下状态栏图标让位;跑马灯模式和 board 各自独立刷新
 | `watchlist` | 自选池,`{"symbol": "AAPL", "market": "us"}`;market 决定涨跌配色习惯 |
 | `redUpMarkets` | 这些市场红涨绿跌(默认 cn/hk),其余绿涨红跌 |
 | `pausePerSymbol` | >0 时每个标的滚到左缘停留 N 秒(默认 0,连续滚) |
+| `changeArrows` | 涨跌用 ▲/▼ 三角(默认开,交易所风格;关=+/-号) |
+| `marqueeSeparator` | 标的间分隔,默认 3 个空格纯空隙 |
 | `provider` | `demo` \| `real` |
 | `defaultWidth` | 菜单栏显示宽度(字符数),默认 20 |
-| `scrollSpeed` | 每 tick 秒数,默认 0.05(= 20fps) |
+| `scrollSpeed` | 每 tick 秒数,默认 0.0222(≈45 列/秒) |
 | `quoteLoop` | 行情循环开关(菜单可切) |
 | `displayMode` | `marquee` \| `board` \| `both`(菜单 Mode 可切) |
 | `boardCorner` | board 卡默认贴程序坞哪端:`left` \| `right` |

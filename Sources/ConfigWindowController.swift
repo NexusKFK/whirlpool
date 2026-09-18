@@ -13,7 +13,9 @@ final class ConfigWindowController: NSObject, NSWindowDelegate {
     private static let modes: [(key: String, label: String)] = [
         ("marquee", "跑马灯(菜单栏)"),
         ("board", "报价卡(程序坞旁)"),
-        ("both", "双开"),
+        ("bar", "底部条(屏幕下缘)"),
+        ("marquee,board", "跑马灯+报价卡"),
+        ("marquee,bar", "跑马灯+底部条"),
     ]
 
     private var window: NSWindow?
@@ -21,9 +23,11 @@ final class ConfigWindowController: NSObject, NSWindowDelegate {
     private var rowViews: [WatchlistRow] = []
     private let modePopup = NSPopUpButton()
     private let refreshField = NSTextField()
-    private let speedSlider = NSSlider(value: 0.05, minValue: 0.02, maxValue: 0.3,
+    private let speedSlider = NSSlider(value: 0.0222, minValue: 0.02, maxValue: 0.1,
                                        target: nil, action: nil)
     private let speedValueLabel = NSTextField(labelWithString: "")
+    private let arrowsCheck = NSButton(checkboxWithTitle: "涨跌用 ▲/▼(交易所风格)",
+                                       target: nil, action: nil)
     private var config: TickerConfig
 
     init(config: TickerConfig) {
@@ -40,8 +44,9 @@ final class ConfigWindowController: NSObject, NSWindowDelegate {
         rebuildRows()
         modePopup.selectItem(at: Self.modes.firstIndex { $0.key == config.displayMode } ?? 0)
         refreshField.stringValue = String(Int(config.boardRefresh))
-        speedSlider.doubleValue = min(0.3, max(0.02, config.scrollSpeed))
+        speedSlider.doubleValue = min(0.1, max(0.02, config.scrollSpeed))
         updateSpeedLabel()
+        arrowsCheck.state = config.changeArrows ? .on : .off
         window?.center()
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
@@ -104,6 +109,8 @@ final class ConfigWindowController: NSObject, NSWindowDelegate {
         speedRow.orientation = .horizontal
         speedRow.spacing = 8
 
+        arrowsCheck.translatesAutoresizingMaskIntoConstraints = false
+
         let resetBtn = NSButton(title: "报价卡归位(清除拖动记忆)", target: self,
                                 action: #selector(resetBoardOrigin))
         resetBtn.bezelStyle = .inline
@@ -124,7 +131,8 @@ final class ConfigWindowController: NSObject, NSWindowDelegate {
         btnRow.alignment = .centerY
 
         let form = NSStackView(views: [title, scroll, addBtn, separator,
-                                       modeRow, refreshRow, speedRow, resetBtn, btnRow])
+                                       modeRow, refreshRow, speedRow, arrowsCheck,
+                                       resetBtn, btnRow])
         form.orientation = .vertical
         form.alignment = .leading
         form.spacing = 10
@@ -210,6 +218,7 @@ final class ConfigWindowController: NSObject, NSWindowDelegate {
             config.boardRefresh = min(3600, max(5, secs))
         }
         config.scrollSpeed = min(0.5, max(0.02, speedSlider.doubleValue))
+        config.changeArrows = (arrowsCheck.state == .on)
 
         saveConfig(config)
         onApplied?(config)
