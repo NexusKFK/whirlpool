@@ -1,9 +1,17 @@
 import Foundation
 
+// 分钟线点:t 是时间锚(单位随源,epoch 或当日秒数),v 是价格
+struct SeriesPt {
+    let t: Double
+    let v: Double
+}
+
 struct Quote {
     let price: Double
     let changePct: Double
-    let series: [Double]?   // 当日分钟线(降采样后),board 缩略图用
+    let series: [SeriesPt]?      // 当日分钟线,board 缩略图用
+    let sessionStart: Double?    // 当天时段起(t 同单位)
+    let sessionEnd: Double?
 }
 
 // Board 模式一行的展示数据(market 随行,配色习惯到渲染层再定)
@@ -14,7 +22,7 @@ struct BoardRow {
     let up: Bool
     let flat: Bool       // 0.00 平盘:白色 + 一道杠
     let market: String
-    let series: [Double]?
+    let series: [SeriesPt]?
 }
 
 protocol QuoteProvider {
@@ -82,31 +90,35 @@ final class DemoProvider: QuoteProvider {
     var name: String { "demo" }
 
     private var last: [String: Quote] = [
-        "AAPL":   Quote(price: 228.90,  changePct: 0.82,  series: DemoProvider.walk(228.90, 40)),
-        "SPY":    Quote(price: 566.40,  changePct: -0.31, series: DemoProvider.walk(566.40, 40)),
-        "600519": Quote(price: 1487.00, changePct: 1.24,  series: DemoProvider.walk(1487.00, 40)),
-        "510300": Quote(price: 3.94,    changePct: -0.51, series: DemoProvider.walk(3.94, 40)),
+        "AAPL":   Quote(price: 228.90,  changePct: 0.82,  series: DemoProvider.walk(228.90, 40),  sessionStart: 0, sessionEnd: 1),
+        "SPY":    Quote(price: 566.40,  changePct: -0.31, series: DemoProvider.walk(566.40, 40),  sessionStart: 0, sessionEnd: 1),
+        "600519": Quote(price: 1487.00, changePct: 1.24,  series: DemoProvider.walk(1487.00, 40), sessionStart: 0, sessionEnd: 1),
+        "510300": Quote(price: 3.94,    changePct: -0.51, series: DemoProvider.walk(3.94, 40),    sessionStart: 0, sessionEnd: 1),
     ]
 
-    private static func walk(_ end: Double, _ n: Int) -> [Double] {
-        // 从 end 倒着随机游走出一条演示曲线
-        var pts: [Double] = [end]
-        for _ in 1..<n { pts.append(pts.last! * (1 + Double.random(in: -0.002...0.002))) }
-        return pts.reversed()
+    private static func walk(_ end: Double, _ n: Int) -> [SeriesPt] {
+        // 从 end 倒着随机游走,时间铺在"当天"前 15% —— 像刚开盘的样子
+        var vals: [Double] = [end]
+        for _ in 1..<n { vals.append(vals.last! * (1 + Double.random(in: -0.002...0.002))) }
+        return vals.reversed().enumerated().map { SeriesPt(t: Double($0.offset) / Double(n - 1) * 0.15, v: $0.element) }
     }
 
     func quotes(for entries: [WatchEntry], completion: @escaping ([String: Quote]) -> Void) {
         var out: [String: Quote] = [:]
         for e in entries {
-            let base  = last[e.symbol] ?? Quote(price: 100, changePct: 0, series: nil)
+            let base  = last[e.symbol] ?? Quote(price: 100, changePct: 0, series: nil,
+                                                sessionStart: 0, sessionEnd: 1)
             let drift = Double.random(in: -0.6...0.6)
             var series = base.series ?? []
-            series.append(max(0.01, (series.last ?? base.price) * (1 + drift / 400)))
+            let lastT = series.last?.t ?? 0
+            series.append(SeriesPt(t: min(0.95, lastT + 0.15 / 40),
+                                   v: max(0.01, (series.last?.v ?? base.price) * (1 + drift / 400))))
             if series.count > 60 { series.removeFirst(series.count - 60) }
             out[e.symbol] = Quote(
                 price:     max(0.01, base.price * (1 + drift / 400)),
                 changePct: min(9.99, max(-9.99, base.changePct + drift / 3)),
-                series:    series
+                series:    series,
+                sessionStart: 0, sessionEnd: 1
             )
         }
         last = out

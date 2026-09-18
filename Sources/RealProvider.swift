@@ -73,12 +73,17 @@ final class RealProvider: QuoteProvider {
             let outLock = NSLock()
             let seriesGroup = DispatchGroup()
             for (code, symbol) in codeToSymbol where present.contains(symbol) {
+                let market = entries.first { $0.symbol == symbol }?.market ?? "cn"
+                let session: (Double, Double) = market == "hk" ? (9.5 * 3600, 16 * 3600)
+                                                                : (9.5 * 3600, 15 * 3600)
                 seriesGroup.enter()
                 self.fetchTencentSeries(code: code) { series in
                     if let series {
                         outLock.lock()
                         if let q = out[symbol] {
-                            out[symbol] = Quote(price: q.price, changePct: q.changePct, series: series)
+                            out[symbol] = Quote(price: q.price, changePct: q.changePct,
+                                                series: series,
+                                                sessionStart: session.0, sessionEnd: session.1)
                         }
                         outLock.unlock()
                     }
@@ -99,7 +104,8 @@ final class RealProvider: QuoteProvider {
               let px = Double(parts[3]),
               let pct = Double(parts[32])
         else { return nil }
-        return (key, Quote(price: px, changePct: pct, series: nil))
+        return (key, Quote(price: px, changePct: pct, series: nil,
+                           sessionStart: nil, sessionEnd: nil))
     }
 
     private func tencentCode(_ e: WatchEntry) -> String {
@@ -112,7 +118,7 @@ final class RealProvider: QuoteProvider {
 
     /// https://web.ifzq.gtimg.cn/appstock/app/minute/query?code=sh600519
     /// data.<code>.data.data = ["0930 1250.00 1249.00 123", …](时间 价格 均价 量)
-    private func fetchTencentSeries(code: String, completion: @escaping ([Double]?) -> Void) {
+    private func fetchTencentSeries(code: String, completion: @escaping ([SeriesPt]?) -> Void) {
         guard let url = URL(string: "https://web.ifzq.gtimg.cn/appstock/app/minute/query?code=\(code)") else {
             completion(nil); return
         }
@@ -126,11 +132,14 @@ final class RealProvider: QuoteProvider {
                   let inner = codeNode["data"] as? [String: Any],
                   let lines = inner["data"] as? [String]
             else { completion(nil); return }
-            let pts = lines.compactMap { l -> Double? in
+            let pts = lines.compactMap { l -> SeriesPt? in
                 let f = l.components(separatedBy: " ")
-                return f.count > 1 ? Double(f[1]) : nil
+                guard f.count > 1, let v = Double(f[1]), f[0].count == 4,
+                      let hh = Int(f[0].prefix(2)), let mm = Int(f[0].suffix(2))
+                else { return nil }
+                return SeriesPt(t: Double(hh * 3600 + mm * 60), v: v)
             }
-            completion(pts.count > 2 ? Self.downsample(Array(pts.suffix(240)), to: 60) : nil)
+            completion(pts.count > 2 ? pts : nil)
         }.resume()
     }
 
@@ -163,40 +172,36 @@ final class RealProvider: QuoteProvider {
                       prev != 0
                 else { return }
 
-                var series: [Double]? = nil
-                if let indicators = result["indicators"] as? [String: Any],
+                // 分钟线带时间戳,只留当天;x 轴按真实时段画,不降采样
+                var series: [SeriesPt]? = nil
+                var sStart: Double? = nil
+                var sEnd: Double? = nil
+                if let ts = result["timestamp"] as? [Double],
+                   let indicators = result["indicators"] as? [String: Any],
                    let quoteArr = (indicators["quote"] as? [[String: Any]])?.first,
                    let raw = quoteArr["close"] as? [Any] {
-                    var closes = raw.compactMap { $0 as? Double }
-                    // 只保留当天:盘前/隔夜时 range=1d 会整段返回上一交易日,
-                    // 用当日常规时段开盘时间戳截掉更早的 bar
-                    if let ts = result["timestamp"] as? [Double],
-                       ts.count == closes.count,
-                       let period = meta["currentTradingPeriod"] as? [String: Any],
+                    var pts: [SeriesPt] = []
+                    for (t, c) in zip(ts, raw) {
+                        if let v = c as? Double { pts.append(SeriesPt(t: t, v: v)) }
+                    }
+                    if let period = meta["currentTradingPeriod"] as? [String: Any],
                        let regular = period["regular"] as? [String: Any],
-                       let dayStart = regular["start"] as? Double {
-                        let dayCloses = zip(ts, closes).filter { $0.0 >= dayStart }.map(\.1)
-                        if dayCloses.count > 2 { closes = dayCloses }
+                       let st = regular["start"] as? Double, let en = regular["end"] as? Double {
+                        sStart = st; sEnd = en
+                        let day = pts.filter { $0.t >= st }
+                        if day.count > 2 { pts = day }
                     }
-                    if closes.count > 2 {
-                        series = Self.downsample(Array(closes.suffix(240)), to: 60)
-                    }
+                    if pts.count > 2 { series = pts }
                 }
 
                 lock.lock()
-                out[e.symbol] = Quote(price: px, changePct: (px - prev) / prev * 100, series: series)
+                out[e.symbol] = Quote(price: px, changePct: (px - prev) / prev * 100,
+                                      series: series, sessionStart: sStart, sessionEnd: sEnd)
                 lock.unlock()
             }.resume()
         }
 
         group.notify(queue: .global()) { completion(out) }
-    }
-
-    /// 等距抽点,保留首尾形状
-    static func downsample(_ a: [Double], to n: Int) -> [Double] {
-        guard a.count > n, n > 1 else { return a }
-        let step = Double(a.count - 1) / Double(n - 1)
-        return (0..<n).map { a[Int((Double($0) * step).rounded())] }
     }
 
     private func httpOK(_ resp: URLResponse?) -> Bool {
