@@ -39,6 +39,7 @@ struct TickerConfig: Codable {
     var boardRefresh:      Double            = 30        // 秒
     var barOrigin:         [Double]?         = nil       // 底部条手动拖动后记忆
     var boardPixelFont:    Bool              = true      // 报价卡用 LED 像素字体(关=系统字体)
+    var marqueeBlink:      Bool              = true      // 跑马灯换数时闪变化的数字
 }
 
 private let configURL: URL = {

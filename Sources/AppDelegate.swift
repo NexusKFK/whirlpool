@@ -26,6 +26,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var quoteProvider: QuoteProvider = DemoProvider()
     private var cycleInFlight = false
     private var prefetchArmed = true   // 每轮只预取一次;预取窗口比轮尾长,不设闸会连环重拉
+    private var lastParts: [String: String] = [:]   // symbol → 上轮核心串(价格+涨跌)
+    private var blinkCols: Set<Int> = []             // 本轮要闪的列(流内索引)
+    private var blinkStart: Date? = nil
     private var board: BoardWindow?
     private var boardTimer: Timer?
     private var barWindow: BarWindow?
@@ -563,6 +566,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 phase = .idle
                 return
             }
+            blinkCols = stream.blinkCols
+            blinkStart = stream.blinkCols.isEmpty ? nil : Date()
+
             canvas       = wrapCanvas(stream.columns)
             roundLen     = stream.columns.count
             scrollOffset = 0
@@ -608,8 +614,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // ── Darstellung ────────────────────────────────────────────────────────────
 
     private func showScrollFrame(blank: Bool = false) {
+        // 换数闪烁:1.2s / 100ms 一相,只隐去 blinkCols 命中的列(变化的数字),
+        // 其余内容照常滚动
+        var hide: Set<Int> = []
+        if let bs = blinkStart, !blinkCols.isEmpty, roundLen > 0 {
+            let elapsed = Date().timeIntervalSince(bs)
+            if elapsed < 1.2 {
+                if Int(elapsed / 0.1) % 2 == 1 {
+                    let vc = visCols(displayWidth: displayWidth)
+                    for ci in 0..<vc {
+                        let si = scrollOffset + ci
+                        if si >= 0, si < canvas.count, blinkCols.contains(si % roundLen) {
+                            hide.insert(si)
+                        }
+                    }
+                }
+            } else {
+                blinkStart = nil
+            }
+        }
         let img = renderScrollFrame(columns: canvas, offset: scrollOffset,
-                                     displayWidth: displayWidth, blank: blank)
+                                     displayWidth: displayWidth, blank: blank, hide: hide)
         setImage(img)
     }
 
@@ -688,11 +713,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     }
                     return
                 }
-                let text = QuoteEngine.marqueeText(entries: entries, quotes: quotes,
-                                                   redUpMarkets: redUp, pausePerSymbol: pause,
-                                                   separator: self.config.marqueeSeparator,
-                                                   changeArrows: self.config.changeArrows)
-                self.enqueue(TickerMessage(kind: .scroll, text: text, priority: .normal,
+                let built = QuoteEngine.marqueeText(entries: entries, quotes: quotes,
+                                                    redUpMarkets: redUp, pausePerSymbol: pause,
+                                                    separator: self.config.marqueeSeparator,
+                                                    changeArrows: self.config.changeArrows,
+                                                    blinkChanged: self.config.marqueeBlink,
+                                                    previousParts: self.lastParts)
+                self.lastParts = built.parts
+                self.enqueue(TickerMessage(kind: .scroll, text: built.text, priority: .normal,
                                            duration: 0, onClickCommand: nil, width: nil))
                 self.startTimer()
             }
