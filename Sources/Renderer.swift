@@ -191,3 +191,56 @@ func renderStandbyFrame(text: String, displayWidth: Int,
     let clipped = Array(stream.columns.prefix(visCols(displayWidth: displayWidth)))
     return renderScrollFrame(columns: clipped, offset: 0, displayWidth: displayWidth)
 }
+
+// ── 像素文本(board 卡等非跑马灯场景) ─────────────────────────────────────────
+// 用同一张 LED 位图字体表渲染任意分段着色文本,直写 RGBA,透明底。
+
+func renderPixelText(_ segments: [(text: String, color: NSColor)], dot: Int = 2) -> NSImage {
+    var cols: [(UInt8, NSColor)] = []
+    for seg in segments {
+        for ch in seg.text.uppercased() {
+            guard let g = FONT[ch] else { continue }
+            for b in g { cols.append((b, seg.color)) }
+        }
+    }
+    let gap = max(1, dot / 2)
+    let cw = dot + gap, rh = dot + gap
+    let w = max(1, cols.count * cw + 2)
+    let h = 8 * rh + 2
+
+    guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil,
+                                     pixelsWide: w, pixelsHigh: h,
+                                     bitsPerSample: 8, samplesPerPixel: 4,
+                                     hasAlpha: true, isPlanar: false,
+                                     colorSpaceName: .deviceRGB,
+                                     bytesPerRow: w * 4, bitsPerPixel: 32),
+          let base = rep.bitmapData
+    else { return NSImage(size: NSSize(width: w, height: h)) }
+    let px = UnsafeMutableRawPointer(base).bindMemory(to: UInt32.self, capacity: w * h)
+    memset(base, 0, w * h * 4)
+
+    func pack(_ c: NSColor) -> UInt32 {
+        let rgb = c.usingColorSpace(.deviceRGB) ?? c
+        let r = UInt32(rgb.redComponent * 255.0 + 0.5)
+        let g = UInt32(rgb.greenComponent * 255.0 + 0.5)
+        let b = UInt32(rgb.blueComponent * 255.0 + 0.5)
+        return r | (g << 8) | (b << 16) | (0xFF << 24)
+    }
+
+    for (ci, col) in cols.enumerated() {
+        for bit in 0..<8 where col.0 & (1 << UInt8(bit)) != 0 {
+            let x0 = 1 + ci * cw
+            let y0 = 1 + bit * rh   // bit 0 = 顶行;位图 y 向下,直接对应
+            let v = pack(col.1)
+            for dy in 0..<dot {
+                let row = (y0 + dy) * w + x0
+                for dx in 0..<dot { px[row + dx] = v }
+            }
+        }
+    }
+
+    rep.size = NSSize(width: w, height: h)
+    let img = NSImage(size: NSSize(width: w, height: h))
+    img.addRepresentation(rep)
+    return img
+}

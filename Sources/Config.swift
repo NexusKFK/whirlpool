@@ -38,6 +38,7 @@ struct TickerConfig: Codable {
     var boardOrigin:       [Double]?         = nil       // 手动拖动后记忆 [x, y]
     var boardRefresh:      Double            = 30        // 秒
     var barOrigin:         [Double]?         = nil       // 底部条手动拖动后记忆
+    var boardPixelFont:    Bool              = true      // 报价卡用 LED 像素字体(关=系统字体)
 }
 
 private let configURL: URL = {

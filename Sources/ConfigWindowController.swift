@@ -28,6 +28,8 @@ final class ConfigWindowController: NSObject, NSWindowDelegate {
     private let speedValueLabel = NSTextField(labelWithString: "")
     private let arrowsCheck = NSButton(checkboxWithTitle: "涨跌用 ▲/▼(交易所风格)",
                                        target: nil, action: nil)
+    private let pixelFontCheck = NSButton(checkboxWithTitle: "报价卡像素字体(与跑马灯同款)",
+                                          target: nil, action: nil)
     private let widthSlider = NSSlider(value: 20, minValue: 8, maxValue: 60,
                                        target: nil, action: nil)
     private let widthValueLabel = NSTextField(labelWithString: "")
@@ -52,6 +54,7 @@ final class ConfigWindowController: NSObject, NSWindowDelegate {
         widthSlider.doubleValue = Double(min(60, max(8, config.defaultWidth)))
         updateWidthLabel()
         arrowsCheck.state = config.changeArrows ? .on : .off
+        pixelFontCheck.state = config.boardPixelFont ? .on : .off
         window?.center()
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
@@ -126,6 +129,7 @@ final class ConfigWindowController: NSObject, NSWindowDelegate {
         widthRow.spacing = 8
 
         arrowsCheck.translatesAutoresizingMaskIntoConstraints = false
+        pixelFontCheck.translatesAutoresizingMaskIntoConstraints = false
 
         let resetBtn = NSButton(title: "报价卡归位(清除拖动记忆)", target: self,
                                 action: #selector(resetBoardOrigin))
@@ -148,7 +152,7 @@ final class ConfigWindowController: NSObject, NSWindowDelegate {
 
         let form = NSStackView(views: [title, scroll, addBtn, separator,
                                        modeRow, refreshRow, speedRow, widthRow,
-                                       arrowsCheck, resetBtn, btnRow])
+                                       arrowsCheck, pixelFontCheck, resetBtn, btnRow])
         form.orientation = .vertical
         form.alignment = .leading
         form.spacing = 10
@@ -242,6 +246,7 @@ final class ConfigWindowController: NSObject, NSWindowDelegate {
         }
         config.scrollSpeed = min(0.5, max(0.02, speedSlider.doubleValue))
         config.changeArrows = (arrowsCheck.state == .on)
+        config.boardPixelFont = (pixelFontCheck.state == .on)
         config.defaultWidth = min(60, max(8, Int(widthSlider.doubleValue)))
 
         saveConfig(config)
