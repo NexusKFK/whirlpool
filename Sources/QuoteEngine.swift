@@ -28,10 +28,11 @@ enum QuoteEngine {
         key == "real" ? RealProvider() : DemoProvider()
     }
 
-    /// 拼跑马灯文本。颜色规则:红涨绿跌市场(cn/hk)涨=red,其余市场涨=green。
+    /// 拼跑马灯文本。基底色由配置给(默认白),只有涨跌幅段着色,完事 \c[] 复位。
     /// pausePerSymbol > 0 时在每个标的前埋 \p 暂停标记,标的滚到左缘停留 N 秒。
     static func marqueeText(entries: [WatchEntry], quotes: [String: Quote],
-                            redUpMarkets: [String], pausePerSymbol: Double) -> String {
+                            redUpMarkets: [String], pausePerSymbol: Double,
+                            separator: String = " ♦ ") -> String {
         let parts = entries.compactMap { e -> String? in
             guard let q = quotes[e.symbol] else { return nil }
             let up    = q.changePct >= 0
@@ -41,9 +42,9 @@ enum QuoteEngine {
             let price = q.price >= 1000 ? String(format: "%.1f", q.price)
                                         : String(format: "%.2f", q.price)
             let pause = pausePerSymbol > 0 ? "\\p[\(pausePerSymbol)]" : ""
-            return "\(pause)\\c[amber]\(e.symbol) \(price) \\c[\(color)]\(sign)\(String(format: "%.2f", q.changePct))%"
+            return "\(pause)\(e.symbol) \(price) \\c[\(color)]\(sign)\(String(format: "%.2f", q.changePct))%\\c[]"
         }
-        return parts.joined(separator: "   ★   ")
+        return parts.joined(separator: separator)
     }
 
     static func boardRows(entries: [WatchEntry], quotes: [String: Quote]) -> [BoardRow] {
