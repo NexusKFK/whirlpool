@@ -80,3 +80,13 @@ macOS 还支持 `--settings`、`--status`、`--send`、`--urgent`、`--very-urge
 [更新记录](CHANGELOG.md) · [贡献与翻译](CONTRIBUTING.md) · [安全说明](SECURITY.md) · [架构](docs/ARCHITECTURE.md) · [许可证](LICENSE) · [致谢](ATTRIBUTION.md)
 
 macOS 显示引擎基于 MIT 许可的 [rhsev/ticker](https://github.com/rhsev/ticker) 改造，保留原始版权声明。
+
+## 许可与署名
+
+代码:**GPL-3.0-only**(见 [LICENSE](LICENSE));LED 渲染引擎衍生自
+[rhsev/ticker](https://github.com/rhsev/ticker)(MIT,原文保留于
+[LICENSE-MIT](LICENSE-MIT))。图标、名称与文档:**CC BY-NC-SA 4.0**,
+转载须署名、禁商用,详见 [NOTICE.md](NOTICE.md)。
+
+> 转载 / 二次开发请保留本行出处:Project **Pinwheel 风车星系** by
+> [NexusKFK](https://github.com/NexusKFK) · github.com/NexusKFK/pinwheel

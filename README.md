@@ -1,4 +1,24 @@
-# Pinwheel
+<p align="center">
+  <img src="icons/pinwheel_1024.png" width="128" alt="Pinwheel">
+</p>
+
+<h1 align="center">Pinwheel 风车星系</h1>
+
+<p align="center">
+  <b>A LED stock ticker that lives in your macOS menu bar.</b><br>
+  Seamless scrolling quotes · dock-side pixel board · bottom bar for rotated displays.<br>
+  Free key-less data: Yahoo + Tencent. No subscription, no telemetry.
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img alt="License GPL-3.0" src="https://img.shields.io/badge/code-GPL--3.0-blue.svg"></a>
+  <img alt="CC BY-NC-SA assets" src="https://img.shields.io/badge/assets-CC%20BY--NC--SA%204.0-lightgrey.svg">
+  <img alt="Platform" src="https://img.shields.io/badge/platform-macOS%2013%2B-lightblue.svg">
+  <img alt="Swift" src="https://img.shields.io/badge/Swift-5.7-orange.svg">
+  <a href="README.zh-CN.md"><img alt="中文文档" src="https://img.shields.io/badge/docs-%E4%B8%AD%E6%96%87-success.svg"></a>
+</p>
+
+---
 
 [简体中文](README.zh-CN.md) · English
 
@@ -103,3 +123,16 @@ Messages support `\c[green]` / `\c[]` colors, `\p[3]` pauses, and `\b[1:green]` 
 - [License](LICENSE) and [attribution](ATTRIBUTION.md)
 
 Built on the MIT-licensed [rhsev/ticker](https://github.com/rhsev/ticker) display engine. Original copyright notices are retained.
+
+## License & Attribution
+
+Code: **GPL-3.0-only** (see [LICENSE](LICENSE)). The LED renderer derives from
+[rhsev/ticker](https://github.com/rhsev/ticker) by Ralf Hülsmann — MIT, retained
+in [LICENSE-MIT](LICENSE-MIT) per its terms.
+
+App icon, product name and documentation: **CC BY-NC-SA 4.0** — forks and media
+coverage are welcome, but keep the attribution; do not rebrand or monetize the
+artwork. See [NOTICE.md](NOTICE.md).
+
+> 转载 / 二次开发请保留本行出处:Project **Pinwheel 风车星系** by
+> [NexusKFK](https://github.com/NexusKFK) · github.com/NexusKFK/pinwheel
