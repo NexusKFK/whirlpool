@@ -1,13 +1,13 @@
 import AppKit
 
 // 缩略图模式(board):贴在程序坞两端空位的报价小卡。
-// 30s 一刷;左键整卡拖动(位置落配置),右键弹菜单(与状态栏菜单同源)。
+// 每行 = 代码/价格/涨跌幅 + 当日分钟线缩略图;无标题,更透。
+// 左键整卡拖动(位置落配置),右键弹菜单(与状态栏菜单同源)。
 // 程序坞本体不容第三方塞内容,但底部条两端是 Dock 图标排剩下的空白,
 // 一块浮层小窗占在那里,视觉上就是坞的延伸。
 final class BoardWindow: NSPanel, NSWindowDelegate {
 
     private let container = NSVisualEffectView()
-    private let header = NSTextField(labelWithString: "")
     private var programmaticMove = false
 
     var config: TickerConfig {
@@ -17,7 +17,7 @@ final class BoardWindow: NSPanel, NSWindowDelegate {
 
     init(config: TickerConfig) {
         self.config = config
-        super.init(contentRect: NSRect(x: 0, y: 0, width: 232, height: 120),
+        super.init(contentRect: NSRect(x: 0, y: 0, width: 250, height: 100),
                    styleMask: [.borderless, .nonactivatingPanel],
                    backing: .buffered, defer: false)
         delegate = self
@@ -30,43 +30,50 @@ final class BoardWindow: NSPanel, NSWindowDelegate {
         hidesOnDeactivate = false
         becomesKeyOnlyIfNeeded = true
 
-        container.material = .hudWindow
+        container.material = .underWindowBackground   // 比标题栏材质透得多
         container.blendingMode = .behindWindow
         container.state = .active
         container.wantsLayer = true
-        container.layer?.cornerRadius = 14
+        container.layer?.cornerRadius = 12
         container.layer?.masksToBounds = true
         contentView = container
-
-        header.font = NSFont.monospacedSystemFont(ofSize: 9, weight: .medium)
-        header.textColor = .secondaryLabelColor
-        container.addSubview(header)
 
         reposition()
     }
 
     func update(entries: [WatchEntry], quotes: [String: Quote], redUpMarkets: [String], at date: Date) {
         let rowsData = QuoteEngine.boardRows(entries: entries, quotes: quotes)
-        container.subviews.filter { $0 !== header }.forEach { $0.removeFromSuperview() }
+        container.subviews.forEach { $0.removeFromSuperview() }
 
-        let W: CGFloat = 232, inset: CGFloat = 12, rowH: CGFloat = 17, headerH: CGFloat = 13
-        let H = inset * 2 + headerH + 5 + CGFloat(rowsData.count) * rowH
+        let W: CGFloat = 250, inset: CGFloat = 10, rowH: CGFloat = 22
+        let H = inset * 2 + CGFloat(rowsData.count) * rowH
 
         programmaticMove = true
         setFrame(NSRect(x: frame.origin.x, y: frame.origin.y, width: W, height: H), display: false)
         programmaticMove = false
 
-        let df = DateFormatter()
-        df.dateFormat = "HH:mm:ss"
-        header.stringValue = "PINWHEEL · \(df.string(from: date))"
         let rowW = W - inset * 2
-        header.frame = NSRect(x: inset, y: H - inset - headerH, width: rowW, height: headerH)
-
         for (i, r) in rowsData.enumerated() {
-            let label = Self.rowLabel(r, redUp: redUpMarkets.contains(r.market), width: rowW)
-            let y = H - inset - headerH - 5 - CGFloat(i + 1) * rowH + 1
-            label.frame = NSRect(x: inset, y: y, width: rowW, height: rowH)
-            container.addSubview(label)
+            let y = H - inset - CGFloat(i + 1) * rowH
+            let row = NSView(frame: NSRect(x: inset, y: y, width: rowW, height: rowH))
+
+            let color: NSColor = redUpMarkets.contains(r.market)
+                ? (r.up ? .systemRed : .systemGreen)
+                : (r.up ? .systemGreen : .systemRed)
+
+            let labelW = rowW - 74
+            let label = Self.rowLabel(r, color: color, width: labelW)
+            label.frame = NSRect(x: 0, y: 2, width: labelW, height: rowH - 4)
+            row.addSubview(label)
+
+            if let pts = r.series, pts.count > 1 {
+                let spark = SparklineView(frame: NSRect(x: rowW - 70, y: 3, width: 66, height: rowH - 6))
+                spark.points = pts
+                spark.lineColor = color
+                row.addSubview(spark)
+            }
+
+            container.addSubview(row)
         }
 
         // 右角锚定随实际宽度重算(手动拖过的位置不动)
@@ -105,9 +112,7 @@ final class BoardWindow: NSPanel, NSWindowDelegate {
     // ── 行渲染 ───────────────────────────────────────────────────────────────
     // 单条 attributed label + 右对齐 tab 站:代码左,价格/涨跌幅右,等宽数字对齐。
 
-    private static func rowLabel(_ r: BoardRow, redUp: Bool, width: CGFloat) -> NSTextField {
-        let color: NSColor = redUp ? (r.up ? .systemRed : .systemGreen)
-                                   : (r.up ? .systemGreen : .systemRed)
+    private static func rowLabel(_ r: BoardRow, color: NSColor, width: CGFloat) -> NSTextField {
         let para = NSMutableParagraphStyle()
         para.tabStops = [
             NSTextTab(type: .rightTabStopType, location: width - 64),
@@ -126,5 +131,50 @@ final class BoardWindow: NSPanel, NSWindowDelegate {
         attr.addAttribute(.foregroundColor, value: color,
                           range: NSRange(location: prefixLen, length: r.change.utf16.count))
         return NSTextField(labelWithAttributedString: attr)
+    }
+}
+
+// ── 分钟线缩略图:细线 + 淡填充 ────────────────────────────────────────────────
+
+final class SparklineView: NSView {
+
+    var points: [Double] = [] { didSet { needsDisplay = true } }
+    var lineColor: NSColor = .systemGreen
+
+    override var isFlipped: Bool { true }
+    override var isOpaque: Bool { false }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard points.count > 1 else { return }
+        let minV = points.min()!, maxV = points.max()!
+        let span = max(maxV - minV, 0.000001)
+        let n = points.count
+        let inset: CGFloat = 1.5
+
+        let path = NSBezierPath()
+        var first = NSPoint.zero
+        var coords: [NSPoint] = []
+        for (i, p) in points.enumerated() {
+            let x = inset + (bounds.width - inset * 2) * CGFloat(i) / CGFloat(n - 1)
+            let v = CGFloat((p - minV) / span)
+            let y = inset + (bounds.height - inset * 2) * (1 - v)   // flipped:低值在下
+            let pt = NSPoint(x: x, y: y)
+            if i == 0 { first = pt; path.move(to: pt) } else { path.line(to: pt) }
+            coords.append(pt)
+        }
+
+        // 淡填充
+        let fill = path.copy() as! NSBezierPath
+        fill.line(to: NSPoint(x: coords.last!.x, y: bounds.maxY))
+        fill.line(to: NSPoint(x: first.x, y: bounds.maxY))
+        fill.close()
+        lineColor.withAlphaComponent(0.16).setFill()
+        fill.fill()
+
+        path.lineWidth = 1.2
+        path.lineCapStyle = .round
+        path.lineJoinStyle = .round
+        lineColor.setStroke()
+        path.stroke()
     }
 }
