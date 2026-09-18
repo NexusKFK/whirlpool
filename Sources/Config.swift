@@ -9,14 +9,15 @@ struct WatchEntry: Codable, Equatable {
 struct TickerConfig: Codable {
     // Ticker display
     var tickerEnabled:     Bool              = true
-    var defaultColor:      String            = "amber"
+    var defaultColor:      String            = "white"
     var defaultWidth:      Int               = 20
     var scrollSpeed:       Double            = 0.05
-    var defaultPause:      Double            = 3.0
+    var defaultPause:      Double            = 0      // 每轮开头停留秒数,0=连续滚
     var customChars:       [String: [UInt8]] = [:]
     var transparent:       Bool              = true
-    // 彩色透明模式:点阵自带颜色,红涨绿跌可见。"auto" 会退化成菜单栏单色。
-    var transparentColor:  String            = "amber"
+    // 彩色透明模式:点阵自带颜色。"auto" 会退化成菜单栏单色(吃掉涨跌色)。
+    var transparentColor:  String            = "white"
+    var marqueeSeparator:  String            = " ♦ "  // 标的间分隔符,字体表内字符有效
 
     // Quote loop — 一轮滚完自动拉新行情再入队,循环不息
     var quoteLoop:         Bool              = true

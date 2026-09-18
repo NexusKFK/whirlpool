@@ -39,6 +39,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // Aktuelle Scroll-Animation
     private var canvas:      [ColoredColumn] = []
     private var scrollOffset = 0
+    private var roundLen     = 0             // 一轮 = 一份完整串(环绕画布的一半)
     private var pendingPauses: [PauseMarker] = []   // noch nicht getriggert
     private var currentMsg:  TickerMessage?          // für very-urgent Replay
 
@@ -276,9 +277,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let stream = buildScrollStream(text: msg.text, defaultColor: baseColor(),
                                            onClickCommand: msg.onClickCommand,
                                            customChars: config.customChars)
-            let vc  = visCols(displayWidth: displayWidth)
-            let pad = [ColoredColumn](repeating: ColoredColumn(value: 0, color: baseColor()), count: vc)
-            let rebuilt = pad + stream.columns + pad
+            let rebuilt = wrapCanvas(stream.columns)
             // Gleicher Text, gleiche Breite → gleiche Geometrie; nur die Farben
             // ändern sich, Scrollposition und offene Pausen bleiben gültig.
             if rebuilt.count == canvas.count {
@@ -305,11 +304,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         interrupted = nil
         currentMsg  = nil
         phase = .idle
-        setIdle()
         stopTimer()
-        // 行情循环还开着就续上下一轮,否则 Clear queue 会把跑马灯清死
+        // 行情循环还开着就续上下一轮,否则 Clear queue 会把跑马灯清死;
+        // 重拉期间保留最后一帧,不闪 idle 图标。
         if config.quoteLoop, config.tickerEnabled, !userPaused {
             fetchNextQuoteCycle()
+        } else {
+            setIdle()
         }
     }
 
@@ -452,19 +453,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             startMessage(msg)
 
         case .scrolling:
-            let vc = visCols(displayWidth: displayWidth)
-
             if let p = pendingPauses.first, p.at == scrollOffset {
                 pendingPauses.removeFirst()
                 triggerPause(p.kind)
                 return
             }
 
-            // Ende erst nach dem Pause-Check prüfen, sonst geht ein Marker
-            // am Nachrichtenende verloren
-            if canvas.count <= vc || scrollOffset >= canvas.count - vc {
+            // 一轮 = 一份完整串。画布是双拼环绕,窗口末端恰是"串尾接串头",
+            // 走完一份即拉下一轮——轮与轮之间没有整屏空白垫。
+            if roundLen > 0, scrollOffset >= roundLen {
                 phase = .idle
-                // 行情循环:保留最后一帧直接拉下一轮,避免每轮之间闪 idle 图标
                 if config.quoteLoop, config.tickerEnabled, !userPaused, !cycleInFlight {
                     fetchNextQuoteCycle()
                 } else {
@@ -521,18 +519,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         switch msg.kind {
         case .scroll:
-            let stream   = buildScrollStream(text: msg.text, defaultColor: defColor,
-                                              onClickCommand: msg.onClickCommand,
-                                              customChars: config.customChars)
-            let vc       = visCols(displayWidth: displayWidth)
-            let pad      = [ColoredColumn](repeating: ColoredColumn(value: 0, color: defColor), count: vc)
-            canvas       = pad + stream.columns + pad
+            let stream = buildScrollStream(text: msg.text, defaultColor: defColor,
+                                           onClickCommand: msg.onClickCommand,
+                                           customChars: config.customChars)
+            guard stream.columns.count > 0 else {
+                phase = .idle
+                return
+            }
+            canvas       = wrapCanvas(stream.columns)
+            roundLen     = stream.columns.count
             scrollOffset = 0
 
-            var pauses   = stream.pauses.map { PauseMarker(at: $0.at + vc, kind: $0.kind) }
-            let hasEarlyPause = pauses.contains { $0.at == vc }
-            if !hasEarlyPause {
-                pauses.insert(PauseMarker(at: vc, kind: .timed(seconds: config.defaultPause)), at: 0)
+            var pauses = stream.pauses.map { PauseMarker(at: $0.at, kind: $0.kind) }
+            if config.defaultPause > 0, !pauses.contains(where: { $0.at == 0 }) {
+                pauses.insert(PauseMarker(at: 0, kind: .timed(seconds: config.defaultPause)), at: 0)
             }
             pendingPauses = pauses.sorted { $0.at < $1.at }
             phase         = .scrolling
@@ -573,6 +573,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let img = renderScrollFrame(columns: canvas, offset: scrollOffset,
                                      displayWidth: displayWidth, blank: blank)
         setImage(img)
+    }
+
+    /// 无缝环绕画布:把串拼几份,保证任何窗口位置都有内容,
+    /// 窗口末端恰好是"串尾接串头",轮与轮之间没有空白垫。
+    private func wrapCanvas(_ columns: [ColoredColumn]) -> [ColoredColumn] {
+        let vc = visCols(displayWidth: displayWidth)
+        let reps = max(2, 1 + Int((Double(vc) / Double(max(1, columns.count))).rounded(.up)))
+        return (0..<reps).flatMap { _ in columns }
     }
 
     private func setImage(_ img: NSImage) {
@@ -638,7 +646,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     return
                 }
                 let text = QuoteEngine.marqueeText(entries: entries, quotes: quotes,
-                                                   redUpMarkets: redUp, pausePerSymbol: pause)
+                                                   redUpMarkets: redUp, pausePerSymbol: pause,
+                                                   separator: self.config.marqueeSeparator)
                 self.enqueue(TickerMessage(kind: .scroll, text: text, priority: .normal,
                                            duration: 0, onClickCommand: nil, width: nil))
                 self.startTimer()
@@ -656,10 +665,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         if m == "marquee" || m == "both" {
             ensureStatusItem()
-            // 重建定时器:配置里的 scrollSpeed(速度滑块)保存后即时生效;
-            // 队列空时 idle 分支自会拉行情续上,不必显式 kick。
-            stopTimer()
-            if config.tickerEnabled, !userPaused { startTimer() }
+            // 保存(自选池/速度/颜色)即清旧一轮、按新配置立即重拉——
+            // clearAllMessages 内部会 fetchNextQuoteCycle 续上,期间保留最后一帧
+            clearAllMessages()
         } else if let si = statusItem {
             NSStatusBar.system.removeStatusItem(si)
             statusItem = nil
