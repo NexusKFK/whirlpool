@@ -614,18 +614,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // ── Darstellung ────────────────────────────────────────────────────────────
 
     private func showScrollFrame(blank: Bool = false) {
-        // 换数闪烁:1.2s / 100ms 一相,只隐去 blinkCols 命中的列(变化的数字),
-        // 其余内容照常滚动
-        var hide: Set<Int> = []
+        // 换数提示:变化段以列自身颜色整列点亮,亮-常-亮各 0.25s 共两下,
+        // 滚动照常——报价卡方向色闪的 LED 等价物
+        var flash: Set<Int> = []
         if let bs = blinkStart, !blinkCols.isEmpty, roundLen > 0 {
             let elapsed = Date().timeIntervalSince(bs)
-            if elapsed < 1.2 {
-                if Int(elapsed / 0.1) % 2 == 1 {
+            if elapsed < 0.75 {
+                if Int(elapsed / 0.25) != 1 {
                     let vc = visCols(displayWidth: displayWidth)
                     for ci in 0..<vc {
                         let si = scrollOffset + ci
                         if si >= 0, si < canvas.count, blinkCols.contains(si % roundLen) {
-                            hide.insert(si)
+                            flash.insert(si)
                         }
                     }
                 }
@@ -634,7 +634,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         let img = renderScrollFrame(columns: canvas, offset: scrollOffset,
-                                     displayWidth: displayWidth, blank: blank, hide: hide)
+                                     displayWidth: displayWidth, blank: blank, flash: flash)
         setImage(img)
     }
 
