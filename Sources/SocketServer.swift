@@ -1,6 +1,6 @@
 import Foundation
 
-let socketPath = "/tmp/pinwheel.sock"
+let socketPath = "/tmp/pinwheel-\(getuid()).sock"
 
 func runSocketServer(onMessage: @escaping (TickerMessage) -> String) {
     DispatchQueue.global(qos: .background).async {
@@ -21,7 +21,8 @@ func runSocketServer(onMessage: @escaping (TickerMessage) -> String) {
                 bind(serverFd, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
             }
         }
-        guard bound == 0 else { return }
+        guard bound == 0 else { close(serverFd); return }
+        chmod(socketPath, S_IRUSR | S_IWUSR)
         listen(serverFd, 8)
 
         // No accept() timeout: the loop has no exit condition, so a timeout would
@@ -36,6 +37,12 @@ func runSocketServer(onMessage: @escaping (TickerMessage) -> String) {
                 }
             }
             guard clientFd >= 0 else { continue }
+            var uid: uid_t = 0, gid: gid_t = 0
+            guard getpeereid(clientFd, &uid, &gid) == 0, uid == getuid() else { close(clientFd); continue }
+            var timeout = timeval(tv_sec: 5, tv_usec: 0)
+            setsockopt(clientFd, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+            var noSignal: Int32 = 1
+            setsockopt(clientFd, SOL_SOCKET, SO_NOSIGPIPE, &noSignal, socklen_t(MemoryLayout<Int32>.size))
 
             var buffer = [UInt8](repeating: 0, count: 4096)
             let n = recv(clientFd, &buffer, buffer.count, 0)

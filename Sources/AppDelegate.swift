@@ -23,13 +23,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var animTimer:  Timer?
     private var pauseItem:  NSMenuItem?
     private var config:     TickerConfig!
-    private var quoteProvider: QuoteProvider = DemoProvider()
+    private var quoteService: QuoteService!
+    private var configRevision = 0
     private var cycleInFlight = false
     private var prefetchArmed = true   // 每轮只预取一次;预取窗口比轮尾长,不设闸会连环重拉
-    private var lastParts: [String: String] = [:]   // symbol → 上轮核心串(价格+涨跌)
     private var lastTicks: [String: Double] = [:]   // symbol → 上轮价格(判跳动方向)
-    private var blinkCols: [Int: LEDColor] = [:]     // 本轮要闪的列(流内索引)→ 闪现色
-    private var blinkStart: Date? = nil
+    private var priceFlashes = ScrollFlashes()
     private var board: BoardWindow?
     private var boardTimer: Timer?
     private var barWindow: BarWindow?
@@ -58,6 +57,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         config           = loadConfig()
+        L10n.language = config.language
+        installMainMenu()
         displayWidth     = config.defaultWidth
         renderTransparent = config.transparent
         applyTint()
@@ -78,8 +79,36 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return reply
         }
 
-        quoteProvider = QuoteEngine.provider(for: config.provider)
+        configureQuoteService()
         applyDisplayMode()
+        if let error = configReadError {
+            let alert = NSAlert()
+            alert.messageText = L("Configuration Could Not Be Read")
+            alert.informativeText = L("The original file has been preserved. Check its format before saving new settings.") + "\n\n" + error
+            alert.runModal()
+        }
+    }
+
+    private func installMainMenu() {
+        let root = NSMenu()
+        let application = NSMenuItem(title: "Pinwheel", action: nil, keyEquivalent: "")
+        let appMenu = NSMenu(title: "Pinwheel")
+        for (title, action, key) in [("About Pinwheel", #selector(showAbout), ""),
+                                      ("Settings…", #selector(openConfigWindow), ","),
+                                      ("Quit Pinwheel", #selector(quit), "q")] {
+            let item = NSMenuItem(title: L(title), action: action, keyEquivalent: key)
+            item.target = self; appMenu.addItem(item)
+        }
+        application.submenu = appMenu; root.addItem(application)
+        let edit = NSMenuItem(title: L("Edit"), action: nil, keyEquivalent: "")
+        let editMenu = NSMenu(title: L("Edit"))
+        for (title, action, key) in [("Undo", "undo:", "z"), ("Redo", "redo:", "Z"),
+                                     ("Cut", "cut:", "x"), ("Copy", "copy:", "c"),
+                                     ("Paste", "paste:", "v"), ("Select All", "selectAll:", "a")] {
+            editMenu.addItem(NSMenuItem(title: L(title), action: Selector(action), keyEquivalent: key))
+        }
+        edit.submenu = editMenu; root.addItem(edit)
+        NSApp.mainMenu = root
     }
 
     private func ensureStatusItem() {
@@ -115,6 +144,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func screensChanged() {
+        if let saved = try? readConfig(at: configURL) {
+            config.boardOrigin = saved.boardOrigin; config.barOrigin = saved.barOrigin
+        }
+        board?.config = config; barWindow?.config = config
         let previous = renderScale
         updateRenderScale()
         guard renderScale != previous else { return }
@@ -173,77 +206,91 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             stopTimer()
             idleRendered = false
             setIdle()
-            barWindow?.orderOut(nil)   // 收起时底部条一并收,别留一扇空窗
+            barWindow?.orderOut(nil)
+            board?.orderOut(nil)
         } else {
             if config.quoteLoop, config.tickerEnabled {
                 clearAllMessages()     // 展开立即拉新行情,不吃旧轮残帧
             } else {
                 startTimer()
             }
-            if config.displayMode.contains("bar") {
-                barWindow?.orderFrontRegardless()
-            }
+            if config.displayMode.contains("bar") { barWindow?.orderFrontRegardless() }
+            if config.displayMode.contains("board") { board?.orderFrontRegardless(); refreshBoard() }
         }
     }
 
     private func buildMenu() -> NSMenu {
         let menu = NSMenu()
-
-        // Ticker-Steuerung (nur wenn aktiv)
-        if config.tickerEnabled {
-            let ci = NSMenuItem(title: "Clear queue", action: #selector(clearQueue), keyEquivalent: "")
-            ci.target = self
-            menu.addItem(ci)
-            menu.addItem(.separator())
-            let pi = NSMenuItem(title: userPaused ? "Resume" : "Pause",
-                                action: #selector(togglePause), keyEquivalent: "")
-            pi.target = self
-            pauseItem = pi
-            menu.addItem(pi)
-            menu.addItem(.separator())
+        func item(_ title: String, _ action: Selector, _ key: String = "") {
+            let entry = NSMenuItem(title: L(title), action: action, keyEquivalent: key)
+            entry.target = self; menu.addItem(entry)
         }
-
-        // Farbe (nur im Transparentmodus — opak gilt defaultColor aus der Config)
-        if config.transparent {
-            let colorItem = NSMenuItem(title: "Color", action: nil, keyEquivalent: "")
-            colorItem.submenu = buildColorMenu()
-            menu.addItem(colorItem)
-            menu.addItem(.separator())
-        }
-
-        // Ticker-Toggle
-        let tickerItem = NSMenuItem(title: "Ticker", action: #selector(toggleTickerEnabled),
-                                    keyEquivalent: "")
-        tickerItem.target = self
-        tickerItem.state  = config.tickerEnabled ? .on : .off
-        menu.addItem(tickerItem)
-
-        let loopItem = NSMenuItem(title: "Quote loop", action: #selector(toggleQuoteLoop),
-                                  keyEquivalent: "")
-        loopItem.target = self
-        loopItem.state  = config.quoteLoop ? .on : .off
-        menu.addItem(loopItem)
-
-        let cfgItem = NSMenuItem(title: "Configure…", action: #selector(openConfigWindow),
-                                 keyEquivalent: ",")
-        cfgItem.target = self
-        menu.addItem(cfgItem)
-
-        let modeItem = NSMenuItem(title: "Mode", action: nil, keyEquivalent: "")
-        modeItem.submenu = buildModeMenu()
-        menu.addItem(modeItem)
-
-        let editItem = NSMenuItem(title: "Edit config…", action: #selector(editConfigFile),
-                                  keyEquivalent: "")
-        editItem.target = self
-        menu.addItem(editItem)
+        item("About Pinwheel", #selector(showAbout))
         menu.addItem(.separator())
-
-        let qi = NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q")
-        qi.target = self
-        menu.addItem(qi)
-
+        let status = NSMenuItem(title: userPaused ? L("Paused") : L(quoteService?.status ?? "Waiting for quotes"), action: nil, keyEquivalent: "")
+        status.isEnabled = false; menu.addItem(status)
+        if let date = quoteService?.lastUpdated {
+            let label = NSMenuItem(title: L("Updated at") + " " + DateFormatter.localizedString(from: date, dateStyle: .none, timeStyle: .medium), action: nil, keyEquivalent: "")
+            label.isEnabled = false; menu.addItem(label)
+        }
+        item(userPaused ? "Resume" : "Pause", #selector(toggleCollapsed))
+        item("Refresh Quotes", #selector(refreshQuotes))
+        menu.addItem(.separator())
+        item("Settings…", #selector(openConfigWindow), ",")
+        let display = NSMenuItem(title: L("Display"), action: nil, keyEquivalent: "")
+        display.submenu = buildModeMenu(); menu.addItem(display)
+        let appearance = NSMenuItem(title: L("Appearance"), action: nil, keyEquivalent: "")
+        appearance.submenu = buildColorMenu(); menu.addItem(appearance)
+        let advanced = NSMenuItem(title: L("Advanced"), action: nil, keyEquivalent: "")
+        let advancedMenu = NSMenu()
+        for (title, action) in [("Clear Messages", #selector(clearQueue)), ("Show Configuration File…", #selector(editConfigFile))] {
+            let entry = NSMenuItem(title: L(title), action: action, keyEquivalent: "")
+            entry.target = self; advancedMenu.addItem(entry)
+        }
+        advancedMenu.addItem(.separator())
+        for (title, action, enabled) in [("Enable Ticker", #selector(toggleTickerEnabled), config.tickerEnabled),
+                                          ("Automatic Quotes", #selector(toggleQuoteLoop), config.quoteLoop)] {
+            let entry = NSMenuItem(title: L(title), action: action, keyEquivalent: "")
+            entry.target = self; entry.state = enabled ? .on : .off; advancedMenu.addItem(entry)
+        }
+        advanced.submenu = advancedMenu; menu.addItem(advanced)
+        item("Help", #selector(showHelp))
+        menu.addItem(.separator())
+        item("Quit Pinwheel", #selector(quit), "q")
         return menu
+    }
+
+    @objc private func showAbout() {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.6.0"
+        NSApp.activate(ignoringOtherApps: true)
+        NSApp.orderFrontStandardAboutPanel(options: [
+            .applicationName: "Pinwheel", .applicationVersion: version,
+            .credits: NSAttributedString(string: L("A quiet desktop ticker for your watchlist.") + "\n\n" + L("Open-source software under the MIT license. Market data remains subject to provider terms."))
+        ])
+    }
+
+    @objc private func showHelp() {
+        if let url = Bundle.main.url(forResource: L10n.isChinese ? "README.zh-CN" : "README", withExtension: "md") {
+            NSWorkspace.shared.open(url)
+        } else { showAbout() }
+    }
+
+    @objc private func refreshQuotes() {
+        if userPaused { toggleCollapsed(); return }
+        quoteService.requestRefresh()
+        clearAllMessages()
+        if config.displayMode.contains("board") { refreshBoard() }
+    }
+
+    private func configureQuoteService() {
+        quoteService = QuoteService(provider: QuoteEngine.provider(for: config.provider), interval: config.boardRefresh)
+        quoteService.onUpdate = { [weak self] in
+            guard let self else { return }
+            let text = "Pinwheel · " + L(self.quoteService.status)
+            self.statusItem?.button?.toolTip = text
+            self.board?.contentView?.toolTip = text
+            self.barWindow?.contentView?.toolTip = text
+        }
     }
 
     private func buildColorMenu() -> NSMenu {
@@ -251,13 +298,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let current = config.transparentColor.lowercased()
         // Nur die gängigen Grundfarben — \c[red] und \c[yellow] bleiben im Text
         // natürlich weiter möglich, sie brauchen nur keinen Menüeintrag.
-        let entries = [("Adaptive (no colors)", "auto"),
+        let entries = [("Adaptive (monochrome)", "auto"),
                        ("Amber", "amber"),
                        ("Green", "green"),
                        ("White", "white"),
                        ("Black", "black")]
         for (title, key) in entries {
-            let item = NSMenuItem(title: title, action: #selector(setTintColor(_:)), keyEquivalent: "")
+            let item = NSMenuItem(title: L(title), action: #selector(setTintColor(_:)), keyEquivalent: "")
             item.target           = self
             item.representedObject = key
             item.state            = (current == key) ? .on : .off
@@ -344,7 +391,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func togglePause() {
         userPaused = !userPaused
-        pauseItem?.title = userPaused ? "Resume" : "Pause"
+        pauseItem?.title = userPaused ? L("Resume") : L("Pause")
         if userPaused { stopTimer() } else { startTimer() }
     }
 
@@ -358,18 +405,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func editConfigFile() {
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-        proc.arguments     = ["-t", configPath()]
-        try? proc.run()
+        NSWorkspace.shared.activateFileViewerSelecting([configURL])
     }
 
     @objc private func openConfigWindow() {
+        if let saved = try? readConfig(at: configURL) {
+            config.boardOrigin = saved.boardOrigin; config.barOrigin = saved.barOrigin
+        }
         if configWindow == nil {
             configWindow = ConfigWindowController(config: config)
             configWindow?.onApplied = { [weak self] c in
                 guard let self else { return }
+                let resetSource = self.config.provider != c.provider
                 self.config = c
+                L10n.language = c.language
+                self.installMainMenu()
+                if resetSource { self.configureQuoteService(); self.lastTicks = [:]; self.board?.resetPriceHistory() }
+                self.quoteService.interval = c.boardRefresh
                 self.applyDisplayMode()
             }
         }
@@ -567,8 +619,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 phase = .idle
                 return
             }
-            blinkCols = stream.blinkCols
-            blinkStart = stream.blinkCols.isEmpty ? nil : Date()
+            priceFlashes = ScrollFlashes(columns: stream.blinkCols)
 
             canvas       = wrapCanvas(stream.columns)
             roundLen     = stream.columns.count
@@ -615,22 +666,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // ── Darstellung ────────────────────────────────────────────────────────────
 
     private func showScrollFrame(blank: Bool = false) {
-        // 换数提示:变化段闪两下纯白高亮(亮-常-亮各 0.25s),字形不变全程可读
-        var flash: [Int: LEDColor] = [:]
-        if let bs = blinkStart, !blinkCols.isEmpty, roundLen > 0 {
-            let elapsed = Date().timeIntervalSince(bs)
-            if elapsed < 0.3 {
-                let vc = visCols(displayWidth: displayWidth)
-                for ci in 0..<vc {
-                    let si = scrollOffset + ci
-                    if si >= 0, si < canvas.count, let c = blinkCols[si % roundLen] {
-                        flash[si] = c
-                    }
-                }
-            } else {
-                blinkStart = nil
-            }
-        }
+        // 每段进入可读区域后独立闪一次;使用单调时钟,滚动不停、数字不消失。
+        let flash = blank ? [:] : priceFlashes.colors(
+            offset: scrollOffset, visibleColumns: visCols(displayWidth: displayWidth),
+            roundLength: roundLen, now: ProcessInfo.processInfo.systemUptime)
         let img = renderScrollFrame(columns: canvas, offset: scrollOffset,
                                      displayWidth: displayWidth, blank: blank, flash: flash)
         setImage(img)
@@ -645,7 +684,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func setImage(_ img: NSImage) {
-        if let si = statusItem {
+        if let si = statusItem, config.displayMode.contains("marquee") {
             si.button?.image = img
             si.button?.title = ""
         }
@@ -657,7 +696,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func setIdle() {
         guard !idleRendered else { return }
         idleRendered = true
-        setImage(renderIdleIcon(color: currentIdleColor()))
+        let image = renderIdleIcon(color: currentIdleColor())
+        statusItem?.button?.image = image
+        barWindow?.update(image)
     }
 
     // ── Queue ──────────────────────────────────────────────────────────────────
@@ -687,20 +728,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // 天然同步且无闪烁;拉取失败(空回调)则保持 idle,下一 tick 再试。
 
     private func fetchNextQuoteCycle() {
+        guard !cycleInFlight else { return }
         cycleInFlight = true
+        let revision = configRevision
         let entries   = config.watchlist
         let redUp     = config.redUpMarkets
         let pause     = config.pausePerSymbol
 
-        quoteProvider.quotes(for: entries) { [weak self] quotes in
+        quoteService.quotes(for: entries) { [weak self] quotes in
             DispatchQueue.main.async {
-                guard let self else { return }
+                guard let self, self.configRevision == revision else { return }
                 self.cycleInFlight = false
                 guard self.config.quoteLoop, self.config.tickerEnabled, !self.userPaused,
                       !quotes.isEmpty, !entries.isEmpty
                 else {
                     // 拉取失败/循环已关:回 idle;循环仍开着则 15s 后重试
-                    self.setIdle()
+                    if self.canvas.isEmpty { self.setIdle() }
                     if self.config.quoteLoop, self.config.tickerEnabled,
                        !self.userPaused, !entries.isEmpty {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
@@ -716,13 +759,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                                                     separator: self.config.marqueeSeparator,
                                                     changeArrows: self.config.changeArrows,
                                                     blinkChanged: self.config.marqueeBlink,
-                                                    previousParts: self.lastParts,
                                                     previousTicks: self.lastTicks)
-                self.lastParts = built.parts
-                self.lastTicks = entries.reduce(into: [:]) { acc, e in
-                    if let q = quotes[e.symbol] { acc[e.symbol] = q.price }
+                // A missing symbol in one response must not erase its last known tick.
+                self.lastTicks = self.lastTicks.filter { key, _ in entries.contains { $0.symbol == key } }
+                for e in entries {
+                    if let q = quotes[e.symbol] { self.lastTicks[e.symbol] = q.price }
                 }
-                self.enqueue(TickerMessage(kind: .scroll, text: built.text, priority: .normal,
+                self.enqueue(TickerMessage(kind: .scroll, text: built, priority: .normal,
                                            duration: 0, onClickCommand: nil, width: nil))
                 self.startTimer()
             }
@@ -736,18 +779,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // bar/board 模式下状态栏图标让位,控制菜单移到各自右键。
 
     private func applyDisplayMode() {
+        configRevision += 1
+        cycleInFlight = false
+        stopTimer()
+        boardTimer?.invalidate(); boardTimer = nil
+        renderTransparent = config.transparent
+        applyTint()
         displayWidth = config.defaultWidth   // GUI 宽度保存后即时同步(marquee/bar 同宽)
         let m = config.displayMode
         let marqueeOn = m.contains("marquee") || m == "both"
         let boardOn   = m.contains("board")   || m == "both"
         let barOn     = m.contains("bar")
 
-        if marqueeOn {
-            ensureStatusItem()
-        } else if let si = statusItem {
-            NSStatusBar.system.removeStatusItem(si)
-            statusItem = nil
-        }
+        ensureStatusItem()
+        if !marqueeOn { statusItem?.button?.image = renderIdleIcon(color: currentIdleColor()) }
 
         if barOn {
             if barWindow == nil {
@@ -755,7 +800,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 barWindow?.menuProvider = { [weak self] in self?.buildBoardMenu() ?? NSMenu() }
             }
             barWindow?.config = config
-            barWindow?.orderFrontRegardless()
+            if !userPaused { barWindow?.orderFrontRegardless() }
         } else {
             barWindow?.orderOut(nil)
         }
@@ -766,7 +811,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 board?.menuProvider = { [weak self] in self?.buildBoardMenu() ?? NSMenu() }
             }
             board?.config = config
-            board?.orderFrontRegardless()
+            if !userPaused { board?.orderFrontRegardless() }
             startBoardTimer()
             refreshBoard()
         } else {
@@ -794,14 +839,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func refreshBoard() {
+        guard !userPaused, config.tickerEnabled else { return }
+        let revision = configRevision
         let entries = config.watchlist
         let redUp   = config.redUpMarkets
         let arrows  = config.changeArrows
-        quoteProvider.quotes(for: entries) { [weak self] quotes in
+        quoteService.quotes(for: entries) { [weak self] quotes in
             DispatchQueue.main.async {
-                guard let self, !quotes.isEmpty else { return }
+                guard let self, self.configRevision == revision, !self.userPaused, !quotes.isEmpty else { return }
                 self.board?.update(entries: entries, quotes: quotes,
-                                   redUpMarkets: redUp, at: Date(), changeArrows: arrows)
+                                   redUpMarkets: redUp, at: self.quoteService.lastUpdated ?? Date(), changeArrows: arrows,
+                                   status: self.quoteService.status)
             }
         }
     }
@@ -815,13 +863,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func buildModeMenu() -> NSMenu {
         let menu = NSMenu()
-        let modes: [(String, String)] = [
-            ("跑马灯(菜单栏)", "marquee"),
-            ("报价卡(程序坞旁)", "board"),
-            ("底部条(屏幕下缘)", "bar"),
-            ("跑马灯+报价卡", "marquee,board"),
-            ("跑马灯+底部条", "marquee,bar"),
-        ]
+        let modes = TickerConfig.displayModes.map { ($0.label, $0.key) }
         for (title, key) in modes {
             let i = NSMenuItem(title: title, action: #selector(setDisplayMode(_:)), keyEquivalent: "")
             i.target = self
@@ -832,23 +874,5 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         return menu
     }
 
-    private func buildBoardMenu() -> NSMenu {
-        let menu = NSMenu()
-        let cfgItem = NSMenuItem(title: "Configure…", action: #selector(openConfigWindow),
-                                 keyEquivalent: ",")
-        cfgItem.target = self
-        menu.addItem(cfgItem)
-        let modeItem = NSMenuItem(title: "Mode", action: nil, keyEquivalent: "")
-        modeItem.submenu = buildModeMenu()
-        menu.addItem(modeItem)
-        menu.addItem(.separator())
-        let editItem = NSMenuItem(title: "Edit config…", action: #selector(editConfigFile),
-                                  keyEquivalent: "")
-        editItem.target = self
-        menu.addItem(editItem)
-        let qi = NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q")
-        qi.target = self
-        menu.addItem(qi)
-        return menu
-    }
+    private func buildBoardMenu() -> NSMenu { buildMenu() }
 }

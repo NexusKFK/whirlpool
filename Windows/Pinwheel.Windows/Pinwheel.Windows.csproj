@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType><TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms><EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
+    <AssemblyName>Pinwheel</AssemblyName><Version>1.6.0</Version>
+    <ApplicationIcon>../../icons/pinwheel.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Pinwheel.Core/Pinwheel.Core.csproj" />
+    <EmbeddedResource Include="../../Shared/font.json" Link="font.json" />
+  </ItemGroup>
+</Project>

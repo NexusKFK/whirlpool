@@ -57,9 +57,9 @@ final class BarWindow: NSPanel, NSWindowDelegate {
     // ── 位置 ─────────────────────────────────────────────────────────────────
 
     private func reposition() {
-        if let o = config.barOrigin, o.count == 2 {
+        if let origin = reachableOrigin(config.barOrigin, size: frame.size) {
             programmaticMove = true
-            setFrameOrigin(NSPoint(x: o[0], y: o[1]))
+            setFrameOrigin(origin)
             programmaticMove = false
             return
         }
@@ -73,6 +73,9 @@ final class BarWindow: NSPanel, NSWindowDelegate {
     func windowDidMove(_ notification: Notification) {
         guard !programmaticMove else { return }
         config.barOrigin = [Double(frame.origin.x), Double(frame.origin.y)]
-        saveConfig(config)
+        if configReadError == nil, var current = try? readConfig(at: configURL) {
+            current.barOrigin = config.barOrigin
+            saveConfig(current)
+        }
     }
 }

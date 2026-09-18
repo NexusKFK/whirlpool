@@ -1,24 +1,21 @@
 #!/bin/bash
-# Builds Pinwheel.app — ad-hoc 签名后可放应用程序/登录项。
-# CLI 入口同一个二进制: pinwheel --send …
-set -e
-
-APP="Pinwheel.app"
-CONTENTS="$APP/Contents"
-
-rm -rf "$APP"
-mkdir -p "$CONTENTS/MacOS" "$CONTENTS/Resources"
-
-swift build -c release 2>&1
-
-cp .build/release/pinwheel "$CONTENTS/MacOS/pinwheel"
-cp Info.plist "$CONTENTS/Info.plist"
-cp icons/pinwheel.icns "$CONTENTS/Resources/pinwheel.icns"
-
-# Ad-hoc sign — required for URL scheme registration
-codesign --force --deep --sign - "$APP"
-xattr -dr com.apple.quarantine "$APP" 2>/dev/null || true
-
-echo "→ $APP"
-echo ""
-echo "Symlink CLI: ln -sf \"\$(pwd)//$APP/Contents/MacOS/pinwheel\" ~/bin/pinwheel"
+# Builds a signed local application; failed builds leave the previous app intact.
+set -euo pipefail
+cd "$(dirname "$0")"
+swift build -c release "$@"
+bin_path=$(swift build -c release "$@" --show-bin-path)
+stage=$(mktemp -d .build/package.XXXXXX)
+trap 'rm -rf "$stage"' EXIT
+app="$stage/Pinwheel.app"
+mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
+cp "$bin_path/pinwheel" "$app/Contents/MacOS/pinwheel"
+cp Info.plist "$app/Contents/Info.plist"
+cp icons/pinwheel.icns "$app/Contents/Resources/pinwheel.icns"
+for doc in README.md README.zh-CN.md LICENSE ATTRIBUTION.md; do
+    if [ -f "$doc" ]; then cp "$doc" "$app/Contents/Resources/"; fi
+done
+codesign --force --deep --sign - "$app"
+codesign --verify --deep --strict "$app"
+rm -rf Pinwheel.app
+mv "$app" Pinwheel.app
+echo 'Built Pinwheel.app'

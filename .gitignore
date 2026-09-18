@@ -1,3 +1,10 @@
 .build/
 Pinwheel.app/
 .DS_Store
+
+dist/
+**/bin/
+**/obj/
+.vs/
+*.user
+*.suo
