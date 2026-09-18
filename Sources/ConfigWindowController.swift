@@ -10,6 +10,7 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
     private let mode = NSPopUpButton()
     private let source = NSPopUpButton()
     private let language = NSPopUpButton()
+    private let size = NSPopUpButton()
     private let refresh = NSTextField()
     private let speed = NSSlider(value: 30, minValue: 10, maxValue: 50, target: nil, action: nil)
     private let width = NSSlider(value: 20, minValue: 8, maxValue: 60, target: nil, action: nil)
@@ -46,6 +47,7 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
         refresh.stringValue = String(Int(config.boardRefresh))
         speed.doubleValue = 1 / config.scrollSpeed
         width.integerValue = config.defaultWidth
+        size.selectItem(at: max(0, min(2, config.ledDotSize - 1)))
         arrows.state = config.changeArrows ? .on : .off
         pixels.state = config.boardPixelFont ? .on : .off
         flashes.state = config.marqueeBlink ? .on : .off
@@ -132,9 +134,13 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
         arrows.title = L("Use ▲ / ▼ for price changes")
         pixels.title = L("Use pixel font on the quote board")
         flashes.title = L("Flash changed price suffixes")
+        size.removeAllItems(); size.addItems(withTitles: [L("Small"), L("Medium"), L("Large")])
+        size.setAccessibilityLabel(L("Marquee size"))
         resetNote.font = .systemFont(ofSize: 11); resetNote.textColor = .secondaryLabelColor
         return stack([formRow("Display mode", [mode]), formRow("Scroll speed", [speed, speedValue]),
-                      formRow("Display width", [width, widthValue]), arrows, pixels, flashes,
+                      formRow("Display width", [width, widthValue]), formRow("Marquee size", [size]),
+                      note("Large is clamped to Medium inside the menu bar; the floating ticker uses the full size."),
+                      arrows, pixels, flashes,
                       note("Flash color follows the previous quote; daily change keeps its own color."),
                       button("Reset Floating Windows", #selector(resetWindows)), resetNote, NSView()])
     }
@@ -256,6 +262,7 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
         draft.boardRefresh = interval
         draft.scrollSpeed = 1 / speed.doubleValue
         draft.defaultWidth = width.integerValue
+        draft.ledDotSize = size.indexOfSelectedItem + 1
         draft.changeArrows = arrows.state == .on
         draft.boardPixelFont = pixels.state == .on
         draft.marqueeBlink = flashes.state == .on

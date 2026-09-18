@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.6.1
+
+- LED dot size setting (Small / Medium / Large) for the menu bar ticker and the floating ticker bar; scroll speed now follows physical speed, so changing the size does not change how fast quotes scroll.
+- The menu bar clamps Large to Medium (the status item window cannot fit it); the floating bar uses the full size in all three tiers.
+- Repaired the price regression suite: tests referenced the pre-rename `TickFlash` API and could not compile.
+
+中文：菜单栏跑马灯与浮动行情条新增点阵字号（小 / 中 / 大）；滚动速度按物理速度归一，切换字号不再改变滚动快慢；菜单栏放不下「大」档时自动按「中」档渲染，浮动行情条三档全可用；修复回归测试套件中的旧 API 名称引用。
+
 ## 1.6.0
 
 - Native settings organized into Watchlist, Display, and General, with validation and ordering.

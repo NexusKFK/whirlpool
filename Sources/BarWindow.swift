@@ -36,14 +36,16 @@ final class BarWindow: NSPanel, NSWindowDelegate {
         reposition()
     }
 
-    /// 每帧渲染回调;--width 改宽后随图调整,保持水平中心
+    /// 每帧渲染回调;--width 改宽后随图调整,保持水平中心;
+    /// 字号切换后高度也要跟(可收缩),底缘固定不动
     func update(_ img: NSImage) {
         imageView.image = img
-        if abs(img.size.width - frame.width) > 1 {
+        let targetH = max(34, img.size.height + 6)
+        if abs(img.size.width - frame.width) > 1 || abs(targetH - frame.height) > 1 {
             let cx = frame.midX
             setFrame(NSRect(x: cx - img.size.width / 2, y: frame.origin.y,
                             width: img.size.width,
-                            height: max(frame.height, img.size.height + 6)),
+                            height: targetH),
                      display: true)
         }
     }
