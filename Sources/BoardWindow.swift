@@ -49,7 +49,8 @@ final class BoardWindow: NSPanel, NSWindowDelegate {
         container.subviews.forEach { $0.removeFromSuperview() }
 
         let pixel = config.boardPixelFont
-        let W: CGFloat = 250, inset: CGFloat = 10
+        let W: CGFloat = pixel ? Self.fittedWidth(rows: rowsData) : 250
+        let inset: CGFloat = 10
         let rowH: CGFloat = pixel ? 30 : 22
         let H = inset * 2 + CGFloat(rowsData.count) * rowH
 
@@ -149,6 +150,26 @@ final class BoardWindow: NSPanel, NSWindowDelegate {
 
     // ── 行渲染 ───────────────────────────────────────────────────────────────
     // 单条 attributed label + 右对齐 tab 站:代码左,价格/涨跌幅右,等宽数字对齐。
+
+    /// 像素模式卡宽按内容自适应:量出最长一行的三段点阵宽度,
+    /// 加 sparkline 与内边距,上限 460(字太长宁可换行观感也不无限拉宽)
+    private static func fittedWidth(rows: [BoardRow]) -> CGFloat {
+        var textW: CGFloat = 0
+        for r in rows {
+            let w = pixelTextWidth(r.symbol) + 6 + pixelTextWidth(r.price)
+                  + 4 + pixelTextWidth(r.change)
+            textW = max(textW, w)
+        }
+        return min(460, 10 * 2 + textW + 74 + 10)
+    }
+
+    private static func pixelTextWidth(_ s: String) -> CGFloat {
+        var cols = 0
+        for ch in s.uppercased() {
+            if FONT[ch] != nil { cols += 6 }
+        }
+        return CGFloat(cols) * 3   // dot 2 + gap 1 = 3pt/列
+    }
 
     /// 行底闪光:方向色 32% 透明圆角垫块(真实子视图,垫在文字下),
     /// 0.55s alpha 淡出后移除——不依赖 layer 动画时序,不会残留细条

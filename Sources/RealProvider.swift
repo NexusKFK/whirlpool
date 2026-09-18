@@ -167,7 +167,17 @@ final class RealProvider: QuoteProvider {
                 if let indicators = result["indicators"] as? [String: Any],
                    let quoteArr = (indicators["quote"] as? [[String: Any]])?.first,
                    let raw = quoteArr["close"] as? [Any] {
-                    let closes = raw.compactMap { $0 as? Double }
+                    var closes = raw.compactMap { $0 as? Double }
+                    // 只保留当天:盘前/隔夜时 range=1d 会整段返回上一交易日,
+                    // 用当日常规时段开盘时间戳截掉更早的 bar
+                    if let ts = result["timestamp"] as? [Double],
+                       ts.count == closes.count,
+                       let period = meta["currentTradingPeriod"] as? [String: Any],
+                       let regular = period["regular"] as? [String: Any],
+                       let dayStart = regular["start"] as? Double {
+                        let dayCloses = zip(ts, closes).filter { $0.0 >= dayStart }.map(\.1)
+                        if dayCloses.count > 2 { closes = dayCloses }
+                    }
                     if closes.count > 2 {
                         series = Self.downsample(Array(closes.suffix(240)), to: 60)
                     }
