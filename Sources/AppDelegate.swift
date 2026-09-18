@@ -157,8 +157,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             statusItem.button?.performClick(nil)
             statusItem.menu = nil
         } else {
-            // 左键 = 弹出配置窗(松手常驻);右键才是菜单
-            openConfigWindow()
+            // 左键单击 = 收起/展开(收起时缩成 < 小图标);右键才是菜单
+            toggleCollapsed()
+        }
+    }
+
+    @objc private func toggleCollapsed() {
+        userPaused = !userPaused
+        if userPaused {
+            stopTimer()
+            idleRendered = false
+            setIdle()
+        } else {
+            startTimer()
         }
     }
 

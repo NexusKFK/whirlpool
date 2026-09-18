@@ -32,7 +32,11 @@ swift build
 
 board 模式下状态栏图标让位;跑马灯模式和 board 各自独立刷新(共用同一个 provider)。
 
-交互约定:菜单栏图标**左键=弹出配置窗**(松手常驻),**右键=菜单**;bar/board 左键拖动、右键菜单。图标是 `<SPX` 点阵包框(tools/make-pinwheel-icon.swift 可重画)。
+交互约定:菜单栏图标**左键单击=收起/展开**(收起时缩成 `<` 小图标),**右键=菜单**(Configure… 在里面,也可 `pinwheel --settings`);bar/board 左键拖动、右键菜单。图标 = 深底白色 `<SPX` 点阵 + 四角取景括号(tools/make-pinwheel-icon.swift 可重画)。
+
+## 版本
+
+**v1.0.0**(2026-09-18):首个定版——跑马灯/报价卡/底部条三显示可组合、免 key 双数据链(Yahoo+腾讯)、配置 GUI、CLI 遥控、无缝环绕滚动、▲/▼ 涨跌、两缘渐隐。v0.1→v1.0 一天内迭代,全部变更见 git log。
 
 ## 配置
 
