@@ -5,6 +5,15 @@ struct Quote {
     let changePct: Double
 }
 
+// Board 模式一行的展示数据(market 随行,配色习惯到渲染层再定)
+struct BoardRow {
+    let symbol: String
+    let price: String
+    let change: String   // 带符号带 %
+    let up: Bool
+    let market: String
+}
+
 protocol QuoteProvider {
     var name: String { get }
     /// 拉一轮行情,任意线程回调;空字典 = 本轮放弃(显示层保持 idle)。
@@ -33,6 +42,17 @@ enum QuoteEngine {
             return "\(pause)\\c[amber]\(e.symbol) \(price) \\c[\(color)]\(sign)\(String(format: "%.2f", q.changePct))%"
         }
         return parts.joined(separator: "   ★   ")
+    }
+
+    static func boardRows(entries: [WatchEntry], quotes: [String: Quote]) -> [BoardRow] {
+        entries.compactMap { e in
+            guard let q = quotes[e.symbol] else { return nil }
+            let price  = q.price >= 1000 ? String(format: "%.1f", q.price)
+                                         : String(format: "%.2f", q.price)
+            let change = String(format: "%@%.2f%%", q.changePct >= 0 ? "+" : "", q.changePct)
+            return BoardRow(symbol: e.symbol, price: price, change: change,
+                            up: q.changePct >= 0, market: e.market)
+        }
     }
 }
 

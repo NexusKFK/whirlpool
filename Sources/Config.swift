@@ -29,6 +29,12 @@ struct TickerConfig: Codable {
     var pausePerSymbol:    Double            = 0      // >0 时每个标的滚到左缘停留 N 秒
     var redUpMarkets:      [String]          = ["cn", "hk"]
     var provider:          String            = "demo" // demo | real(见 RealProvider.swift)
+
+    // Board 模式(缩略图报价卡,贴程序坞两端空位)
+    var displayMode:       String            = "marquee" // marquee | board | both
+    var boardCorner:       String            = "right"   // 程序坞左端 | 右端
+    var boardOrigin:       [Double]?         = nil       // 手动拖动后记忆 [x, y]
+    var boardRefresh:      Double            = 30        // 秒
 }
 
 private let configURL: URL = {

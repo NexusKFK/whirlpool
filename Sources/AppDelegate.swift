@@ -19,12 +19,14 @@ private enum Phase {
 
 class AppDelegate: NSObject, NSApplicationDelegate {
 
-    private var statusItem: NSStatusItem!
+    private var statusItem: NSStatusItem?
     private var animTimer:  Timer?
     private var pauseItem:  NSMenuItem?
     private var config:     TickerConfig!
     private var quoteProvider: QuoteProvider = DemoProvider()
     private var cycleInFlight = false
+    private var board: BoardWindow?
+    private var boardTimer: Timer?
 
     // Zustand
     private var displayWidth: Int = 20
@@ -52,14 +54,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         renderTransparent = config.transparent
         applyTint()
 
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        statusItem.button?.title = ""
-
-        // Klick-Handler
-        statusItem.button?.action = #selector(statusItemClicked)
-        statusItem.button?.target = self
-        statusItem.button?.sendAction(on: [.leftMouseUp])
-
         updateRenderScale()
         NotificationCenter.default.addObserver(
             self, selector: #selector(screensChanged),
@@ -77,7 +71,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         quoteProvider = QuoteEngine.provider(for: config.provider)
-        if config.quoteLoop { fetchNextQuoteCycle() }
+        applyDisplayMode()
+    }
+
+    private func ensureStatusItem() {
+        guard statusItem == nil else { return }
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        item.button?.title = ""
+        item.button?.action = #selector(statusItemClicked)
+        item.button?.target = self
+        item.button?.sendAction(on: [.leftMouseUp])
+        statusItem = item
     }
 
     /// Grundfarbe einer Nachricht. Im gefärbten Transparentmodus gilt die im Menü
@@ -97,7 +101,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // Bildschirms, auf dem die Menüleiste liegt.
 
     private func updateRenderScale() {
-        let s = statusItem.button?.window?.backingScaleFactor
+        let s = statusItem?.button?.window?.backingScaleFactor
              ?? NSScreen.main?.backingScaleFactor ?? 2
         renderScale = max(1, Int(s.rounded()))
     }
@@ -135,6 +139,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // ── Menü ───────────────────────────────────────────────────────────────────
 
     @objc private func statusItemClicked() {
+        guard let statusItem else { return }
         if case .stickyWait(let cmd) = phase {
             if let cmd = cmd {
                 let proc = Process()
@@ -188,6 +193,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         loopItem.target = self
         loopItem.state  = config.quoteLoop ? .on : .off
         menu.addItem(loopItem)
+
+        let modeItem = NSMenuItem(title: "Mode", action: nil, keyEquivalent: "")
+        modeItem.submenu = buildModeMenu()
+        menu.addItem(modeItem)
 
         let editItem = NSMenuItem(title: "Edit config…", action: #selector(editConfigFile),
                                   keyEquivalent: "")
@@ -541,8 +550,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func setImage(_ img: NSImage) {
-        statusItem.button?.image = img
-        statusItem.button?.title = ""
+        statusItem?.button?.image = img
+        statusItem?.button?.title = ""
     }
 
     private func setIdle() {
@@ -609,5 +618,95 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 self.startTimer()
             }
         }
+    }
+
+    // ── Display-Mode ─────────────────────────────────────────────────────────────
+    //
+    // marquee = 跑马灯(状态栏);board = 报价卡(程序坞旁);both = 两个都要。
+    // board 模式下状态栏图标整个让位,控制菜单移到报价卡右键。
+
+    private func applyDisplayMode() {
+        let m = config.displayMode
+
+        if m == "marquee" || m == "both" {
+            ensureStatusItem()
+            if config.quoteLoop { fetchNextQuoteCycle() }
+        } else if let si = statusItem {
+            NSStatusBar.system.removeStatusItem(si)
+            statusItem = nil
+            stopTimer()
+        }
+
+        if m == "board" || m == "both" {
+            if board == nil {
+                board = BoardWindow(config: config)
+                board?.menuProvider = { [weak self] in self?.buildBoardMenu() ?? NSMenu() }
+            }
+            board?.config = config
+            board?.orderFrontRegardless()
+            startBoardTimer()
+            refreshBoard()
+        } else {
+            boardTimer?.invalidate()
+            boardTimer = nil
+            board?.orderOut(nil)
+        }
+    }
+
+    private func startBoardTimer() {
+        guard boardTimer == nil else { return }
+        let t = Timer(timeInterval: max(5, config.boardRefresh), repeats: true) { [weak self] _ in
+            self?.refreshBoard()
+        }
+        t.tolerance = 2
+        RunLoop.main.add(t, forMode: .common)
+        boardTimer = t
+    }
+
+    private func refreshBoard() {
+        let entries = config.watchlist
+        let redUp   = config.redUpMarkets
+        quoteProvider.quotes(for: entries) { [weak self] quotes in
+            DispatchQueue.main.async {
+                guard let self, !quotes.isEmpty else { return }
+                self.board?.update(entries: entries, quotes: quotes,
+                                   redUpMarkets: redUp, at: Date())
+            }
+        }
+    }
+
+    @objc private func setDisplayMode(_ sender: NSMenuItem) {
+        guard let key = sender.representedObject as? String else { return }
+        config.displayMode = key
+        saveConfig(config)
+        applyDisplayMode()
+    }
+
+    private func buildModeMenu() -> NSMenu {
+        let menu = NSMenu()
+        for (title, key) in [("Marquee", "marquee"), ("Board", "board"), ("Both", "both")] {
+            let i = NSMenuItem(title: title, action: #selector(setDisplayMode(_:)), keyEquivalent: "")
+            i.target = self
+            i.representedObject = key
+            i.state = (config.displayMode == key) ? .on : .off
+            menu.addItem(i)
+        }
+        return menu
+    }
+
+    private func buildBoardMenu() -> NSMenu {
+        let menu = NSMenu()
+        let modeItem = NSMenuItem(title: "Mode", action: nil, keyEquivalent: "")
+        modeItem.submenu = buildModeMenu()
+        menu.addItem(modeItem)
+        menu.addItem(.separator())
+        let editItem = NSMenuItem(title: "Edit config…", action: #selector(editConfigFile),
+                                  keyEquivalent: "")
+        editItem.target = self
+        menu.addItem(editItem)
+        let qi = NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q")
+        qi.target = self
+        menu.addItem(qi)
+        return menu
     }
 }
