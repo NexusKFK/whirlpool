@@ -5,7 +5,9 @@ namespace Whirlpool.Windows;
 
 internal sealed class SettingsForm : Form
 {
-    private static readonly string[] DecimalChoices = ["Auto", "0", "1", "2", "3", "4", "5", "6"];
+    private static readonly string[] DecimalChoices = ["Auto", "0", "1", "2", "3", "4", "5", "6", "7", "8"];
+    private bool resetPositions;
+    private readonly Func<Settings>? currentSettings;
     private readonly Settings draft;
     private readonly List<Watchlist> lists;
     private int current;
@@ -33,8 +35,9 @@ internal sealed class SettingsForm : Form
     private readonly CheckBox updates = Check("Check for updates automatically");
     public event Action<Settings>? Saved;
 
-    public SettingsForm(Settings settings)
+    public SettingsForm(Settings settings, Func<Settings>? currentSettings = null)
     {
+        this.currentSettings = currentSettings;
         draft = settings.Clone();
         lists = draft.Watchlists.Select(l => new Watchlist { Name = l.Name, Entries = [.. l.Entries] }).ToList();
         current = Math.Clamp(draft.ActiveWatchlist, 0, lists.Count - 1);
@@ -172,7 +175,7 @@ internal sealed class SettingsForm : Form
         Wide(form, arrows); Wide(form, flash); Wide(form, topmost); Wide(form, hover); Wide(form, locked); Wide(form, through);
         Wide(form, Note("Flash color follows the previous quote; daily change keeps its own color."));
         var resetLabel = new Label { AutoSize = true, ForeColor = SystemColors.GrayText };
-        Wide(form, Button("Reset Floating Windows", (_, _) => { draft.TickerOrigin = null; draft.BoardOrigin = null; resetLabel.Text = T("Window positions will reset after you save."); }));
+        Wide(form, Button("Reset Floating Windows", (_, _) => { resetPositions = true; resetLabel.Text = T("Window positions will reset after you save."); }));
         Wide(form, resetLabel);
         var page = Page("Display"); page.AutoScroll = true; page.Controls.Add(form); return page;
     }
@@ -229,7 +232,9 @@ internal sealed class SettingsForm : Form
         draft.HoverPause = hover.Checked; draft.SmartRefresh = smart.Checked; draft.CheckUpdates = updates.Checked;
         draft.LockPosition = locked.Checked; draft.ClickThrough = through.Checked;
         var screenKey = screenKeys[Math.Max(0, screen.SelectedIndex)];
-        if (screenKey != draft.DisplayScreen) { draft.DisplayScreen = screenKey; draft.TickerOrigin = null; draft.BoardOrigin = null; }
+        if (screenKey != draft.DisplayScreen || resetPositions) { draft.TickerOrigin = null; draft.BoardOrigin = null; }
+        else if (currentSettings?.Invoke() is { } latest) { draft.TickerOrigin = latest.TickerOrigin; draft.BoardOrigin = latest.BoardOrigin; }
+        draft.DisplayScreen = screenKey;
         draft.RedUpMarkets.RemoveAll(m => m is "cn" or "hk"); if (redUp.Checked) draft.RedUpMarkets.AddRange(["cn", "hk"]);
         draft.Normalize();
         try

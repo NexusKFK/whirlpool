@@ -155,7 +155,7 @@ final class MarqueeEngine {
         case .scroll:
             guard let built = buildRound(msg), built.totalCols > 0 else {
                 phase = .idle; current = nil; round = nil
-                showIdle()
+                advance()
                 return
             }
             round = built

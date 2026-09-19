@@ -15,9 +15,10 @@ public sealed class QuoteFeed : IDisposable
     private DateTimeOffset nextFetch = DateTimeOffset.MinValue, cooldownUntil = DateTimeOffset.MinValue, lastAttempt = DateTimeOffset.MinValue;
     private int failures, rateLimits;
     private string key = "";
+    private (int Interval, bool Smart)? cadence;
     public string Status { get; private set; } = "Waiting for quotes";
     public DateTimeOffset? LastUpdated { get; private set; }
-    public static string Version { get; set; } = "1.9.2";
+    public static string Version { get; set; } = "1.9.3";
 
     public QuoteFeed(HttpMessageHandler? handler = null, Func<DateTimeOffset>? clock = null)
     {
@@ -42,10 +43,19 @@ public sealed class QuoteFeed : IDisposable
         {
             var entries = settings.Watchlist;
             var requestKey = settings.Provider + ":" + string.Join('|', entries.Select(e => e.Market + ":" + e.Symbol).Order());
-            if (requestKey != key) { key = requestKey; cache.Clear(); nextFetch = DateTimeOffset.MinValue; LastUpdated = null; }
+            if (requestKey != key)
+            {
+                key = requestKey; cache.Clear(); nextFetch = DateTimeOffset.MinValue; LastUpdated = null;
+                failures = 0; Status = "Waiting for quotes";
+            }
             var now = Now;
+            var requestedCadence = (settings.RefreshSeconds, settings.SmartRefresh);
+            if (cadence != requestedCadence) { cadence = requestedCadence; Invalidate(); }
             if (settings.Provider != "demo" && now < cooldownUntil) { Status = "Rate limited · retrying later"; return new Dictionary<string, Quote>(cache); }
-            if (now < nextFetch && (!force || failures > 0) || now < lastAttempt.AddSeconds(5)) return new Dictionary<string, Quote>(cache);
+            // Keep an early manual refresh pending until the minimum spacing expires.
+            // The UI consumes its force flag once, so simply returning here loses that request.
+            if (force && failures == 0) nextFetch = Min(nextFetch, Max(now, lastAttempt.AddSeconds(5)));
+            if (now < nextFetch || now < lastAttempt.AddSeconds(5)) return new Dictionary<string, Quote>(cache);
             lastAttempt = now;
             if (settings.Provider == "demo")
             {
@@ -176,5 +186,10 @@ public sealed class QuoteFeed : IDisposable
             ? new DateTimeOffset(local, TimeSpan.FromHours(8)) : null;
     }
 
-    public void Dispose() { http.Dispose(); gate.Dispose(); }
+    private static DateTimeOffset Min(DateTimeOffset a, DateTimeOffset b) => a < b ? a : b;
+    private static DateTimeOffset Max(DateTimeOffset a, DateTimeOffset b) => a > b ? a : b;
+
+    // HttpClient.Dispose cancels requests; their finally blocks still need to release the gate.
+    // No WaitHandle is allocated for this managed semaphore, so it can be collected normally.
+    public void Dispose() { http.Dispose(); }
 }

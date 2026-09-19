@@ -34,7 +34,7 @@ internal sealed class TickerForm : Form
     private IReadOnlyDictionary<string, Quote> pending = new Dictionary<string, Quote>();
     private double offset, lastTick, bannerUntil;
     private bool placing, hovering;
-    private string signature = "";
+    private string? signature;
     private Tone tone = Tone.Dark;
     private Bitmap? strip, banner;
     private int scale = 1;
@@ -97,6 +97,12 @@ internal sealed class TickerForm : Form
     public void Configure(Settings value)
     {
         bool changedLayout = value.WidthCharacters != settings.WidthCharacters;
+        if (value.Provider != settings.Provider || !value.Watchlist.SequenceEqual(settings.Watchlist))
+        {
+            // Never build a new watchlist using quotes or tick history from the old source/list.
+            pending = new Dictionary<string, Quote>(); previous.Clear(); columns.Clear(); ClearPulses(); offset = 0;
+            banner?.Dispose(); banner = null;
+        }
         settings = value.Clone(); TopMost = settings.AlwaysOnTop;
         scale = Math.Max(1, (int)Math.Round(DeviceDpi / 96.0));
         placing = true;
@@ -105,7 +111,7 @@ internal sealed class TickerForm : Form
         WindowPlacement.Apply(this, settings.TickerOrigin, false, settings.DisplayScreen); placing = false;
         ApplyClickThrough();
         if (changedLayout) offset = 0;
-        signature = ""; ApplyPending(); RenderStrip();
+        signature = null; ApplyPending(); RenderStrip();
     }
 
     public void ApplyTheme(Tone value)

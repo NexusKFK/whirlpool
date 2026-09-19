@@ -69,4 +69,45 @@ func runCoreTests() throws {
     now = now.addingTimeInterval(31); provider.cooldownUntil = now.addingTimeInterval(120)
     service.quotes(for: entries) { _ in }; precondition(provider.calls == 2 && service.status == "Rate limited · retrying later")
     print("PASS: shared in-flight requests, cache, stale quote retention, manual-refresh throttling and rate-limit cooldown")
+
+    let scheduledProvider = TestProvider()
+    let scheduled = QuoteService(provider: scheduledProvider, interval: 30, now: { now })
+    scheduled.cadence = { _, _, _, _ in 1800 }
+    scheduled.quotes(for: entries) { _ in }
+    scheduledProvider.responses.removeFirst()(["AAPL": quote])
+    RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+    now = now.addingTimeInterval(60)
+    scheduled.cadence = nil
+    scheduled.quotes(for: entries) { _ in }
+    precondition(scheduledProvider.calls == 2, "turning off smart refresh must release the old 30-minute wait")
+    scheduledProvider.responses.removeFirst()(["AAPL": quote])
+    RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+    scheduled.interval = 5
+    scheduled.quotes(for: entries) { _ in }
+    precondition(scheduledProvider.calls == 2, "changing cadence still honors the minimum request spacing")
+    now = now.addingTimeInterval(5)
+    scheduled.quotes(for: entries) { _ in }
+    precondition(scheduledProvider.calls == 3, "shorter refresh interval takes effect without waiting for the old one")
+    scheduledProvider.responses.removeFirst()([:])
+    RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+    scheduled.cadence = nil; scheduled.interval = 10
+    now = now.addingTimeInterval(10)
+    scheduled.quotes(for: entries) { _ in }
+    precondition(scheduledProvider.calls == 3, "cadence changes must not bypass error backoff")
+    print("PASS: refresh-setting changes release normal waits while preserving throttling and backoff")
+
+    let seriesProvider = TestProvider()
+    let seriesService = QuoteService(provider: seriesProvider, interval: 1800, now: { now })
+    seriesService.quotes(for: entries) { _ in }
+    seriesService.invalidate() // The board opened while a summary-only request was running.
+    seriesProvider.responses.removeFirst()(["AAPL": quote])
+    RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+    seriesService.quotes(for: entries) { _ in }
+    precondition(seriesProvider.calls == 1)
+    now = now.addingTimeInterval(5)
+    seriesService.quotes(for: entries) { _ in }
+    precondition(seriesProvider.calls == 2, "an in-flight summary must not erase a pending request for board series")
+    seriesProvider.responses.removeFirst()(["AAPL": quote])
+    RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+    print("PASS: opening the quote board during a summary fetch preserves its request for series")
 }

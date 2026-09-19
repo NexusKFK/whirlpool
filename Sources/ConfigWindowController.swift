@@ -1,9 +1,14 @@
 import AppKit
 import ServiceManagement
 
+private final class SettingsDocumentView: NSView {
+    override var isFlipped: Bool { true }
+}
+
 /// A draft-based, keyboard-accessible settings window. Cancel never writes config.
 final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataSource, NSTableViewDelegate, NSTextFieldDelegate {
     var onApplied: ((TickerConfig) -> Void)?
+    var currentConfig: (() -> TickerConfig?)?
     private var config: TickerConfig
     private var entries: [WatchEntry] = []          // 正在编辑的那一套
     private var lists: [Watchlist] = []             // 全部自选池草稿
@@ -92,20 +97,22 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
     }
 
     private func buildWindow() {
-        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 660, height: 830),
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 660, height: 700),
                          styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         w.title = L("Whirlpool Settings")
-        w.minSize = NSSize(width: 660, height: 830)
+        w.contentMinSize = NSSize(width: 660, height: 540)
         w.isReleasedWhenClosed = false
         w.delegate = self
         w.setFrameAutosaveName("WhirlpoolSettings")
-        // 旧版本记住的窗口可能比新内容矮:恢复后不足最小尺寸就撑开,免得底部选项被裁
-        if w.contentLayoutRect.height < 830 || w.contentLayoutRect.width < 660 {
-            w.setContentSize(NSSize(width: max(660, w.contentLayoutRect.width), height: 830))
+        // Keep the footer reachable on laptops and scaled displays; long tabs scroll instead.
+        if let area = (NSScreen.main ?? NSScreen.screens.first)?.visibleFrame {
+            let size = NSSize(width: min(max(660, w.frame.width), area.width),
+                              height: min(w.frame.height, area.height))
+            w.setFrame(NSRect(origin: w.frame.origin, size: size), display: false)
         }
         window = w
         let tabs = NSTabView()
-        for (title, view) in [(L("Watchlist"), watchlistTab()), (L("Display"), displayTab()), (L("General"), generalTab())] {
+        for (title, view) in [(L("Watchlist"), watchlistTab()), (L("Display"), scrollable(displayTab())), (L("General"), scrollable(generalTab()))] {
             let tab = NSTabViewItem(identifier: title)
             tab.label = title
             tab.view = view
@@ -132,6 +139,26 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
             footer.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -16),
             footer.heightAnchor.constraint(equalToConstant: 32)
         ])
+    }
+
+    private func scrollable(_ content: NSView) -> NSScrollView {
+        let scroll = NSScrollView()
+        scroll.hasVerticalScroller = true; scroll.autohidesScrollers = true
+        scroll.drawsBackground = false
+        let document = SettingsDocumentView()
+        document.translatesAutoresizingMaskIntoConstraints = false
+        content.translatesAutoresizingMaskIntoConstraints = false
+        document.addSubview(content)
+        scroll.documentView = document
+        NSLayoutConstraint.activate([
+            document.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor),
+            document.heightAnchor.constraint(greaterThanOrEqualTo: scroll.contentView.heightAnchor),
+            content.leadingAnchor.constraint(equalTo: document.leadingAnchor),
+            content.trailingAnchor.constraint(equalTo: document.trailingAnchor),
+            content.topAnchor.constraint(equalTo: document.topAnchor),
+            content.bottomAnchor.constraint(equalTo: document.bottomAnchor),
+        ])
+        return scroll
     }
 
     private func watchlistTab() -> NSView {
@@ -332,7 +359,7 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
     }
 
     func numberOfRows(in tableView: NSTableView) -> Int { entries.count }
-    static let decimalChoices: [Int?] = [nil, 0, 1, 2, 3, 4, 5, 6]
+    static let decimalChoices: [Int?] = [nil, 0, 1, 2, 3, 4, 5, 6, 7, 8]
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         if tableColumn?.identifier.rawValue == "decimals" {
@@ -460,6 +487,10 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
             error("Enter a refresh interval from 5 to 3600 seconds."); return
         }
         var draft = config
+        // A settings draft can stay open while floating windows are being dragged.
+        if let latest = currentConfig?() {
+            draft.barOrigin = latest.barOrigin; draft.boardOrigin = latest.boardOrigin
+        }
         draft.watchlists = cleanedLists
         draft.activeWatchlist = currentList
         draft.displayMode = TickerConfig.displayModes[mode.indexOfSelectedItem].key

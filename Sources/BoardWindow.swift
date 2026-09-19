@@ -15,9 +15,21 @@ final class BoardWindow: NSPanel, NSWindowDelegate {
     private var saveWork: DispatchWorkItem?
     /// 双击/右键某行打开图表
     var onOpenChart: ((WatchEntry) -> Void)?
+    var onOriginChange: (([Double]) -> Void)?
 
     var config: TickerConfig {
-        didSet { isMovableByWindowBackground = !config.lockPosition; reposition() }
+        didSet {
+            if oldValue.boardOrigin != config.boardOrigin { saveWork?.cancel() }
+            isMovableByWindowBackground = !config.lockPosition
+            for row in container.subviews.compactMap({ $0 as? BoardRowView }) { row.locked = config.lockPosition }
+            if oldValue.watchlist != config.watchlist || oldValue.provider != config.provider {
+                resetPriceHistory()
+                update(entries: config.watchlist, quotes: [:], redUpMarkets: config.redUpMarkets,
+                       at: Date(), status: "Loading quotes…")
+            }
+            if oldValue.boardOrigin != config.boardOrigin || oldValue.displayScreen != config.displayScreen
+                || oldValue.boardCorner != config.boardCorner { reposition() }
+        }
     }
     var menuProvider: (() -> NSMenu)?
 
@@ -79,7 +91,7 @@ final class BoardWindow: NSPanel, NSWindowDelegate {
         let style = LEDStyle(tone: Tone.of(container.effectiveAppearance))
 
         let pixel = config.boardPixelFont
-        let W: CGFloat = pixel ? Self.fittedWidth(rows: rowsData) : 250
+        let W: CGFloat = pixel ? max(250, Self.fittedWidth(rows: rowsData)) : 250
         let inset: CGFloat = 10
         let rowH: CGFloat = pixel ? 24 : 22
         let H = inset * 2 + CGFloat(rowsData.count) * rowH + 18
@@ -150,7 +162,7 @@ final class BoardWindow: NSPanel, NSWindowDelegate {
             container.addSubview(row)
         }
 
-        let footer = NSTextField(labelWithString: L(status) + " · " + DateFormatter.localizedString(from: date, dateStyle: .none, timeStyle: .medium))
+        let footer = NSTextField(labelWithString: L(status) + (rowsData.isEmpty ? "" : " · " + DateFormatter.localizedString(from: date, dateStyle: .none, timeStyle: .medium)))
         footer.font = .systemFont(ofSize: 9)
         footer.textColor = .secondaryLabelColor
         footer.lineBreakMode = .byTruncatingTail
@@ -172,7 +184,7 @@ final class BoardWindow: NSPanel, NSWindowDelegate {
 
     // ── 位置 ─────────────────────────────────────────────────────────────────
 
-    private func reposition() {
+    func reposition() {
         if let origin = reachableOrigin(config.boardOrigin, size: frame.size) {
             programmaticMove = true
             setFrameOrigin(origin)
@@ -190,6 +202,7 @@ final class BoardWindow: NSPanel, NSWindowDelegate {
     func windowDidMove(_ notification: Notification) {
         guard !programmaticMove else { return }
         config.boardOrigin = [Double(frame.origin.x), Double(frame.origin.y)]
+        if let origin = config.boardOrigin { onOriginChange?(origin) }
         // 拖动过程中会连发;停手 0.5 秒后再落盘一次
         saveWork?.cancel()
         let origin = config.boardOrigin
@@ -287,7 +300,7 @@ private final class BoardContainerView: NSVisualEffectView {
 }
 
 /// 报价卡一行:单击拖卡、双击开图表、右键菜单首项为本行图表
-private final class BoardRowView: NSView {
+final class BoardRowView: NSView {
     var entry: WatchEntry?
     var onOpenChart: ((WatchEntry) -> Void)?
     var menuProvider: (() -> NSMenu?)?

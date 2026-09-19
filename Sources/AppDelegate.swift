@@ -24,6 +24,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private let engine = MarqueeEngine()
     private var userPaused = false
     private var suspended = false                   // 屏幕休眠 / 切走用户:停拉取、停滚动
+    private var suspensionReasons = Set<Notification.Name>()
     private var artRefreshPending = false
     private var retryPending = false
     private var quitReason = "unknown"
@@ -120,10 +121,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NotificationCenter.default.addObserver(
             self, selector: #selector(windowWillClose(_:)), name: NSWindow.willCloseNotification, object: nil)
         let ws = NSWorkspace.shared.notificationCenter
-        ws.addObserver(self, selector: #selector(systemAsleep), name: NSWorkspace.screensDidSleepNotification, object: nil)
-        ws.addObserver(self, selector: #selector(systemAwake), name: NSWorkspace.screensDidWakeNotification, object: nil)
-        ws.addObserver(self, selector: #selector(systemAsleep), name: NSWorkspace.sessionDidResignActiveNotification, object: nil)
-        ws.addObserver(self, selector: #selector(systemAwake), name: NSWorkspace.sessionDidBecomeActiveNotification, object: nil)
+        ws.addObserver(self, selector: #selector(systemAsleep(_:)), name: NSWorkspace.screensDidSleepNotification, object: nil)
+        ws.addObserver(self, selector: #selector(systemAwake(_:)), name: NSWorkspace.screensDidWakeNotification, object: nil)
+        ws.addObserver(self, selector: #selector(systemAsleep(_:)), name: NSWorkspace.sessionDidResignActiveNotification, object: nil)
+        ws.addObserver(self, selector: #selector(systemAwake(_:)), name: NSWorkspace.sessionDidBecomeActiveNotification, object: nil)
 
         runSocketServer { [weak self] msg -> String in
             guard let self else { return "error" }
@@ -368,16 +369,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // ── Pixeldichte / Bildschirme ──────────────────────────────────────────────
 
     @objc private func screensChanged() {
-        if let saved = try? readConfig(at: configURL) {
-            config.boardOrigin = saved.boardOrigin; config.barOrigin = saved.barOrigin
-        }
         board?.config = config; barWindow?.config = config
+        board?.reposition(); barWindow?.reposition()
         scheduleArtRefresh()
     }
 
     // ── 休眠 / 锁屏:不拉行情、不滚动 ─────────────────────────────────────────
 
-    @objc private func systemAsleep() {
+    @objc private func systemAsleep(_ notification: Notification) {
+        suspensionReasons.insert(notification.name)
         guard !suspended else { return }
         suspended = true
         appLog.notice("suspend (screens asleep or session inactive)")
@@ -385,8 +385,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         boardTimer?.invalidate(); boardTimer = nil
     }
 
-    @objc private func systemAwake() {
-        guard suspended else { return }
+    @objc private func systemAwake(_ notification: Notification) {
+        suspensionReasons.remove(notification.name == NSWorkspace.screensDidWakeNotification
+            ? NSWorkspace.screensDidSleepNotification : NSWorkspace.sessionDidResignActiveNotification)
+        guard suspended, suspensionReasons.isEmpty else { return }
         suspended = false
         appLog.notice("resume")
         guard !userPaused, config.tickerEnabled else { return }
@@ -421,7 +423,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             board?.orderOut(nil)
         } else {
             if barOn { barWindow?.orderFrontRegardless() }
-            if boardOn { board?.orderFrontRegardless(); refreshBoard() }
+            if boardOn { board?.orderFrontRegardless(); startBoardTimer(); refreshBoard() }
             restartMarquee()
         }
     }
@@ -601,14 +603,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         persistFloatingOptions()
     }
 
-    /// 锁定/穿透只改这两项:别的字段以磁盘为准(浮窗位置可能刚被拖动写过)
+    /// Drag callbacks keep the shared configuration current, even before the debounced disk save.
     private func persistFloatingOptions() {
-        if configReadError == nil, var saved = try? readConfig(at: configURL) {
-            saved.lockPosition = config.lockPosition
-            saved.barClickThrough = config.barClickThrough
-            saveConfig(saved)
-            config.barOrigin = saved.barOrigin; config.boardOrigin = saved.boardOrigin
-        }
+        saveConfig(config)
         barWindow?.config = config
         board?.config = config
     }
@@ -626,7 +623,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// 清掉插播与当前轮,按当前配置重开一轮(行情循环开着就立刻重拉)
     private func restartMarquee() {
         guard marqueeOn || barOn else { engine.stop(); return }
-        guard config.tickerEnabled, !userPaused else { engine.stop(); return }
+        guard config.tickerEnabled, !userPaused, !suspended else { engine.stop(); return }
         if config.quoteLoop {
             engine.clearKeepingFrame()
             cycleInFlight = false
@@ -648,11 +645,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func openConfigWindow() {
-        if let saved = try? readConfig(at: configURL) {
-            config.boardOrigin = saved.boardOrigin; config.barOrigin = saved.barOrigin
-        }
         if configWindow == nil {
             configWindow = ConfigWindowController(config: config)
+            configWindow?.currentConfig = { [weak self] in self?.config }
             configWindow?.onApplied = { [weak self] c in
                 guard let self else { return }
                 let resetSource = self.config.provider != c.provider
@@ -834,12 +829,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // 只改当前池,别的字段以磁盘为准(浮窗位置可能刚被拖动写过)
         var saved = (try? readConfig(at: configURL)) ?? config!
         saved.activeWatchlist = index
+        saved.barOrigin = config.barOrigin; saved.boardOrigin = config.boardOrigin
         config.activeWatchlist = index
         if configReadError == nil { saveConfig(saved) }
         appLog.notice("watchlist → \(self.config.watchlists[index].name, privacy: .public)")
         applyDisplayMode()
         // 切换提示:先亮一下池名,行情到了接着滚(LED 字库只有 ASCII,中文名用序号)
-        guard (marqueeOn || barOn), config.watchlists.count > 1 else { return }
+        guard (marqueeOn || barOn), config.watchlists.count > 1,
+              config.tickerEnabled, !userPaused, !suspended else { return }
         let name = config.watchlists[index].name
         let ledSafe = name.uppercased().allSatisfy { FONT[$0] != nil }
         let label = isTextMarquee || ledSafe ? name : "LIST \(index + 1)"
@@ -932,6 +929,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 bar.menuProvider = { [weak self] in self?.buildMenu() ?? NSMenu() }
                 bar.onHover = { [weak self] inside in self?.hover(inside) }
                 bar.onOptionClick = { [weak self] in self?.nextWatchlist() }
+                bar.onOriginChange = { [weak self] origin in self?.config.barOrigin = origin }
                 hook(bar.surface)
                 bar.surface.onHover = nil
                 barWindow = bar
@@ -953,6 +951,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 board = BoardWindow(config: config)
                 board?.menuProvider = { [weak self] in self?.buildMenu() ?? NSMenu() }
                 board?.onOpenChart = { [weak self] entry in self?.openChart(for: entry) }
+                board?.onOriginChange = { [weak self] origin in self?.config.boardOrigin = origin }
             }
             board?.config = config
             if !userPaused { board?.orderFrontRegardless() }
@@ -968,7 +967,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func startBoardTimer() {
-        guard boardTimer == nil else { return }
+        guard boardTimer == nil, !suspended else { return }
         let t = Timer(timeInterval: max(5, config.boardRefresh), repeats: true) { [weak self] _ in
             self?.refreshBoard()
         }
@@ -985,7 +984,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let arrows  = config.changeArrows
         quoteService.quotes(for: entries) { [weak self] quotes in
             DispatchQueue.main.async {
-                guard let self, self.configRevision == revision, !self.userPaused, !quotes.isEmpty else { return }
+                guard let self, self.configRevision == revision, !self.userPaused, !self.suspended,
+                      self.config.tickerEnabled else { return }
                 self.board?.update(entries: entries, quotes: quotes,
                                    redUpMarkets: redUp, at: self.quoteService.lastUpdated ?? Date(), changeArrows: arrows,
                                    status: self.quoteService.status)

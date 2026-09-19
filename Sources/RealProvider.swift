@@ -17,6 +17,7 @@ final class RealProvider: QuoteProvider {
     func quotes(for entries: [WatchEntry], completion: @escaping ([String: Quote]) -> Void) {
         let cnSide    = entries.filter { $0.market == "cn" || $0.market == "hk" }
         let yahooSide = entries.filter { $0.market != "cn" && $0.market != "hk" }
+        let wantsSeries = includeSeries
 
         var results: [String: Quote] = [:]
         let lock = NSLock()
@@ -24,14 +25,14 @@ final class RealProvider: QuoteProvider {
 
         if !cnSide.isEmpty {
             group.enter()
-            fetchTencent(cnSide) { qs in
+            fetchTencent(cnSide, includeSeries: wantsSeries) { qs in
                 lock.lock(); results.merge(qs) { a, _ in a }; lock.unlock()
                 group.leave()
             }
         }
         if !yahooSide.isEmpty {
             group.enter()
-            fetchYahoo(yahooSide) { qs in
+            fetchYahoo(yahooSide, includeSeries: wantsSeries) { qs in
                 lock.lock(); results.merge(qs) { a, _ in a }; lock.unlock()
                 group.leave()
             }
@@ -44,7 +45,7 @@ final class RealProvider: QuoteProvider {
     // 字段:~3 现价,~32 涨跌幅%(港股同族布局,若有出入只影响港股行)。
     // 分钟线走 ifzq 端点,每标的一个附加请求。
 
-    private func fetchTencent(_ entries: [WatchEntry], completion: @escaping ([String: Quote]) -> Void) {
+    private func fetchTencent(_ entries: [WatchEntry], includeSeries: Bool, completion: @escaping ([String: Quote]) -> Void) {
         let codeToSymbol = Dictionary(entries.map { (tencentCode($0), $0.symbol) }, uniquingKeysWith: { first, _ in first })
         let codes = codeToSymbol.keys.joined(separator: ",")
         guard let url = URL(string: "https://qt.gtimg.cn/q=\(codes)") else {
@@ -67,7 +68,7 @@ final class RealProvider: QuoteProvider {
             }
 
             // 分钟线:每标的单独取,取不到就让该行没有缩略图
-            guard self.includeSeries else { completion(out); return }
+            guard includeSeries else { completion(out); return }
             let present = Set(out.keys)
             let outLock = NSLock()
             let seriesGroup = DispatchGroup()
@@ -161,7 +162,7 @@ final class RealProvider: QuoteProvider {
     // v8 chart 端点,免 crumb。chartPreviousClose = 区间前收盘(1d 即昨收),
     // regularMarketPrice 与之相除得涨跌幅;同一响应的 indicators 即分钟线。
 
-    private func fetchYahoo(_ entries: [WatchEntry], completion: @escaping ([String: Quote]) -> Void) {
+    private func fetchYahoo(_ entries: [WatchEntry], includeSeries: Bool, completion: @escaping ([String: Quote]) -> Void) {
         var out: [String: Quote] = [:]
         let lock = NSLock()
         let group = DispatchGroup()
@@ -169,7 +170,7 @@ final class RealProvider: QuoteProvider {
         for e in entries {
             group.enter()
             let sym = e.symbol.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? e.symbol
-            let query = self.includeSeries ? "interval=1m&range=1d" : "interval=1d&range=1d"
+            let query = includeSeries ? "interval=1m&range=1d" : "interval=1d&range=1d"
             guard let url = URL(string: "https://query1.finance.yahoo.com/v8/finance/chart/\(sym)?\(query)")
             else { group.leave(); continue }
             var req = URLRequest(url: url)
@@ -191,7 +192,7 @@ final class RealProvider: QuoteProvider {
                 var series: [SeriesPt]? = nil
                 var sStart: Double? = nil
                 var sEnd: Double? = nil
-                if self.includeSeries, let ts = result["timestamp"] as? [Double],
+                if includeSeries, let ts = result["timestamp"] as? [Double],
                    let indicators = result["indicators"] as? [String: Any],
                    let quoteArr = (indicators["quote"] as? [[String: Any]])?.first,
                    let raw = quoteArr["close"] as? [Any] {

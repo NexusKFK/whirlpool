@@ -52,6 +52,7 @@ internal sealed class TickerApplication : ApplicationContext
     private readonly UpdateState updateState = UpdateState.Load();
     private Release? available;
     private bool paused, suspended, refreshing, force, exiting, canSave = true;
+    private bool powerSuspended, sessionSuspended;
     private int generation;
 
     public TickerApplication()
@@ -191,7 +192,7 @@ internal sealed class TickerApplication : ApplicationContext
     private void ShowSettings()
     {
         if (settingsForm is { IsDisposed: false }) { settingsForm.Activate(); return; }
-        settingsForm = new SettingsForm(settings);
+        settingsForm = new SettingsForm(settings, () => settings);
         settingsForm.Saved += value =>
         {
             var checkUpdates = value.CheckUpdates;
@@ -222,7 +223,7 @@ internal sealed class TickerApplication : ApplicationContext
         try
         {
             var quotes = await feed.RefreshAsync(settings.Clone(), forced, token);
-            if (exiting || revision != generation || paused) return;
+            if (exiting || revision != generation || paused || suspended) return;
             ticker.SetQuotes(settings, quotes); board.SetQuotes(settings, quotes);
             var status = T(feed.Status);
             var text = "Whirlpool · " + status;
@@ -249,9 +250,11 @@ internal sealed class TickerApplication : ApplicationContext
         try { latest = await UpdateChecker.LatestAsync(updateHttp, Program.Version); }
         catch (Exception error) when (error is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException)
         {
+            if (exiting) return;
             if (manual) MessageBox.Show(error.Message, T("Could Not Check for Updates"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
+        if (exiting) return;
         updateState.LastCheck = DateTimeOffset.UtcNow;
         available = latest is not null && UpdateChecker.IsNewer(latest.Version, Program.Version) ? latest : null;
         if (available is { } release)
@@ -297,14 +300,16 @@ internal sealed class TickerApplication : ApplicationContext
 
     private void OnPowerModeChanged(object? sender, PowerModeChangedEventArgs e)
     {
-        if (e.Mode == PowerModes.Suspend) OnUi(() => SetSuspended(true));
-        else if (e.Mode == PowerModes.Resume) OnUi(() => SetSuspended(false));
+        if (e.Mode == PowerModes.Suspend) OnUi(() => { powerSuspended = true; SetSuspended(true); });
+        else if (e.Mode == PowerModes.Resume) OnUi(() => { powerSuspended = false; SetSuspended(sessionSuspended); });
     }
 
     private void OnSessionSwitch(object? sender, SessionSwitchEventArgs e)
     {
-        if (e.Reason is SessionSwitchReason.SessionLock or SessionSwitchReason.ConsoleDisconnect or SessionSwitchReason.RemoteDisconnect) OnUi(() => SetSuspended(true));
-        else if (e.Reason is SessionSwitchReason.SessionUnlock or SessionSwitchReason.ConsoleConnect or SessionSwitchReason.RemoteConnect) OnUi(() => SetSuspended(false));
+        if (e.Reason is SessionSwitchReason.SessionLock or SessionSwitchReason.ConsoleDisconnect or SessionSwitchReason.RemoteDisconnect)
+            OnUi(() => { sessionSuspended = true; SetSuspended(true); });
+        else if (e.Reason is SessionSwitchReason.SessionUnlock or SessionSwitchReason.ConsoleConnect or SessionSwitchReason.RemoteConnect)
+            OnUi(() => { sessionSuspended = false; SetSuspended(powerSuspended); });
     }
 
     private void OnUserPreferenceChanged(object? sender, UserPreferenceChangedEventArgs e)

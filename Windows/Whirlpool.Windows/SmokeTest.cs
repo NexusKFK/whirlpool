@@ -27,6 +27,20 @@ internal static class SmokeTest
             ticker.ShowBanner("> US");
             using var image = new Bitmap(ticker.Width, ticker.Height);
             ticker.DrawToBitmap(image, ticker.ClientRectangle);
+            var switched = config.Clone(); switched.ActiveWatchlist = 1;
+            ticker.Configure(switched); board.Configure(switched);
+            if (board.Controls.OfType<DataGridView>().Single().Rows.Count != 0)
+                throw new Exception("Switching watchlists left stale board rows visible.");
+            using var emptyTicker = new TickerForm();
+            emptyTicker.Configure(switched); emptyTicker.ApplyTheme(tone);
+            using var actual = new Bitmap(ticker.Width, ticker.Height);
+            using var expected = new Bitmap(emptyTicker.Width, emptyTicker.Height);
+            ticker.DrawToBitmap(actual, ticker.ClientRectangle);
+            emptyTicker.DrawToBitmap(expected, emptyTicker.ClientRectangle);
+            for (int y = 0; y < actual.Height; y++)
+                for (int x = 0; x < actual.Width; x++)
+                    if (actual.GetPixel(x, y) != expected.GetPixel(x, y))
+                        throw new Exception("Switching watchlists retained the previous ticker strip or banner.");
         }
     }
 }

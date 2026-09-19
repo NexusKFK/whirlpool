@@ -86,6 +86,7 @@ public sealed class Settings
         RedUpMarkets ??= [];
         Watchlists ??= [];
         var active = Watchlists.ElementAtOrDefault(ActiveWatchlist);
+        Watchlists.RemoveAll(list => list is null);
         foreach (var list in Watchlists)
         {
             list.Name = (list.Name ?? "").Trim();

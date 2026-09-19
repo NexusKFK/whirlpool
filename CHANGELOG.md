@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.9.3 (unreleased)
+
+- Refresh settings take effect without waiting out an earlier market-closed interval; minimum request spacing and error/rate-limit backoff remain enforced. Windows queues a manual refresh pressed during the five-second guard instead of losing it.
+- Opening the macOS board during an in-flight summary request retains the pending request for intraday charts instead of deferring it until the next regular refresh; each request snapshots its data requirements.
+- Switching a watchlist or quote source clears stale board rows and Windows ticker content immediately, including the previous tick history and list banner. macOS no longer displays a list-switch banner while paused or disabled.
+- Floating-window moves update the shared settings immediately. Saving an open settings draft or changing menu options preserves the latest position; resetting positions cancels pending drag saves. macOS board rows respect position locking immediately.
+- macOS settings fit smaller screens and scroll long Display/General tabs while keeping Save/Cancel visible. Both platforms expose all supported decimal overrides (0–8).
+- An empty queued scroll message no longer stalls subsequent messages. Resuming a paused macOS board after sleep restarts its refresh timer; overlapping sleep/session events must all clear before polling resumes, and late quote callbacks cannot repaint suspended displays.
+- Windows tolerates null watchlist records in edited configuration files, expires flashes for offscreen rows, and avoids releasing a disposed quote-request semaphore during shutdown.
+- Added regression coverage for refresh changes, deferred manual refresh, empty queue entries, window-state changes and persistence races; expanded the Windows UI smoke test for stale content after switching lists.
+
+中文：修复刷新设置迟迟不生效、Windows 五秒保护期内手动刷新丢失、切池/换行情源残留旧报价、浮窗位置被旧设置覆盖及重置后被延迟保存还原、报价卡锁定延迟生效等问题。设置页适配小屏并支持滚动，小数位补全 7/8 位。修复空插播卡队列、休眠后恢复报价卡计时器、休眠与会话状态重叠、Windows 空配置记录导致启动失败及闪色/退出清理问题。保留原有价格后缀闪色规则，并新增对应回归检查。
+
 ## 1.9.2
 
 - Chinese product name: **WP行情带** (replacing 涡状星系) in the READMEs and NOTICE; the English name stays Whirlpool.

@@ -56,6 +56,8 @@ try
     Check(Settings.Load(path).RefreshSeconds == 15 && Settings.Load(path).Language == "zh-Hans", "configuration round-trip");
     File.WriteAllText(path, "{\"refreshSeconds\":0}");
     Check(Settings.Load(path).RefreshSeconds == 5 && Settings.Load(path).Watchlist.Count > 0, "old settings defaults and clamping");
+    File.WriteAllText(path, "{\"watchlists\":[null,{\"name\":\"Keep\",\"entries\":[{\"symbol\":\"TLT\",\"market\":\"us\"}]}],\"activeWatchlist\":1}");
+    Check(Settings.Load(path).Active.Name == "Keep" && Settings.Load(path).ActiveWatchlist == 0, "null list entries do not prevent startup or lose the selected valid list");
     File.WriteAllText(path, "{\"language\":\"zh-Hans\",\"watchlist\":[{\"symbol\":\"qqq\",\"market\":\"us\"}]}");
     var migrated = Settings.Load(path);
     Check(migrated.Watchlists.Count == 1 && migrated.Watchlist.Single().Symbol == "QQQ" && migrated.Active.Name == "自选股", "pre-1.9 single list migrates");
@@ -119,6 +121,24 @@ using var slow = new QuoteFeed(calm, () => now);
 await slow.RefreshAsync(config);
 now = now.AddMinutes(5); await slow.RefreshAsync(config);
 Check(slow.Status == "Markets closed · refreshing slowly" && calm.Calls == 1, "weekend: smart refresh backs off");
+var manualTime = now;
+using (var manual = new QuoteFeed(new FakeHandler { Response = calm.Response }, () => manualTime))
+{
+    await manual.RefreshAsync(config);
+    manualTime = manualTime.AddSeconds(1);
+    await manual.RefreshAsync(config, true);
+    manualTime = manualTime.AddSeconds(4);
+    await manual.RefreshAsync(config);
+    Check(manual.LastUpdated == manualTime, "manual refresh inside five-second guard is deferred, not lost");
+}
+config.SmartRefresh = false;
+await slow.RefreshAsync(config);
+Check(calm.Calls == 2 && slow.Status == "Updated", "turning off smart refresh releases the old 30-minute wait");
+config.RefreshSeconds = 5;
+await slow.RefreshAsync(config);
+Check(calm.Calls == 2, "cadence changes preserve minimum request spacing");
+now = now.AddSeconds(5); await slow.RefreshAsync(config);
+Check(calm.Calls == 3, "shorter refresh interval applies after the minimum spacing");
 var mixed = new FakeHandler { Response = () => new(HttpStatusCode.OK) { Content = new StringContent("v_sh600519=\"1~贵州茅台~600519~1257.12~" + string.Join('~', Enumerable.Repeat("0", 26)) + "~20260918161436~0~-0.78~0\";v_hk00700=\"1~腾讯~00700~419.000~" + string.Join('~', Enumerable.Repeat("0", 26)) + "~2026/09/18 16:08:32~0~-1.64~0\";", Encoding.UTF8) } };
 using var batch = new QuoteFeed(mixed, () => time);
 var china = new Settings(); china.Watchlist = [new("600519", "cn"), new("700", "hk")];

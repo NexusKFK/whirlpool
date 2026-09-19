@@ -32,5 +32,10 @@ Status: cross-compilation and core checks can run on macOS. Native Windows execu
 - [ ] Enable Lock Floating Windows; verify the ticker and board cannot be dragged and the tray menu still works.
 - [ ] Enable Click Through Ticker; verify clicks reach the window underneath; turn it off from the tray menu.
 - [ ] Run `Whirlpool.exe --smoke-test` and inspect the process exit code.
+- [ ] While the network is unavailable, switch lists or between live/demo sources; the old list's rows, prices and banner must disappear immediately.
+- [ ] During a closed-market interval, disable smart refresh or shorten the interval; polling should resume without waiting out the old 30-minute cache. An early manual refresh should run after the five-second guard.
+- [ ] Keep Settings open, drag a floating window, then Save; the latest position must survive. Reset positions and immediately Save; an older drag must not restore the old position.
+- [ ] Set Decimals to 7 or 8, save and reopen; both choices must remain selected and render correctly.
+- [ ] Sleep while the session is locked; waking alone must not resume polling until the session is active too. Quit during an active request and verify a clean exit.
 
 Config: `%APPDATA%\Whirlpool\config.json`. To report issues, include OS version, display scaling, app version, and steps. Remove personal information from screenshots/configs before sharing.
