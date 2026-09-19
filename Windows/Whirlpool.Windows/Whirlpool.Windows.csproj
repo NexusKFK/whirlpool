@@ -3,12 +3,15 @@
     <OutputType>WinExe</OutputType><TargetFramework>net10.0-windows</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms><EnableWindowsTargeting>true</EnableWindowsTargeting>
     <ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
-    <AssemblyName>Pinwheel</AssemblyName><Version>1.6.0</Version>
-    <ApplicationIcon>../../icons/pinwheel.ico</ApplicationIcon>
+    <AssemblyName>Whirlpool</AssemblyName><RootNamespace>Whirlpool.Windows</RootNamespace>
+    <Version>1.9.0</Version><Product>Whirlpool</Product><Company>NexusKFK</Company>
+    <Description>A quiet desktop ticker for your watchlist.</Description>
+    <ApplicationIcon>../../icons/whirlpool.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="../Pinwheel.Core/Pinwheel.Core.csproj" />
+    <ProjectReference Include="../Whirlpool.Core/Whirlpool.Core.csproj" />
     <EmbeddedResource Include="../../Shared/font.json" Link="font.json" />
   </ItemGroup>
 </Project>
