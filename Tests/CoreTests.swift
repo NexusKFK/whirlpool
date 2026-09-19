@@ -13,7 +13,7 @@ func runCoreTests() throws {
     let migrated = try JSONDecoder().decode(TickerConfig.self, from: oldJSON)
     precondition(migrated.watchlist.first?.symbol == "QQQ" && migrated.defaultWidth == 55 && migrated.language == "system")
     let clamped = try JSONDecoder().decode(TickerConfig.self, from: Data("{\"scrollSpeed\":0,\"boardRefresh\":-1,\"defaultWidth\":1000,\"boardOrigin\":[1],\"language\":\"unknown\",\"ledDotSize\":9}".utf8))
-    precondition(clamped.scrollSpeed == 0.02 && clamped.boardRefresh == 5 && clamped.defaultWidth == 60 && clamped.boardOrigin == nil && clamped.language == "system" && clamped.ledDotSize == 3)
+    precondition(clamped.scrollSpeed == 0.02 && clamped.boardRefresh == 5 && clamped.defaultWidth == TickerConfig.maxWidth && clamped.boardOrigin == nil && clamped.language == "system" && clamped.ledDotSize == 3)
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: directory) }
     let file = directory.appendingPathComponent("config.json")

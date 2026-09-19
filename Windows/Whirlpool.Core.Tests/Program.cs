@@ -42,6 +42,8 @@ Check(yahoo?.Decimals == 4 && yahoo.MarketTime == DateTimeOffset.FromUnixTimeSec
 // ── Settings: validation, migration, multiple watchlists ──
 var defaults = new Settings();
 Check(defaults.ShowTicker && !defaults.ShowBoard && defaults.DisplayScreen == "auto", "defaults: ticker only, automatic screen");
+var wide = new Settings { WidthCharacters = 500 }; wide.Normalize();
+Check(wide.WidthCharacters == Settings.MaxWidth && Settings.MaxWidth == 120, "width limit raised to 120 characters");
 Check(!Settings.ValidEntries([new("700", "hk"), new("00700", "hk")]), "canonical duplicate validation");
 Check(!Settings.ValidEntries([new("AAPL\\c[red]", "us")]), "invalid symbol rejected");
 I18n.Language = "en"; Check(I18n.T("Settings…") == "Settings…", "English");

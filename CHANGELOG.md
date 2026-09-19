@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.9.2
+
+- Chinese product name: **WP行情带** (replacing 涡状星系) in the READMEs and NOTICE; the English name stays Whirlpool.
+- Wider ticker: the display width now goes up to 120 characters (≈2,160 pt). The floating ticker is limited only by its own screen (it used to share the menu bar's 40%-of-screen cap in system/monospaced font mode, so a bar-only setup stopped at ≈810 pt); the menu bar ticker keeps its 40% cap so macOS does not hide it. A widened bar stays inside its screen. Windows allows 120 characters too.
+
+中文：中文名改为「WP行情带」（原「涡状星系」），英文名仍为 Whirlpool。显示宽度上限从 60 提到 120 个字符（约 2160pt）。浮动行情条只受所在屏幕宽度限制——此前在系统/等宽字体模式下它与菜单栏共用「屏宽 40%」上限，只开浮动条时也被卡在约 810pt；菜单栏跑马灯保留 40% 上限，避免被 macOS 藏掉。变宽后的浮动条不会伸出屏幕。Windows 同步放宽到 120 字符。
+
 ## 1.9.1
 
 - Screen choice: **Display → Screen** puts the floating ticker and board on a chosen display (stored by display UUID, so it survives reboots; a disconnected choice is kept and falls back to the main display). macOS mirrors a status item to every screen's menu bar (`NSStatusItemReplicantView`) with one shared width, so the menu bar ticker cannot be limited to one screen; its width is now sized for the chosen (or main) screen instead of whichever screen had keyboard focus, which made it jump between 810 and 450 pt.

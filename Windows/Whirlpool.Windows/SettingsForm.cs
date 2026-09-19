@@ -20,7 +20,7 @@ internal sealed class SettingsForm : Form
     private readonly List<string> screenKeys = [];
     private readonly NumericUpDown interval = new() { Minimum = 5, Maximum = 3600, Width = 110 };
     private readonly NumericUpDown speed = new() { Minimum = 10, Maximum = 50, Width = 110 };
-    private readonly NumericUpDown width = new() { Minimum = 8, Maximum = 60, Width = 110 };
+    private readonly NumericUpDown width = new() { Minimum = 8, Maximum = Settings.MaxWidth, Width = 110 };
     private readonly CheckBox arrows = Check("Use ▲ / ▼ for price changes");
     private readonly CheckBox flash = Check("Flash changed price suffixes");
     private readonly CheckBox topmost = Check("Always on top");

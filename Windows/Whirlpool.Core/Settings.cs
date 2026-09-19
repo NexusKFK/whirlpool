@@ -15,6 +15,8 @@ public sealed class Settings
     public int RefreshSeconds { get; set; } = 30;
     public int ColumnsPerSecond { get; set; } = 30;
     public int WidthCharacters { get; set; } = 45;
+    /// <summary>Upper bound for WidthCharacters; the ticker is additionally limited to its screen width.</summary>
+    public const int MaxWidth = 120;
     public bool ShowTicker { get; set; } = true;
     public bool ShowBoard { get; set; }
     public bool AlwaysOnTop { get; set; } = true;
@@ -76,7 +78,7 @@ public sealed class Settings
     {
         RefreshSeconds = Math.Clamp(RefreshSeconds, 5, 3600);
         ColumnsPerSecond = Math.Clamp(ColumnsPerSecond, 10, 50);
-        WidthCharacters = Math.Clamp(WidthCharacters, 8, 60);
+        WidthCharacters = Math.Clamp(WidthCharacters, 8, MaxWidth);
         Language = new[] { "system", "en", "zh-Hans" }.Contains(Language) ? Language : "system";
         Theme = new[] { "system", "light", "dark" }.Contains(Theme) ? Theme : "system";
         DisplayScreen = string.IsNullOrWhiteSpace(DisplayScreen) ? "auto" : DisplayScreen.Trim();

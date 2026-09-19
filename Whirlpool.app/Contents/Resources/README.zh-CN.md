@@ -1,4 +1,4 @@
-# Whirlpool
+# WP行情带 · Whirlpool
 
 简体中文 · [English](README.md)
 
@@ -88,5 +88,5 @@ macOS 显示引擎基于 MIT 许可的 [rhsev/ticker](https://github.com/rhsev/t
 [LICENSE-MIT](LICENSE-MIT))。图标、名称与文档:**CC BY-NC-SA 4.0**,
 转载须署名、禁商用,详见 [NOTICE.md](NOTICE.md)。
 
-> 转载 / 二次开发请保留本行出处:Project **Whirlpool 涡状星系** by
+> 转载 / 二次开发请保留本行出处:Project **Whirlpool · WP行情带** by
 > [NexusKFK](https://github.com/NexusKFK) · github.com/NexusKFK/whirlpool

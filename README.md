@@ -2,7 +2,7 @@
   <img src="icons/whirlpool_1024.png" width="128" alt="Whirlpool">
 </p>
 
-<h1 align="center">Whirlpool 涡状星系</h1>
+<h1 align="center">Whirlpool · WP行情带</h1>
 
 <p align="center">
   <b>A LED stock ticker that lives in your macOS menu bar.</b><br>
@@ -153,5 +153,5 @@ App icon, product name and documentation: **CC BY-NC-SA 4.0** — forks and medi
 coverage are welcome, but keep the attribution; do not rebrand or monetize the
 artwork. See [NOTICE.md](NOTICE.md).
 
-> 转载 / 二次开发请保留本行出处:Project **Whirlpool 涡状星系** by
+> 转载 / 二次开发请保留本行出处:Project **Whirlpool · WP行情带** by
 > [NexusKFK](https://github.com/NexusKFK) · github.com/NexusKFK/whirlpool

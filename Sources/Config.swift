@@ -169,7 +169,7 @@ struct TickerConfig: Codable {
     }
 
     mutating func normalize() {
-        defaultWidth = min(60, max(8, defaultWidth))
+        defaultWidth = min(Self.maxWidth, max(8, defaultWidth))
         ledDotSize = min(3, max(1, ledDotSize))
         if !["led", "system", "mono"].contains(marqueeFont) { marqueeFont = "led" }
         scrollSpeed = scrollSpeed.isFinite ? min(0.1, max(0.02, scrollSpeed)) : 0.0333
@@ -214,6 +214,9 @@ struct TickerConfig: Codable {
     }
 
     var colorScheme: ColorScheme { ColorScheme(configKey: transparentColor) }
+
+    /// 显示宽度上限(M 档字符,1 字符≈18pt)。实际宽度另受屏宽约束:菜单栏 40%、浮动条整屏。
+    static let maxWidth = 120
 
     static var displayModes: [(key: String, label: String)] {
         [("marquee", L("Menu Bar Ticker")), ("board", L("Quote Board")),
