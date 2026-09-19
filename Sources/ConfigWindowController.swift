@@ -238,7 +238,8 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
     @objc private func sliderChanged() { updateValues() }
     private func updateValues() {
         speedValue.stringValue = "\(Int(speed.doubleValue)) \(L("columns / sec"))"
-        widthValue.stringValue = "\(width.integerValue) \(L("characters"))"
+        // 宽度按物理尺寸锚定(M 档 1 字符≈18pt):换字号不改变条的实际宽度
+        widthValue.stringValue = "\(width.integerValue) \(L("characters")) · ≈\(width.integerValue * 18 + 8) pt"
     }
     @objc private func resetWindows() { resetPositions = true; resetNote.stringValue = L("Window positions will reset after you save.") }
     @objc private func cancel() { window?.close() }

@@ -35,11 +35,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var configWindow: ConfigWindowController?
 
     // Zustand
-    private var displayWidth: Int = 20
     private var tintColor: LEDColor?   // im Menü gewählte Grundfarbe, nil = Menüleiste
     private var phase: Phase = .idle
     private var userPaused = false
     private var idleRendered = false
+
+    // ── 显示宽度=物理宽度,按 M 档字符数锚定(1 字符≈18pt)──
+    // 字号切换时按各面点距换算字符数,换字号不再改变条在屏上的实际宽度。
+    // S 档一字符 12pt → 同宽度容 1.5× 字符;L 档 24pt → 0.75×。
+    private func displayCols(dot: Int) -> Int {
+        max(4, Int((Double(config.defaultWidth) * 3.0 / Double(LEDLayout(dot: dot).colW)).rounded()))
+    }
+
+    /// 引擎侧(画布覆盖/预取时机)按最宽可视面取值,保证任何一屏都滚得出内容
+    private var maxViewportCols: Int {
+        max(displayCols(dot: min(config.ledDotSize, 2)), displayCols(dot: config.ledDotSize))
+    }
 
     // Aktuelle Scroll-Animation
     private var canvas:      [ColoredColumn] = []
@@ -59,7 +70,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         config           = loadConfig()
         L10n.language = config.language
         installMainMenu()
-        displayWidth     = config.defaultWidth
         renderTransparent = config.transparent
         applyTint()
 
@@ -345,10 +355,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         case .standby:
             if let msg = currentMsg {
-                setImage(renderSurfaces {
-                    renderStandbyFrame(text: msg.text, displayWidth: displayWidth,
+                setImage(renderSurfaces { dot in
+                    renderStandbyFrame(text: msg.text, displayWidth: displayCols(dot: dot),
                                        defaultColor: baseColor(),
-                                       customChars: config.customChars)
+                                       customChars: config.customChars, dot: dot)
                 })
             }
 
@@ -462,7 +472,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         switch msg.kind {
         case .setWidth:
-            if let w = msg.width, w >= 5 { displayWidth = w }
+            // 运行时覆盖宽度(不落盘);物理锚定下只改基准值,各面自行换算
+            if let w = msg.width, w >= 5 { config.defaultWidth = min(60, max(8, w)) }
             return "ok"
         case .clearQueue:
             clearAllMessages()
@@ -548,7 +559,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // 滚到头时新数据已入队,消除轮尾的冻结停顿感。
             if prefetchArmed, config.quoteLoop, config.tickerEnabled, !userPaused,
                !cycleInFlight, roundLen > 0,
-               scrollOffset >= roundLen - visCols(displayWidth: displayWidth) {
+               scrollOffset >= roundLen - maxViewportCols {
                 prefetchArmed = false
                 fetchNextQuoteCycle()
             }
@@ -640,9 +651,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             showScrollFrame()
 
         case .standby:
-            setImage(renderSurfaces {
-                renderStandbyFrame(text: msg.text, displayWidth: displayWidth,
-                                   defaultColor: defColor, customChars: config.customChars)
+            setImage(renderSurfaces { dot in
+                renderStandbyFrame(text: msg.text, displayWidth: displayCols(dot: dot),
+                                   defaultColor: defColor, customChars: config.customChars, dot: dot)
             })
             phase = .standby(until: Date().addingTimeInterval(msg.duration))
 
@@ -673,19 +684,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showScrollFrame(blank: Bool = false) {
         // 每段进入可读区域后独立闪一次;使用单调时钟,滚动不停、数字不消失。
-        let flash = blank ? [:] : priceFlashes.colors(
-            offset: scrollOffset, visibleColumns: visCols(displayWidth: displayWidth),
-            roundLength: roundLen, now: ProcessInfo.processInfo.systemUptime)
-        setImage(renderSurfaces {
-            renderScrollFrame(columns: canvas, offset: scrollOffset,
-                              displayWidth: displayWidth, blank: blank, flash: flash)
+        // 各面按自己的档位换算可视列数(物理宽度锚定),闪变时钟按面各自计时。
+        setImage(renderSurfaces { dot in
+            let vw = displayCols(dot: dot)
+            let flash = blank ? [:] : priceFlashes.colors(
+                offset: scrollOffset, visibleColumns: visCols(displayWidth: vw),
+                roundLength: roundLen, now: ProcessInfo.processInfo.systemUptime)
+            return renderScrollFrame(columns: canvas, offset: scrollOffset,
+                                     displayWidth: vw, blank: blank, flash: flash, dot: dot)
         })
     }
 
     /// 无缝环绕画布:把串拼几份,保证任何窗口位置都有内容,
     /// 窗口末端恰好是"串尾接串头",轮与轮之间没有空白垫。
     private func wrapCanvas(_ columns: [ColoredColumn]) -> [ColoredColumn] {
-        let vc = visCols(displayWidth: displayWidth)
+        let vc = maxViewportCols
         let reps = max(2, 1 + Int((Double(vc) / Double(max(1, columns.count))).rounded(.up)))
         return (0..<reps).flatMap { _ in columns }
     }
@@ -698,17 +711,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var marqueeOn: Bool { config.displayMode.contains("marquee") }
 
-    private func renderSurfaces(_ make: () -> NSImage) -> (menubar: NSImage, bar: NSImage) {
+    private func renderSurfaces(_ make: (_ dot: Int) -> NSImage) -> (menubar: NSImage, bar: NSImage) {
         if config.ledDotSize <= 2 {
             renderDotSize = config.ledDotSize
-            let img = make()
+            let img = make(config.ledDotSize)
             return (img, img)
         }
         renderDotSize = 2
-        let menubar = make()
+        let menubar = make(2)
         if barWindow?.isVisible == true {
             renderDotSize = config.ledDotSize
-            return (menubar, make())
+            return (menubar, make(config.ledDotSize))
         }
         return (menubar, menubar)   // bar 不在时 bar 份不会被消费
     }
@@ -726,7 +739,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func setIdle() {
         guard !idleRendered else { return }
         idleRendered = true
-        let surfaces = renderSurfaces { renderIdleIcon(color: currentIdleColor()) }
+        let surfaces = renderSurfaces { dot in renderIdleIcon(color: currentIdleColor(), dot: dot) }
         statusItem?.button?.image = surfaces.menubar
         barWindow?.update(surfaces.bar)
     }
@@ -816,7 +829,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         renderTransparent = config.transparent
         renderDotSize = min(config.ledDotSize, 2)   // 环境默认=菜单栏安全档;出帧时各面显式定档
         applyTint()
-        displayWidth = config.defaultWidth   // GUI 宽度保存后即时同步(marquee/bar 同宽)
         let m = config.displayMode
         let marqueeOn = m.contains("marquee") || m == "both"
         let boardOn   = m.contains("board")   || m == "both"
