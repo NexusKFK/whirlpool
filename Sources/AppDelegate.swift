@@ -91,7 +91,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var queue:     [TickerMessage] = []
     private let queueLock = NSLock()
     private var interrupted: TickerMessage? = nil    // sehr-dringend unterbrochene Msg
-    private var frameParity = false                  // 状态栏半帧率:滚动帧隔一亮一
 
     // ── Setup ──────────────────────────────────────────────────────────────────
 
@@ -311,7 +310,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func showAbout() {
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.7.1"
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.7.2"
         NSApp.activate(ignoringOtherApps: true)
         NSApp.orderFrontStandardAboutPanel(options: [
             .applicationName: "Whirlpool", .applicationVersion: version,
@@ -646,8 +645,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 return
             }
 
-            frameParity.toggle()
-            showScrollFrame(statusPaint: frameParity)
+            showScrollFrame()
             scrollOffset += 1
 
         case .pauseInStream(let until):
@@ -782,28 +780,28 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // ── Darstellung ────────────────────────────────────────────────────────────
 
-    private func showScrollFrame(blank: Bool = false, statusPaint: Bool = true) {
+    private func showScrollFrame(blank: Bool = false) {
         // 每段进入可读区域后独立闪一次;使用单调时钟,滚动不停、数字不消失。
         // 各面按自己的档位换算可视列数(物理宽度锚定),闪变时钟按面各自计时。
-        // 状态栏是全窗最贵的面(AppKit 每帧重排):滚动帧降为半帧率,bar 全帧率。
+        // 流畅度优先,两面全帧率;状态栏每帧的开销靠固定 button 宽度压(免重排)。
         if let strip = textStrip {
-            setImage(renderSurfaces(statusPaint: statusPaint) { _, _ in
+            setImage(renderSurfaces { _, _ in
                 let flash = blank ? [:] : priceFlashes.colors(
                     offset: scrollOffset, visibleColumns: maxViewportCols,
                     roundLength: roundLen, now: ProcessInfo.processInfo.systemUptime)
                 return renderTextFrame(strip: strip, offset: scrollOffset,
                                        viewportCols: maxViewportCols, blank: blank, flash: flash)
-            }, statusPaint: statusPaint)
+            })
             return
         }
-        setImage(renderSurfaces(statusPaint: statusPaint) { dot, menubar in
+        setImage(renderSurfaces { dot, menubar in
             let vw = menubar ? menuBarCols(dot: dot) : displayCols(dot: dot)
             let flash = blank ? [:] : priceFlashes.colors(
                 offset: scrollOffset, visibleColumns: visCols(displayWidth: vw),
                 roundLength: roundLen, now: ProcessInfo.processInfo.systemUptime)
             return renderScrollFrame(columns: canvas, offset: scrollOffset,
                                      displayWidth: vw, blank: blank, flash: flash, dot: dot)
-        }, statusPaint: statusPaint)
+        })
     }
 
     /// 无缝环绕画布:把串拼几份,保证任何窗口位置都有内容,
@@ -822,38 +820,45 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var marqueeOn: Bool { config.displayMode.contains("marquee") }
 
-    /// menubar=false 时菜单栏份跳过渲染(nil),省掉最贵的一帧
-    private func renderSurfaces(statusPaint: Bool = true,
-                                _ make: (_ dot: Int, _ menubar: Bool) -> NSImage) -> (menubar: NSImage?, bar: NSImage) {
+    private func renderSurfaces(_ make: (_ dot: Int, _ menubar: Bool) -> NSImage) -> (menubar: NSImage, bar: NSImage) {
         if config.ledDotSize <= 2 {
             renderDotSize = config.ledDotSize
             let img = make(config.ledDotSize, true)
             return (img, img)
         }
         renderDotSize = 2
-        let menubar = statusPaint ? make(2, true) : nil
+        let menubar = make(2, true)
         if barWindow?.isVisible == true {
             renderDotSize = config.ledDotSize
             return (menubar, make(config.ledDotSize, false))
         }
-        if let menubar { return (menubar, menubar) }
-        return (nil, make(2, false))   // bar 不在且本帧不画菜单栏:bar 份占位不消费
+        return (menubar, menubar)   // bar 不在时 bar 份不会被消费
     }
 
-    private func setImage(_ surfaces: (menubar: NSImage?, bar: NSImage), statusPaint: Bool = true) {
-        if statusPaint, let img = surfaces.menubar, let si = statusItem, marqueeOn {
-            si.button?.image = img
+    private func setImage(_ surfaces: (menubar: NSImage, bar: NSImage)) {
+        if let si = statusItem, marqueeOn {
+            si.button?.image = surfaces.menubar
+            syncStatusLength(to: surfaces.menubar.size.width)
         }
         if let bar = barWindow, bar.isVisible {
             bar.update(surfaces.bar)
         }
     }
 
+    /// 固定状态项宽度:variableLength 会让 AppKit 每帧重解 button 内在尺寸
+    /// (采样实证 alignmentRectInsets 每帧必调)。长度与图同宽 → 只换图层内容。
+    private func syncStatusLength(to width: CGFloat) {
+        guard let si = statusItem else { return }
+        let w = width.rounded(.up)
+        if abs(si.length - w) > 0.5 { si.length = w }
+    }
+
     private func setIdle() {
         guard !idleRendered else { return }
         idleRendered = true
         let surfaces = renderSurfaces { dot, _ in renderIdleIcon(color: currentIdleColor(), dot: dot) }
-        if let img = surfaces.menubar { statusItem?.button?.image = img }
+        statusItem?.button?.image = surfaces.menubar
+        syncStatusLength(to: surfaces.menubar.size.width)
         barWindow?.update(surfaces.bar)
     }
 
@@ -949,7 +954,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let barOn     = m.contains("bar")
 
         ensureStatusItem()
-        if !marqueeOn { statusItem?.button?.image = renderIdleIcon(color: currentIdleColor()) }
+        if !marqueeOn {
+            let idle = renderIdleIcon(color: currentIdleColor())
+            statusItem?.button?.image = idle
+            syncStatusLength(to: idle.size.width)
+        }
 
         if barOn {
             if barWindow == nil {
