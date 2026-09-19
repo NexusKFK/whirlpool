@@ -7,9 +7,9 @@
     <key>CFBundleName</key>
     <string>Whirlpool</string>
     <key>CFBundleVersion</key>
-    <string>1.7.1</string>
+    <string>1.7.2</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.7.1</string>
+    <string>1.7.2</string>
     <key>CFBundleExecutable</key>
     <string>whirlpool</string>
     <key>CFBundlePackageType</key>
