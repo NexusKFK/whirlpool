@@ -81,41 +81,43 @@ final class TextStrip {
 
     struct BlinkRun {
         let x: CGFloat                    // 串内起点(pt)
+        let width: CGFloat
         let cols: Range<Int>              // 覆盖的虚拟列
-        let substring: NSString
-        let baseAttrs: [NSAttributedString.Key: Any]
+        let range: NSRange                // 在整串中的字符范围
+        let color: LEDColor               // 闪现色
     }
 
-    let image: NSImage                    // 整条串,单份(环绕在帧渲染里拼)
+    let attributed: NSAttributedString    // 整串(已按风格着色)
+    let style: LEDStyle
     let widthPt: CGFloat
     let heightPt: Int                     // 含上下 3pt 松量,画帧时即帧高
     let textY: CGFloat                    // draw(at:) 的基线定位 y
     let totalCols: Int                    // 虚拟列数(3pt/列)
     let pauses: [PauseMarker]             // at 已换算为虚拟列
     let blinkCols: [Int: LEDColor]        // 虚拟列 → 闪现色(跳动方向色)
-    private let blinkRuns: [BlinkRun]
-    private var tintedCache: [String: NSAttributedString] = [:]
+    let runs: [BlinkRun]
+    private var cachedImage: NSImage?
 
-    init(stream: TextStream, font: NSFont, defaultColor: LEDColor) {
-        let template = renderTransparent && !renderColoredTransparent
+    init(stream: TextStream, font: NSFont, defaultColor: LEDColor, style: LEDStyle = legacyStyle) {
+        self.style = style
         let attr = NSMutableAttributedString()
         var blinkRanges: [(NSRange, LEDColor)] = []
         for run in stream.runs where !run.text.isEmpty {
-            let foreground: NSColor = template ? .black : nsColor(run.color)
             let location = attr.length
             attr.append(NSAttributedString(string: run.text, attributes: [
-                .font: font, .foregroundColor: foreground,
+                .font: font, .foregroundColor: style.nsColor(run.color),
             ]))
             if let b = run.blink {
                 blinkRanges.append((NSRange(location: location, length: (run.text as NSString).length), b))
             }
         }
+        attributed = attr
 
         // 布局量测:单行,零 fragment padding,字符位 → x 坐标
         let storage = NSTextStorage(attributedString: attr)
         let manager = NSLayoutManager()
         storage.addLayoutManager(manager)
-        let container = NSTextContainer(size: NSSize(width: 100_000, height: 500))
+        let container = NSTextContainer(size: NSSize(width: 1_000_000, height: 500))
         container.lineFragmentPadding = 0
         manager.addTextContainer(container)
         manager.ensureLayout(forCharacterRange: NSRange(location: 0, length: attr.length))
@@ -123,8 +125,8 @@ final class TextStrip {
 
         let n = attr.length
         var charX = [CGFloat](repeating: 0, count: n + 1)
-        for ci in 0...n {
-            let glyph = manager.glyphIndexForCharacter(at: min(ci, max(0, n - 1)))
+        for ci in 0...n where n > 0 {
+            let glyph = manager.glyphIndexForCharacter(at: min(ci, n - 1))
             var loc = manager.location(forGlyphAt: glyph)
             if ci == n {   // 末字符右缘 = 末字符 x + 自身advance
                 let lineFragment = manager.lineFragmentUsedRect(
@@ -134,13 +136,14 @@ final class TextStrip {
             charX[ci] = loc.x
         }
 
-        widthPt = max(6, ceil(used.width))
         let bounds = attr.boundingRect(
             with: NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude),
             options: [.usesLineFragmentOrigin, .usesFontLeading])
         heightPt = Int(ceil(used.height)) + 6
         textY = (CGFloat(heightPt) - bounds.height) / 2 - bounds.minY
-        totalCols = max(1, Int(ceil(widthPt / 3.0)))
+        // 宽度取整到 3pt 虚拟列:条带单份宽 = totalCols × 3,环绕接缝与引擎列严格对齐
+        totalCols = max(1, Int(ceil(max(6, ceil(used.width)) / 3.0)))
+        widthPt = CGFloat(totalCols) * 3
 
         func col(_ x: CGFloat) -> Int { max(0, Int((x / 3.0).rounded())) }
 
@@ -156,78 +159,98 @@ final class TextStrip {
             let end = charX[min(range.location + range.length, n)]
             let cols = col(start)..<max(col(start) + 1, col(end))
             for c in cols { blinks[c] = color }
-            let substring = attr.attributedSubstring(from: range).string as NSString
-            runs.append(BlinkRun(x: start, cols: cols, substring: substring,
-                                 baseAttrs: [.font: font, .foregroundColor: NSColor.black]))
+            runs.append(BlinkRun(x: start, width: max(1, end - start), cols: cols, range: range, color: color))
         }
         blinkCols = blinks
-        blinkRuns = runs
+        self.runs = runs
+    }
 
-        // 整条渲染一次
-        let s = max(1, renderScale)
-        let rep = NSBitmapImageRep(bitmapDataPlanes: nil,
-                                   pixelsWide: Int(widthPt) * s, pixelsHigh: heightPt * s,
-                                   bitsPerSample: 8, samplesPerPixel: 4,
-                                   hasAlpha: true, isPlanar: false,
-                                   colorSpaceName: .deviceRGB,
-                                   bytesPerRow: Int(widthPt) * s * 4, bitsPerPixel: 32)
-        if let rep {
-            rep.size = NSSize(width: widthPt, height: CGFloat(heightPt))   // 先设:上下文按比例出 2x 清晰文本
-            NSGraphicsContext.saveGraphicsState()
-            if let ctx = NSGraphicsContext(bitmapImageRep: rep) {
-                NSGraphicsContext.current = ctx
-                attr.draw(at: NSPoint(x: 0, y: textY))
-                NSGraphicsContext.current = nil
-            }
-            NSGraphicsContext.restoreGraphicsState()
-            image = NSImage(size: rep.size)
-            image.addRepresentation(rep)
+    convenience init(stream: TextStream, font: NSFont, defaultColor: LEDColor) {
+        self.init(stream: stream, font: font, defaultColor: defaultColor, style: legacyStyle)
+    }
+
+    /// 把整串(或只把某个闪变段)画进 [x, x+width) 这一片。
+    /// highlight 非 nil:只画该段、用闪现色,其余字透明——字形与底图逐像素重合。
+    private func renderSlice(x: CGFloat, width: CGFloat, scale: Int, highlight: BlinkRun? = nil) -> CGImage? {
+        let s = CGFloat(max(1, scale))
+        let pw = Int(ceil(width * s)), ph = Int(CGFloat(heightPt) * s)
+        guard let ctx = makeBitmapContext(pixelsWide: pw, pixelsHigh: ph) else { return nil }
+        ctx.scaleBy(x: s, y: s)
+        ctx.translateBy(x: -x, y: 0)
+        let text: NSAttributedString
+        if let run = highlight {
+            let tinted = NSMutableAttributedString(attributedString: attributed)
+            tinted.addAttribute(.foregroundColor, value: NSColor.clear,
+                                range: NSRange(location: 0, length: tinted.length))
+            tinted.addAttribute(.foregroundColor, value: style.nsColor(run.color), range: run.range)
+            text = tinted
         } else {
-            image = NSImage(size: NSSize(width: widthPt, height: CGFloat(heightPt)))
+            text = attributed
         }
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: ctx, flipped: false)
+        text.draw(at: NSPoint(x: 0, y: textY))
+        NSGraphicsContext.restoreGraphicsState()
+        return ctx.makeImage()
     }
 
-    /// 闪变覆绘:同一串字形按闪现色重画一遍盖在原位(仅彩色模式被调用)
-    func tinted(for run: BlinkRun, color: LEDColor, at index: Int) -> NSAttributedString {
-        let key = "\(index):\(color.rawValue)"
-        if let cached = tintedCache[key] { return cached }
-        var attrs = run.baseAttrs
-        attrs[.foregroundColor] = nsColor(color)
-        let result = NSAttributedString(string: run.substring as String, attributes: attrs)
-        tintedCache[key] = result
-        return result
+    /// GPU 条带:整串分片成纹理 + 每个闪变段一张叠层。
+    func makeArt(scale: Int) -> StripArt {
+        let maxWidth = CGFloat(8192 / max(1, scale))
+        var tiles: [StripTile] = []
+        var x: CGFloat = 0
+        while x < widthPt {
+            let w = min(maxWidth, widthPt - x)
+            if let img = renderSlice(x: x, width: w, scale: scale) {
+                tiles.append(StripTile(image: img, x: x, width: w))
+            }
+            x += w
+        }
+        var flashes: [FlashArt] = []
+        if !style.mono {
+            for run in runs {
+                // 叠层左右各放 2pt,容纳斜体/抗锯齿外溢
+                let x0 = max(0, run.x - 2), w = min(widthPt - x0, run.width + 4)
+                if w > 0, let img = renderSlice(x: x0, width: w, scale: scale, highlight: run) {
+                    flashes.append(FlashArt(tile: StripTile(image: img, x: x0, width: w),
+                                            cols: run.cols, color: run.color))
+                }
+            }
+        }
+        return StripArt(tiles: tiles, width: widthPt, height: CGFloat(heightPt), pitch: 3,
+                        totalCols: totalCols, flashes: flashes, nearest: false, panel: style.panel,
+                        inset: 0, fadeWidth: CGFloat(edgeFadeCols * 3))
     }
 
-    var runs: [BlinkRun] { blinkRuns }
+    /// 整串单份 NSImage(standby 静态帧用)
+    var image: NSImage {
+        if let cachedImage { return cachedImage }
+        let scale = max(1, renderScale)
+        let img = NSImage(size: NSSize(width: widthPt, height: CGFloat(heightPt)))
+        if let cg = renderSlice(x: 0, width: widthPt, scale: scale) {
+            img.addRepresentation(NSBitmapImageRep(cgImage: cg))
+        }
+        cachedImage = img
+        return img
+    }
 }
 
 // ── 帧渲染 ─────────────────────────────────────────────────────────────────────
 
-/// 可视区帧:把整条 strip 平移 blit,右缘补一份实现无缝环绕;
-/// 闪变列命中的 blink 段整段按闪现色覆绘;两缘 24pt 渐隐(与 LED edgeFadeCols 同宽)。
+/// 可视区帧(standby 等静态场景):把整条 strip 平移 blit,右缘补一份实现环绕;两缘渐隐。
 func renderTextFrame(strip: TextStrip, offset: Int, viewportCols: Int, blank: Bool,
                      flash: [Int: LEDColor] = [:]) -> NSImage {
     let s = max(1, renderScale)
     let w = max(6, viewportCols * 3)
     let h = strip.heightPt
     let size = NSSize(width: Double(w), height: Double(h))
-
-    let rep = NSBitmapImageRep(bitmapDataPlanes: nil,
-                               pixelsWide: w * s, pixelsHigh: h * s,
-                               bitsPerSample: 8, samplesPerPixel: 4,
-                               hasAlpha: true, isPlanar: false,
-                               colorSpaceName: .deviceRGB,
-                               bytesPerRow: w * s * 4, bitsPerPixel: 32)
-    guard let rep else { return NSImage(size: size) }
-    rep.size = size
+    guard let ctx = makeBitmapContext(pixelsWide: w * s, pixelsHigh: h * s) else { return NSImage(size: size) }
+    ctx.scaleBy(x: CGFloat(s), y: CGFloat(s))
     NSGraphicsContext.saveGraphicsState()
-    guard let ctx = NSGraphicsContext(bitmapImageRep: rep) else {
-        NSGraphicsContext.restoreGraphicsState()
-        return NSImage(size: size)
-    }
-    NSGraphicsContext.current = ctx
+    let gc = NSGraphicsContext(cgContext: ctx, flipped: false)
+    NSGraphicsContext.current = gc
 
-    if !renderTransparent {
+    if strip.style.panel {
         NSColor.black.setFill()
         NSRect(x: 0, y: 0, width: CGFloat(w), height: CGFloat(h)).fill()
     }
@@ -241,19 +264,9 @@ func renderTextFrame(strip: TextStrip, offset: Int, viewportCols: Int, blank: Bo
             dx += strip.widthPt
         }
 
-        // 换数闪变:彩色模式才有效(模板模式闪色无效,与 LED 一致)
-        if renderColoredTransparent || !renderTransparent {
-            for (idx, run) in strip.runs.enumerated() where !flash.isEmpty {
-                guard flash.keys.contains(where: { run.cols.contains($0) }) else { continue }
-                let color = flash[run.cols.lowerBound] ?? .green
-                strip.tinted(for: run, color: color, at: idx)
-                    .draw(at: NSPoint(x: run.x - xOff, y: strip.textY))
-            }
-        }
-
-        // 两缘渐隐:擦 alpha,模板/透明/黑底三档通用
+        // 两缘渐隐:擦 alpha,透明/黑底通用
         let fade = CGFloat(edgeFadeCols * 3)
-        ctx.compositingOperation = .destinationOut
+        gc.compositingOperation = .destinationOut
         if fade > 0, fade * 2 < CGFloat(w) {
             NSGradient(colors: [NSColor.black, NSColor.black.withAlphaComponent(0)])?
                 .draw(in: NSRect(x: 0, y: 0, width: fade, height: CGFloat(h)), angle: 0)
@@ -262,19 +275,16 @@ func renderTextFrame(strip: TextStrip, offset: Int, viewportCols: Int, blank: Bo
         }
     }
 
-    NSGraphicsContext.current = nil
     NSGraphicsContext.restoreGraphicsState()
-
     let img = NSImage(size: size)
-    img.addRepresentation(rep)
-    img.isTemplate = renderTransparent && !renderColoredTransparent
+    if let cg = ctx.makeImage() { img.addRepresentation(NSBitmapImageRep(cgImage: cg)) }
     return img
 }
 
 /// 系统字体 standby(左对齐,超出可视宽即裁,不滚动)
 func renderTextStandbyFrame(text: String, viewportCols: Int,
-                            font: NSFont, defaultColor: LEDColor) -> NSImage {
+                            font: NSFont, defaultColor: LEDColor, style: LEDStyle = legacyStyle) -> NSImage {
     let stream = buildTextScrollStream(text: text, defaultColor: defaultColor, onClickCommand: nil)
-    let strip = TextStrip(stream: stream, font: font, defaultColor: defaultColor)
+    let strip = TextStrip(stream: stream, font: font, defaultColor: defaultColor, style: style)
     return renderTextFrame(strip: strip, offset: 0, viewportCols: viewportCols, blank: false)
 }

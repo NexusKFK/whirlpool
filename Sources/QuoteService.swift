@@ -16,6 +16,8 @@ final class QuoteService {
     private(set) var status = "Waiting for quotes"
     var interval: TimeInterval
     var onUpdate: (() -> Void)?
+    /// 智能刷新:按交易时段放宽成功后的下次拉取间隔(nil = 恒用 interval)
+    var cadence: (([WatchEntry], TimeInterval, Date, [String: Date]) -> TimeInterval)?
 
     init(provider: QuoteProvider, interval: TimeInterval, now: @escaping () -> Date = Date.init) {
         self.provider = provider; self.interval = interval; self.now = now
@@ -52,14 +54,22 @@ final class QuoteService {
                     self.nextFetch = self.now().addingTimeInterval(max(self.interval, Self.retryDelay(self.failures)))
                 } else {
                     self.failures = 0
-                    self.status = self.provider.name == "demo" ? "Demo · simulated prices" : "Updated"
-                    self.nextFetch = self.now().addingTimeInterval(max(5, self.interval))
+                    let next = self.cadence?(entries, self.interval, self.now(),
+                                             self.cached.compactMapValues { $0.marketTime }) ?? self.interval
+                    self.status = self.provider.name == "demo" ? "Demo · simulated prices"
+                        : (next > self.interval ? "Markets closed · refreshing slowly" : "Updated")
+                    self.nextFetch = self.now().addingTimeInterval(max(5, next))
                 }
                 let callbacks = self.waiters; self.waiters = []
                 callbacks.forEach { $0(self.cached) }
                 self.onUpdate?()
             }
         }
+    }
+
+    /// 数据需求变了(比如报价卡打开要分时线):下次调用直接重拉,仍受退避约束
+    func invalidate() {
+        if failures == 0 && provider.cooldownUntil.map({ $0 > now() }) != true { nextFetch = .distantPast }
     }
 
     // A manual refresh can skip the normal cache, but never provider backoff.
@@ -106,6 +116,9 @@ final class QuoteHTTPClient {
         session.dataTask(with: request) { data, response, error in
             self.queue.async {
                 self.active -= 1
+                if let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) {
+                    self.rateLimitCount = 0
+                }
                 if let http = response as? HTTPURLResponse, http.statusCode == 429 {
                     self.rateLimitCount += 1
                     let wait = max(QuoteService.retryDelay(self.rateLimitCount), Self.retryAfter(http.value(forHTTPHeaderField: "Retry-After")) ?? 0)

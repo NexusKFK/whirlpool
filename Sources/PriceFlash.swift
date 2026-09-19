@@ -9,17 +9,17 @@ struct PriceFlash {
     let suffix: String
     let color: LEDColor
 
-    static func priceText(_ price: Double) -> String {
-        // Keep cents above 1,000 too; changing precision hides real price ticks.
-        String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), price)
+    static func priceText(_ price: Double, decimals: Int = 2) -> String {
+        // 同一品种精度固定(自选设置/行情源提示),不随价格大小变化,否则会藏掉真实跳动
+        String(format: "%.\(min(8, max(0, decimals)))f", locale: Locale(identifier: "en_US_POSIX"), price)
     }
 
     static func between(_ previous: Double?, and current: Double,
-                        redUp: Bool) -> PriceFlash? {
+                        redUp: Bool, decimals: Int = 2) -> PriceFlash? {
         guard let previous, previous.isFinite, current.isFinite,
               previous != current else { return nil }
-        let old = priceText(previous)
-        let new = priceText(current)
+        let old = priceText(previous, decimals: decimals)
+        let new = priceText(current, decimals: decimals)
         guard old != new else { return nil } // No visible change after rounding.
 
         let oldChars = Array(old), newChars = Array(new)

@@ -66,19 +66,34 @@ if CommandLine.arguments.count > 1 {
         cliSend(msg); exit(0)
     }
 
-    // --restart — 退出运行中的实例并重新拉起(常驻进程不可见时的抓手)
+    // --list 名称|序号|next|prev — 切换自选池
+    if let list = value(for: ["--list"]) {
+        let msg = TickerMessage(kind: .setList, text: list, priority: .normal,
+                                duration: 0, onClickCommand: nil, width: nil)
+        cliSend(msg); exit(0)
+    }
+
+    // --restart — 退出运行中的实例并重新拉起(常驻进程不可见时的抓手)。
+    // 等旧进程真正退出再拉新的:否则新实例看到旧 socket 还活着会判定"已在运行"而自退,
+    // 结果两个都没了。拉起的是本二进制所在的 app 包,不靠 LaunchServices 猜同名 app。
     if has(["--restart"]) {
+        let oldPID = runningInstancePID()
         let quitMsg = TickerMessage(kind: .quit, text: "", priority: .normal,
                                     duration: 0, onClickCommand: nil, width: nil)
-        cliSend(quitMsg)
-        for _ in 0..<30 {
-            if !FileManager.default.fileExists(atPath: socketPath) { break }
+        // 没在运行就直接启动;在运行则先请它退出
+        if cliTrySend(quitMsg) { print("ok") }
+        for _ in 0..<100 {   // 最多 10 秒
+            let gone = oldPID.map { kill($0, 0) != 0 && errno == ESRCH }
+                ?? !FileManager.default.fileExists(atPath: socketPath)
+            if gone { break }
             usleep(100_000)
         }
+        let bundle = Bundle.main.bundleURL
         let launcher = Process()
         launcher.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-        launcher.arguments = ["-a", "Whirlpool"]
+        launcher.arguments = bundle.pathExtension == "app" ? ["-n", bundle.path] : ["-a", "Whirlpool"]
         try? launcher.run()
+        launcher.waitUntilExit()
         exit(0)
     }
 
@@ -93,6 +108,7 @@ if CommandLine.arguments.count > 1 {
           whirlpool --standby-very-urgent TEXT --duration N
           whirlpool --width N
           whirlpool --mode marquee|board|bar|marquee,board|marquee,bar
+          whirlpool --list NAME|N|next|prev
           whirlpool --settings
           whirlpool --restart
           whirlpool --clear
@@ -134,13 +150,15 @@ if FileManager.default.fileExists(atPath: socketPath) {
             }
         } == 0
         if connected {
-            // Gültigen Request senden damit der Server sauber abhandelt
+            // Gültigen Request senden damit der Server sauber abhandelt;超时防对端卡死
+            setSocketTimeouts(checkFd, seconds: 2)
             let ping = "{\"type\":\"get_status\"}\n"
             ping.withCString { _ = send(checkFd, $0, strlen($0), 0) }
-            var buf = [UInt8](repeating: 0, count: 64)
+            var buf = [UInt8](repeating: 0, count: 256)
             _ = recv(checkFd, &buf, buf.count, 0)
             close(checkFd)
             fputs("whirlpool: already running\n", stderr)
+            appLog.notice("second launch exited: another instance owns \(socketPath, privacy: .public)")
             exit(0)
         } else {
             // Veraltete Socket-Datei entfernen
