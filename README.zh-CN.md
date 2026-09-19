@@ -54,7 +54,7 @@ bash build-app.sh --arch arm64 --arch x86_64
 - 原子保存；旧配置缺字段时补默认值，损坏文件不会在启动时被默认配置悄悄覆盖。仓库不包含私人自选股配置。
 - macOS 菜单 **高级 → 显示配置文件…** 可定位文件。
 
-macOS 还支持 `--settings`、`--status`、`--send`、`--urgent`、`--very-urgent`、`--standby`、`--width`、`--clear`、`--quit`，详细示例见[英文说明](README.md#macos-cli)。本地控制 socket 按用户隔离，不对网络开放。`--on-click` 会执行本地 shell 命令，只应传入可信命令。
+macOS 还支持 `--settings`、`--status`、`--send`、`--urgent`、`--very-urgent`、`--standby`、`--width`、`--mode`、`--clear`、`--restart`、`--quit`，详细示例见[英文说明](README.md#macos-cli)。本地控制 socket 按用户隔离，不对网络开放。`--on-click` 会执行本地 shell 命令，只应传入可信命令。应用默认不占程序坞；**设置 → 通用 → 「在程序坞显示图标」**可让进程可见（右键即可退出）。终端里可直接用 `/Applications/Whirlpool.app/Contents/MacOS/whirlpool --status | --restart | --quit`，或硬重置 `pkill -x whirlpool && open -a Whirlpool`。
 
 ## 开发与发布
 

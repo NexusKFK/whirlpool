@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.7.1
+
+- Menu bar load fixes: the status-item surface is capped at 40% of the screen width (the full quote stream belongs to the floating bar), status-item frames paint at half rate while the floating bar stays full rate, and the per-frame title reset is gone. Sustained CPU drops from ~30% to ~14-18%.
+- New CLI/socket commands: `--mode` switches display layouts, `--restart` quits and relaunches the resident process.
+- New General setting "Show Dock icon" for a visible handle on the running app (right-click to quit); README documents terminal restart paths.
+
+中文：状态栏负载修复——菜单栏面宽度封顶为屏宽 40%（整条行情流属于浮动行情条），状态栏滚动帧降为半帧率而浮动行情条保持全帧率，去掉每帧 title 重设；常驻 CPU 从约 30% 降到约 14-18%。新增 `--mode`（切换显示布局）与 `--restart`（退出并重启常驻进程）命令；通用设置新增「在程序坞显示图标」，README 补充终端重启路径。
+
 ## 1.7.0
 
 - System-font ticker: the scrolling ticker and the floating bar can now switch from LED dots to the system font or a monospaced font (three sizes apply to both). Colors, pauses, seamless wrap, and changed-digit flashes carry over; in the monochrome "auto" appearance the ticker becomes a template and follows light/dark like native menu bar text.

@@ -89,11 +89,15 @@ whirlpool --urgent 'TEXT'
 whirlpool --very-urgent 'TEXT'
 whirlpool --standby 'TEXT' --duration 10
 whirlpool --width 30
+whirlpool --mode marquee|board|bar|marquee,board|marquee,bar
 whirlpool --clear
+whirlpool --restart
 whirlpool --quit
 ```
 
 Messages support `\c[green]` / `\c[]` colors, `\p[3]` pauses, and `\b[1:green]` / `\b[0]` suffix pulses. The socket is per-user at `/tmp/whirlpool-<uid>.sock`, restricted to that user. `--on-click` intentionally executes a local shell command; use only commands you trust. The CLI is not a network service.
+
+The app runs as a menu-bar agent and shows no Dock icon by default — **Settings → General → "Show Dock icon"** gives you a visible handle (right-click to quit). From a terminal, the bundled binary works directly: `/Applications/Whirlpool.app/Contents/MacOS/whirlpool --status | --restart | --quit`, or hard-reset with `pkill -x whirlpool && open -a Whirlpool`.
 
 ## Project
 

@@ -21,6 +21,7 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
     private let pixels = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let flashes = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let redUp = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    private let dock = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let resetNote = NSTextField(labelWithString: "")
     private var resetPositions = false
     private var lastLanguage = ""
@@ -54,6 +55,7 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
         pixels.state = config.boardPixelFont ? .on : .off
         flashes.state = config.marqueeBlink ? .on : .off
         redUp.state = config.redUpMarkets.contains("cn") && config.redUpMarkets.contains("hk") ? .on : .off
+        dock.state = config.showDockIcon ? .on : .off
         resetPositions = false
         resetNote.stringValue = ""
         updateValues()
@@ -158,10 +160,12 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
         refresh.setAccessibilityLabel(L("Refresh interval"))
         source.setAccessibilityLabel(L("Data source")); language.setAccessibilityLabel(L("Language"))
         redUp.title = L("Red means up in China / Hong Kong")
+        dock.title = L("Show Dock icon")
         return stack([formRow("Language", [language]), note("Language changes apply after saving."),
                       formRow("Data source", [source]), formRow("Refresh interval", [refresh, NSTextField(labelWithString: L("seconds"))]),
                       note("30 seconds is recommended. Short intervals may be rate-limited. All displays share one request cycle."),
-                      redUp, note("Your watchlist stays on this device. Symbols are sent only to the selected quote provider."), NSView()])
+                      redUp, dock, note("The Dock icon gives a visible handle on the running app — right-click it to quit or relaunch."),
+                      note("Your watchlist stays on this device. Symbols are sent only to the selected quote provider."), NSView()])
     }
 
     private func stack(_ views: [NSView]) -> NSStackView {
@@ -276,6 +280,7 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
         draft.marqueeBlink = flashes.state == .on
         draft.redUpMarkets.removeAll { ["cn", "hk"].contains($0) }
         if redUp.state == .on { draft.redUpMarkets += ["cn", "hk"] }
+        draft.showDockIcon = dock.state == .on
         if resetPositions { draft.boardOrigin = nil; draft.barOrigin = nil }
         guard saveConfig(draft) else { error(configPath(), title: "Could Not Save Settings"); return }
         config = draft; onApplied?(draft); window?.close()
