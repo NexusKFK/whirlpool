@@ -18,11 +18,13 @@ final class BarWindow: NSPanel, NSWindowDelegate {
 
     var config: TickerConfig {
         didSet {
+            if oldValue.barOrigin != config.barOrigin { saveWork?.cancel() }
             if oldValue.barBackground != config.barBackground { installBackdrop() }
             applyLock()
-            reposition()
+            if oldValue.barOrigin != config.barOrigin || oldValue.displayScreen != config.displayScreen { reposition() }
         }
     }
+    var onOriginChange: (([Double]) -> Void)?
     var menuProvider: (() -> NSMenu)? {
         didSet { root.menuProvider = menuProvider }
     }
@@ -125,7 +127,7 @@ final class BarWindow: NSPanel, NSWindowDelegate {
 
     // ── 位置 ─────────────────────────────────────────────────────────────────
 
-    private func reposition() {
+    func reposition() {
         if let origin = reachableOrigin(config.barOrigin, size: frame.size) {
             programmaticMove = true
             setFrameOrigin(origin)
@@ -142,6 +144,7 @@ final class BarWindow: NSPanel, NSWindowDelegate {
     func windowDidMove(_ notification: Notification) {
         guard !programmaticMove else { return }
         config.barOrigin = [Double(frame.origin.x), Double(frame.origin.y)]
+        if let origin = config.barOrigin { onOriginChange?(origin) }
         // 拖动过程中会连发;停手 0.5 秒后再落盘一次
         saveWork?.cancel()
         let origin = config.barOrigin

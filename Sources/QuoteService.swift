@@ -9,15 +9,20 @@ final class QuoteService {
     private var cached: [String: Quote] = [:]
     private var waiters: [([String: Quote]) -> Void] = []
     private var inFlight = false
+    private var invalidatedDuringFlight = false
     private var nextFetch = Date.distantPast
     private var lastAttempt = Date.distantPast
     private var failures = 0
     private(set) var lastUpdated: Date?
     private(set) var status = "Waiting for quotes"
-    var interval: TimeInterval
+    var interval: TimeInterval {
+        didSet { if interval != oldValue { requestRefresh() } }
+    }
     var onUpdate: (() -> Void)?
     /// 智能刷新:按交易时段放宽成功后的下次拉取间隔(nil = 恒用 interval)
-    var cadence: (([WatchEntry], TimeInterval, Date, [String: Date]) -> TimeInterval)?
+    var cadence: (([WatchEntry], TimeInterval, Date, [String: Date]) -> TimeInterval)? {
+        didSet { requestRefresh() }
+    }
 
     init(provider: QuoteProvider, interval: TimeInterval, now: @escaping () -> Date = Date.init) {
         self.provider = provider; self.interval = interval; self.now = now
@@ -27,6 +32,7 @@ final class QuoteService {
         let newKey = entries.map { "\($0.market):\($0.symbol)" }.sorted().joined(separator: "|")
         if newKey != key {
             generation += 1; key = newKey; cached = [:]; lastUpdated = nil; nextFetch = .distantPast
+            failures = 0; status = "Waiting for quotes"; invalidatedDuringFlight = false
             let oldWaiters = waiters; waiters = []; inFlight = false
             oldWaiters.forEach { $0([:]) }
         }
@@ -59,7 +65,11 @@ final class QuoteService {
                     self.status = self.provider.name == "demo" ? "Demo · simulated prices"
                         : (next > self.interval ? "Markets closed · refreshing slowly" : "Updated")
                     self.nextFetch = self.now().addingTimeInterval(max(5, next))
+                    if self.invalidatedDuringFlight {
+                        self.nextFetch = max(self.now(), self.lastAttempt.addingTimeInterval(5))
+                    }
                 }
+                self.invalidatedDuringFlight = false
                 let callbacks = self.waiters; self.waiters = []
                 callbacks.forEach { $0(self.cached) }
                 self.onUpdate?()
@@ -69,7 +79,10 @@ final class QuoteService {
 
     /// 数据需求变了(比如报价卡打开要分时线):下次调用直接重拉,仍受退避约束
     func invalidate() {
-        if failures == 0 && provider.cooldownUntil.map({ $0 > now() }) != true { nextFetch = .distantPast }
+        if failures == 0 && provider.cooldownUntil.map({ $0 > now() }) != true {
+            nextFetch = max(now(), lastAttempt.addingTimeInterval(5))
+            if inFlight { invalidatedDuringFlight = true }
+        }
     }
 
     // A manual refresh can skip the normal cache, but never provider backoff.

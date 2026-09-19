@@ -214,5 +214,6 @@ struct TickFlashTestRunner {
         try runCoreTests()
         try runGPUMarqueeTests()
         try runFeatureTests()
+        try runWindowStateTests()
     }
 }

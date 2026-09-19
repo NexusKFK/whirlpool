@@ -36,7 +36,13 @@ internal sealed class BoardForm : Form
         grid.CellDoubleClick += (_, e) => { if (e.RowIndex >= 0 && grid.Rows[e.RowIndex].Tag is WatchEntry entry) OpenChartRequested?.Invoke(entry); };
         grid.ShowCellToolTips = true;
         Controls.Add(grid); Controls.Add(status);
-        animation.Tick += (_, _) => { if (pulses.Count == 0) { animation.Stop(); return; } grid.InvalidateColumn(1); };
+        animation.Tick += (_, _) =>
+        {
+            // Offscreen/deleted rows are never painted, so expire their pulses here too.
+            foreach (var symbol in pulses.Where(p => clock.Elapsed.TotalSeconds - p.Value.since >= PriceFlash.Duration).Select(p => p.Key).ToArray()) pulses.Remove(symbol);
+            grid.InvalidateColumn(1);
+            if (pulses.Count == 0) animation.Stop();
+        };
         FormClosing += (_, e) => { if (e.CloseReason == CloseReason.UserClosing) { e.Cancel = true; Hide(); UserClosed?.Invoke(); } };
         ResizeEnd += (_, _) => PositionSaved?.Invoke(Location);
         VisibleChanged += (_, _) => { if (!Visible) animation.Stop(); };
@@ -45,6 +51,11 @@ internal sealed class BoardForm : Form
 
     public void Configure(Settings value)
     {
+        if (value.Provider != settings.Provider || !value.Watchlist.SequenceEqual(settings.Watchlist))
+        {
+            grid.Rows.Clear(); previous.Clear(); pulses.Clear(); animation.Stop();
+            SetStatus(T("Loading quotes…"), null);
+        }
         settings = value.Clone(); TopMost = settings.AlwaysOnTop;
         grid.Columns[0].HeaderText = T("Symbol"); grid.Columns[1].HeaderText = T("Price"); grid.Columns[2].HeaderText = T("Change");
         WindowPlacement.Apply(this, settings.BoardOrigin, true, settings.DisplayScreen);

@@ -195,6 +195,17 @@ func runGPUMarqueeTests() throws {
     engine.resume()
     engine.stop()
     check(engine.phase == .idle && engine.queueCount == 0, "stop clears the engine")
+    engine.loopsQuotes = { false }
+    engine.enqueue(TickerMessage(kind: .standby, text: "WAIT", priority: .normal,
+                                duration: 0.02, onClickCommand: nil, width: nil))
+    engine.enqueue(TickerMessage(kind: .scroll, text: "", priority: .normal,
+                                duration: 0, onClickCommand: nil, width: nil))
+    engine.colsPerSecond = 1
+    engine.enqueue(second)
+    RunLoop.main.run(until: Date().addingTimeInterval(0.06))
+    check(engine.current?.text == second.text && engine.phase == .scrolling,
+          "an empty queued message must not stall all subsequent messages")
+    engine.stop()
     print("PASS: timeline engine advances rounds, honors pauses, prefetches and replays when starved")
 }
 
