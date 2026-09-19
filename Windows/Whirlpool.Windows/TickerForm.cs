@@ -68,9 +68,23 @@ internal sealed class TickerForm : Form
         {
             if (e.Button != MouseButtons.Left) return;
             if ((ModifierKeys & Keys.Control) != 0) { NextWatchlistRequested?.Invoke(); return; }   // Ctrl+click: next watchlist
+            if (settings.LockPosition) return;                                                       // locked: no dragging
             ReleaseCapture(); SendMessage(Handle, 0xA1, 2, 0);                                       // drag the borderless window
         };
-        HandleCreated += (_, _) => WinTheme.RoundCorners(this);
+        HandleCreated += (_, _) => { WinTheme.RoundCorners(this); ApplyClickThrough(); };
+    }
+
+    private const int GWL_EXSTYLE = -20, WS_EX_LAYERED = 0x80000, WS_EX_TRANSPARENT = 0x20;
+
+    /// <summary>Click-through: a layered + transparent window lets the mouse reach the windows below.</summary>
+    private void ApplyClickThrough()
+    {
+        if (!IsHandleCreated) return;
+        var style = GetWindowLong(Handle, GWL_EXSTYLE);
+        var wanted = settings.ClickThrough ? style | WS_EX_LAYERED | WS_EX_TRANSPARENT : style & ~WS_EX_TRANSPARENT;
+        if (wanted == style) return;
+        SetWindowLong(Handle, GWL_EXSTYLE, wanted);
+        if ((wanted & WS_EX_LAYERED) != 0) SetLayeredWindowAttributes(Handle, 0, 255, 0x2);   // LWA_ALPHA, fully opaque
     }
 
     /// <summary>Pause or resume the animation (sleep, lock, paused from the tray).</summary>
@@ -87,8 +101,9 @@ internal sealed class TickerForm : Form
         scale = Math.Max(1, (int)Math.Round(DeviceDpi / 96.0));
         placing = true;
         Height = 8 * Pitch + 14 * scale;
-        Width = Math.Min(settings.WidthCharacters * 18 * scale + 2 * Inset, (Screen.PrimaryScreen?.WorkingArea.Width ?? 1220) - 20);
-        WindowPlacement.Apply(this, settings.TickerOrigin, false); placing = false;
+        Width = Math.Min(settings.WidthCharacters * 18 * scale + 2 * Inset, (WindowPlacement.Target(settings.DisplayScreen)?.WorkingArea.Width ?? 1220) - 20);
+        WindowPlacement.Apply(this, settings.TickerOrigin, false, settings.DisplayScreen); placing = false;
+        ApplyClickThrough();
         if (changedLayout) offset = 0;
         signature = ""; ApplyPending(); RenderStrip();
     }
@@ -254,5 +269,8 @@ internal sealed class TickerForm : Form
     }
 
     [DllImport("user32.dll")] private static extern bool ReleaseCapture();
+    [DllImport("user32.dll")] private static extern int GetWindowLong(IntPtr handle, int index);
+    [DllImport("user32.dll")] private static extern int SetWindowLong(IntPtr handle, int index, int value);
+    [DllImport("user32.dll")] private static extern bool SetLayeredWindowAttributes(IntPtr handle, uint key, byte alpha, uint flags);
     [DllImport("user32.dll")] private static extern IntPtr SendMessage(IntPtr handle, int msg, int wParam, int lParam);
 }

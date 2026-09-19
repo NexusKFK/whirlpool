@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 
 // 1.9:交易所节假日、按品种小数位、多自选池、新版本检查
 
@@ -108,6 +108,17 @@ func runFeatureTests() throws {
     check(try readConfig(at: target).watchlist.first?.symbol == "TLT" && FileManager.default.fileExists(atPath: legacy.path), "migrated content, original kept")
     check(!migrateLegacyConfig(from: legacy, to: target), "migration runs once")
     print("PASS: multiple watchlists with migration and backward-compatible saves")
+
+    // 1.9.1:默认只开菜单栏跑马灯;显示器默认不指定,选择可往返,未连接的屏不致命
+    let fresh = TickerConfig()
+    check(fresh.displayMode == "marquee" && fresh.displayScreen == "auto", "defaults: menu bar ticker only, automatic screen")
+    let decodedDefaults = try JSONDecoder().decode(TickerConfig.self, from: Data("{}".utf8))
+    check(decodedDefaults.displayMode == "marquee" && decodedDefaults.displayScreen == "auto", "empty config decodes to menu-bar-only")
+    var pinned = TickerConfig(); pinned.displayScreen = "ADB8A3ED-1456-4C11-8A01-20A0696BFBAA"
+    check(try JSONDecoder().decode(TickerConfig.self, from: JSONEncoder().encode(pinned)).displayScreen == pinned.displayScreen, "screen choice round-trips")
+    check(chosenScreen("auto") == nil && chosenScreen("NOT-CONNECTED") == nil && placementScreen("NOT-CONNECTED") != nil, "unknown screen falls back")
+    if let first = NSScreen.screens.first, let id = first.stableID { check(chosenScreen(id)?.displayID == first.displayID, "screen found by stable id") }
+    print("PASS: defaults and screen choice")
 
     // 5) 新版本检查:版本号解析与比较、Release JSON(草稿/预发布忽略)
     check(UpdateChecker.parseVersion("v1.6.0-main") == [1, 6, 0], "tag parse")

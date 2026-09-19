@@ -17,7 +17,7 @@ final class BoardWindow: NSPanel, NSWindowDelegate {
     var onOpenChart: ((WatchEntry) -> Void)?
 
     var config: TickerConfig {
-        didSet { reposition() }
+        didSet { isMovableByWindowBackground = !config.lockPosition; reposition() }
     }
     var menuProvider: (() -> NSMenu)?
 
@@ -32,7 +32,7 @@ final class BoardWindow: NSPanel, NSWindowDelegate {
         isOpaque = false
         backgroundColor = .clear
         hasShadow = true
-        isMovableByWindowBackground = true
+        isMovableByWindowBackground = !config.lockPosition
         hidesOnDeactivate = false
         becomesKeyOnlyIfNeeded = true
 
@@ -95,6 +95,7 @@ final class BoardWindow: NSPanel, NSWindowDelegate {
             row.entry = WatchEntry(symbol: r.symbol, market: r.market)
             row.onOpenChart = { [weak self] e in self?.onOpenChart?(e) }
             row.menuProvider = { [weak self] in self?.menuProvider?() }
+            row.locked = config.lockPosition
             row.toolTip = L("Double-click to open chart")
             let priceFlash = flash ? quotes[r.symbol].flatMap {
                 PriceFlash.between(lastPrices[r.symbol], and: $0.price,
@@ -178,7 +179,7 @@ final class BoardWindow: NSPanel, NSWindowDelegate {
             programmaticMove = false
             return
         }
-        guard let screen = NSScreen.main ?? NSScreen.screens.first else { return }
+        guard let screen = placementScreen(config.displayScreen) else { return }
         let f = screen.frame   // 用整屏帧而非 visibleFrame:后者的底边在程序坞之上
         let x = config.boardCorner == "left" ? f.minX + 12 : f.maxX - frame.width - 12
         programmaticMove = true
@@ -290,12 +291,13 @@ private final class BoardRowView: NSView {
     var entry: WatchEntry?
     var onOpenChart: ((WatchEntry) -> Void)?
     var menuProvider: (() -> NSMenu?)?
+    var locked = false
 
     override func hitTest(_ point: NSPoint) -> NSView? { frame.contains(point) ? self : nil }
     override var mouseDownCanMoveWindow: Bool { false }
     override func mouseDown(with event: NSEvent) {
         if event.clickCount == 2, let entry { onOpenChart?(entry); return }
-        window?.performDrag(with: event)
+        if !locked { window?.performDrag(with: event) }
     }
     override func rightMouseDown(with event: NSEvent) {
         let menu = menuProvider?() ?? NSMenu()

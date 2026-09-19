@@ -47,7 +47,7 @@ internal sealed class BoardForm : Form
     {
         settings = value.Clone(); TopMost = settings.AlwaysOnTop;
         grid.Columns[0].HeaderText = T("Symbol"); grid.Columns[1].HeaderText = T("Price"); grid.Columns[2].HeaderText = T("Change");
-        WindowPlacement.Apply(this, settings.BoardOrigin, true);
+        WindowPlacement.Apply(this, settings.BoardOrigin, true, settings.DisplayScreen);
     }
 
     public void ApplyTheme(Tone value)
@@ -131,6 +131,15 @@ internal sealed class BoardForm : Form
         var flashColor = WinTheme.C(pulse.flash.Red ? Palette.Red(tone) : Palette.Green(tone));
         TextRenderer.DrawText(e.Graphics!, pulse.flash.Suffix, font, new Rectangle(e.CellBounds.Right - suffixWidth - 4, e.CellBounds.Top, suffixWidth, e.CellBounds.Height), flashColor, flags);
         e.Handled = true;
+    }
+
+    /// <summary>Locked: ignore caption drags and the system Move command.</summary>
+    protected override void WndProc(ref Message m)
+    {
+        const int WM_NCLBUTTONDOWN = 0xA1, HTCAPTION = 2, WM_SYSCOMMAND = 0x112, SC_MOVE = 0xF010;
+        if (settings.LockPosition && (m.Msg == WM_NCLBUTTONDOWN && (int)m.WParam == HTCAPTION
+                                      || m.Msg == WM_SYSCOMMAND && ((int)m.WParam & 0xFFF0) == SC_MOVE)) return;
+        base.WndProc(ref m);
     }
 
     protected override void Dispose(bool disposing) { if (disposing) animation.Dispose(); base.Dispose(disposing); }

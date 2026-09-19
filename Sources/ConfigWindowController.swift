@@ -29,6 +29,10 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
     private let dock = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let scheme = NSPopUpButton()
     private let barBackground = NSPopUpButton()
+    private let screenPicker = NSPopUpButton()
+    private let lock = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    private let clickThrough = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    private var screenKeys: [String] = []
     private let hover = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let login = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let smart = NSButton(checkboxWithTitle: "", target: nil, action: nil)
@@ -72,6 +76,9 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
         dock.state = config.showDockIcon ? .on : .off
         scheme.selectItem(at: ColorScheme.allCases.firstIndex(of: config.colorScheme) ?? 0)
         barBackground.selectItem(at: config.barBackground == "none" ? 1 : 0)
+        reloadScreens()
+        lock.state = config.lockPosition ? .on : .off
+        clickThrough.state = config.barClickThrough ? .on : .off
         hover.state = config.hoverPause ? .on : .off
         smart.state = config.smartRefresh ? .on : .off
         updates.state = config.checkUpdates ? .on : .off
@@ -85,16 +92,16 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
     }
 
     private func buildWindow() {
-        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 660, height: 700),
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 660, height: 830),
                          styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         w.title = L("Whirlpool Settings")
-        w.minSize = NSSize(width: 660, height: 700)
+        w.minSize = NSSize(width: 660, height: 830)
         w.isReleasedWhenClosed = false
         w.delegate = self
         w.setFrameAutosaveName("WhirlpoolSettings")
         // 旧版本记住的窗口可能比新内容矮:恢复后不足最小尺寸就撑开,免得底部选项被裁
-        if w.contentLayoutRect.height < 700 || w.contentLayoutRect.width < 660 {
-            w.setContentSize(NSSize(width: max(660, w.contentLayoutRect.width), height: 700))
+        if w.contentLayoutRect.height < 830 || w.contentLayoutRect.width < 660 {
+            w.setContentSize(NSSize(width: max(660, w.contentLayoutRect.width), height: 830))
         }
         window = w
         let tabs = NSTabView()
@@ -130,18 +137,24 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
     private func watchlistTab() -> NSView {
         // This table is reused when changing language; remove old columns first.
         for column in table.tableColumns { table.removeTableColumn(column) }
+        // 代码列吃掉多余宽度;市场/小数位定宽,任何窗口宽度下都不会被挤出表格右缘
         let symbol = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("symbol"))
-        symbol.title = L("Symbol"); symbol.width = 250; symbol.minWidth = 160
+        symbol.title = L("Symbol"); symbol.width = 200; symbol.minWidth = 120
+        symbol.resizingMask = .autoresizingMask
         let market = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("market"))
-        market.title = L("Market"); market.width = 180; market.minWidth = 150
+        market.title = L("Market"); market.width = 190; market.minWidth = 170
+        market.resizingMask = .userResizingMask
         let decimals = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("decimals"))
-        decimals.title = L("Decimals"); decimals.width = 110; decimals.minWidth = 100
+        decimals.title = L("Decimals"); decimals.width = 120; decimals.minWidth = 110
+        decimals.resizingMask = .userResizingMask
         table.addTableColumn(symbol); table.addTableColumn(market); table.addTableColumn(decimals)
         table.delegate = self; table.dataSource = self
+        table.style = .fullWidth
         table.usesAlternatingRowBackgroundColors = true
-        table.rowHeight = 34
+        table.rowHeight = 40                                        // 控件上下各留出呼吸空间
+        table.intercellSpacing = NSSize(width: 12, height: 0)       // 列间距;行间靠行高,斑马纹不断
         table.allowsMultipleSelection = false
-        table.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
+        table.columnAutoresizingStyle = .firstColumnOnlyAutoresizingStyle
         table.setAccessibilityLabel(L("Watchlist"))
         let scroll = NSScrollView()
         scroll.documentView = table; scroll.hasVerticalScroller = true; scroll.borderType = .bezelBorder
@@ -252,14 +265,19 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
         barBackground.removeAllItems(); barBackground.addItems(withTitles: [L("Glass"), L("Transparent")])
         barBackground.setAccessibilityLabel(L("Floating ticker background"))
         hover.title = L("Pause scrolling while the pointer is over the ticker")
-        return stack([formRow("Display mode", [mode]), formRow("Scroll speed", [speed, speedValue]),
+        lock.title = L("Lock floating windows in place")
+        clickThrough.title = L("Let clicks pass through the floating ticker (turn off from the menu bar icon)")
+        screenPicker.setAccessibilityLabel(L("Screen"))
+        return stack([formRow("Display mode", [mode]), formRow("Screen", [screenPicker]),
+                      note("The floating ticker and board appear on this screen. macOS mirrors the menu bar ticker to every screen's menu bar; its width is sized for this screen."),
+                      formRow("Scroll speed", [speed, speedValue]),
                       formRow("Display width", [width, widthValue]), formRow("Marquee size", [size]),
                       formRow("Ticker font", [font]),
                       note("Large is clamped to Medium inside the menu bar for LED dots. The quote board keeps its own font setting."),
                       formRow("Colors", [scheme]),
                       note("Adaptive keeps red/green and switches the neutral color between white and near-black to follow light or dark menu bars."),
                       formRow("Floating ticker background", [barBackground]),
-                      arrows, pixels, flashes, hover,
+                      arrows, pixels, flashes, hover, lock, clickThrough,
                       button("Reset Floating Windows", #selector(resetWindows)), resetNote, NSView()])
     }
 
@@ -323,23 +341,40 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
             popup.selectItem(at: Self.decimalChoices.firstIndex(of: entries[row].decimals) ?? 0)
             popup.tag = row; popup.target = self; popup.action = #selector(decimalsEdited(_:))
             popup.setAccessibilityLabel(L("Decimals"))
-            return popup
+            return Self.cell(popup)
         }
         if tableColumn?.identifier.rawValue == "symbol" {
             let field = NSTextField(string: entries[row].symbol)
             field.isBordered = false; field.drawsBackground = false
             field.font = .monospacedSystemFont(ofSize: 13, weight: .medium)
+            field.usesSingleLineMode = true
+            field.lineBreakMode = .byTruncatingTail
+            field.placeholderString = "AAPL"
             field.delegate = self
             field.tag = row; field.target = self; field.action = #selector(symbolEdited(_:))
             field.setAccessibilityLabel(L("Symbol"))
-            return field
+            return Self.cell(field, inset: 6)
         }
         let popup = NSPopUpButton()
         popup.addItems(withTitles: Self.markets.map(\.label))
         popup.selectItem(at: Self.markets.firstIndex { $0.key == entries[row].market } ?? 0)
         popup.tag = row; popup.target = self; popup.action = #selector(marketEdited(_:))
         popup.setAccessibilityLabel(L("Market"))
-        return popup
+        return Self.cell(popup)
+    }
+
+    /// 单元格容器:控件在行内垂直居中、两侧留白(直接返回控件时会被钉在行顶、贴满列宽)
+    static func cell(_ control: NSView, inset: CGFloat = 2) -> NSTableCellView {
+        let cell = NSTableCellView()
+        control.translatesAutoresizingMaskIntoConstraints = false
+        cell.addSubview(control)
+        NSLayoutConstraint.activate([
+            control.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: inset),
+            control.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -inset),
+            control.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+        ])
+        if let field = control as? NSTextField { cell.textField = field }
+        return cell
     }
     func controlTextDidEndEditing(_ notification: Notification) {
         if let field = notification.object as? NSTextField { symbolEdited(field) }
@@ -358,7 +393,9 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
         finishEditing(); entries.append(WatchEntry(symbol: "", market: "us")); table.reloadData()
         table.selectRowIndexes(IndexSet(integer: entries.count - 1), byExtendingSelection: false)
         table.scrollRowToVisible(entries.count - 1)
-        if let field = table.view(atColumn: 0, row: entries.count - 1, makeIfNecessary: true) as? NSTextField { window?.makeFirstResponder(field) }
+        if let field = (table.view(atColumn: 0, row: entries.count - 1, makeIfNecessary: true) as? NSTableCellView)?.textField {
+            window?.makeFirstResponder(field)
+        }
     }
     @objc private func remove() {
         finishEditing(); let row = table.selectedRow
@@ -379,6 +416,23 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
         // 宽度按物理尺寸锚定(M 档 1 字符≈18pt):换字号不改变条的实际宽度
         widthValue.stringValue = "\(width.integerValue) \(L("characters")) · ≈\(width.integerValue * 18 + 8) pt"
     }
+    /// 显示器列表:自动 + 当前连接的屏;已选但未连接的屏保留为一项,免得悄悄改掉用户选择
+    private func reloadScreens() {
+        screenPicker.removeAllItems()
+        screenKeys = ["auto"]
+        screenPicker.addItem(withTitle: L("Automatic (primary display)"))
+        for screen in NSScreen.screens {
+            guard let id = screen.stableID else { continue }
+            screenKeys.append(id)
+            screenPicker.addItem(withTitle: screen.displayLabel)
+        }
+        if !screenKeys.contains(config.displayScreen) {
+            screenKeys.append(config.displayScreen)
+            screenPicker.addItem(withTitle: L("Disconnected display"))
+        }
+        screenPicker.selectItem(at: screenKeys.firstIndex(of: config.displayScreen) ?? 0)
+    }
+
     @objc private func resetWindows() { resetPositions = true; resetNote.stringValue = L("Window positions will reset after you save.") }
     @objc private func cancel() { window?.close() }
     private func error(_ message: String, title: String = "Invalid Settings") {
@@ -427,6 +481,14 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
         draft.hoverPause = hover.state == .on
         draft.smartRefresh = smart.state == .on
         draft.checkUpdates = updates.state == .on
+        draft.lockPosition = lock.state == .on
+        draft.barClickThrough = clickThrough.state == .on
+        let screenKey = screenKeys.indices.contains(screenPicker.indexOfSelectedItem) ? screenKeys[screenPicker.indexOfSelectedItem] : "auto"
+        if screenKey != config.displayScreen {
+            // 换了显示器:浮窗丢掉旧位置,落到新屏的默认位置
+            draft.displayScreen = screenKey
+            draft.barOrigin = nil; draft.boardOrigin = nil
+        }
         if resetPositions { draft.boardOrigin = nil; draft.barOrigin = nil }
         guard saveConfig(draft) else { error(configPath(), title: "Could Not Save Settings"); return }
         config = draft; onApplied?(draft)

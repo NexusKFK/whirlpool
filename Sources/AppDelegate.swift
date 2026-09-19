@@ -39,15 +39,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// 菜单栏面宽度上限:屏宽的 40%。整条行情流是浮动 bar 的主场,
     /// 状态项过宽时 macOS 会在应用菜单较长时把它整个藏掉(看上去像"退出了")。
     private func menuBarCols(dot: Int) -> Int {
-        let screenW = NSScreen.main?.frame.width ?? 1440
+        let screenW = menuBarScreenWidth
         let cap = Int((screenW * 0.40 - 8) / Double(6 * LEDLayout(dot: dot).colW))
         return max(8, min(displayCols(dot: dot), cap))
+    }
+
+    /// 菜单栏宽度上限按哪块屏算:指定的屏,否则主显示器——固定不变。
+    /// (以前用 NSScreen.main=有键盘焦点的屏,焦点在两屏间切换时条宽在 810/450pt 间来回跳。
+    ///  macOS 会把状态项镜像到每块屏的菜单栏,真身与镜像共用同一宽度,所以按一块屏定死最稳)
+    private var menuBarScreenWidth: CGFloat {
+        (chosenScreen(config.displayScreen) ?? NSScreen.screens.first)?.frame.width ?? 1440
     }
 
     // ── 系统字体跑马灯:3pt 一虚拟列,两面同宽 ──
     private var isTextMarquee: Bool { config.marqueeFont != "led" }
     private var textViewportCols: Int {
-        let screenW = NSScreen.main?.frame.width ?? 1440
+        let screenW = menuBarScreenWidth
         let cap = max(48, Int((screenW * 0.40 - 8) / 3.0))
         return max(24, min(config.defaultWidth * 6, cap))
     }
@@ -455,6 +462,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         item("Settings…", #selector(openConfigWindow), ",")
         let display = NSMenuItem(title: L("Display"), action: nil, keyEquivalent: "")
         display.submenu = buildModeMenu(); menu.addItem(display)
+        if barOn || boardOn {
+            let lock = NSMenuItem(title: L("Lock Floating Windows"), action: #selector(toggleLock), keyEquivalent: "")
+            lock.target = self; lock.state = config.lockPosition ? .on : .off
+            menu.addItem(lock)
+        }
+        if barOn {
+            let through = NSMenuItem(title: L("Click Through Floating Ticker"), action: #selector(toggleClickThrough), keyEquivalent: "")
+            through.target = self; through.state = config.barClickThrough ? .on : .off
+            menu.addItem(through)
+        }
         let appearance = NSMenuItem(title: L("Appearance"), action: nil, keyEquivalent: "")
         appearance.submenu = buildColorMenu(); menu.addItem(appearance)
         let advanced = NSMenuItem(title: L("Advanced"), action: nil, keyEquivalent: "")
@@ -554,6 +571,28 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         config.transparentColor = key
         saveConfig(config)
         engine.refreshArt()
+    }
+
+    @objc private func toggleLock() {
+        config.lockPosition.toggle()
+        persistFloatingOptions()
+    }
+
+    @objc private func toggleClickThrough() {
+        config.barClickThrough.toggle()
+        persistFloatingOptions()
+    }
+
+    /// 锁定/穿透只改这两项:别的字段以磁盘为准(浮窗位置可能刚被拖动写过)
+    private func persistFloatingOptions() {
+        if configReadError == nil, var saved = try? readConfig(at: configURL) {
+            saved.lockPosition = config.lockPosition
+            saved.barClickThrough = config.barClickThrough
+            saveConfig(saved)
+            config.barOrigin = saved.barOrigin; config.boardOrigin = saved.boardOrigin
+        }
+        barWindow?.config = config
+        board?.config = config
     }
 
     @objc private func toggleTickerEnabled() {
@@ -685,6 +724,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         // cols:各显示面图层实际滚到的列(连查两次在变 = 动画在 GPU 上推进)
         let cols = engine.surfaces().map { $0.presentationCol.map { String(format: "%.1f", $0) } ?? "null" }
+        if let window = statusItem?.button?.window, menubar != "null" {
+            let screen = (try? JSONEncoder().encode(window.screen?.localizedName ?? "")).flatMap { String(data: $0, encoding: .utf8) } ?? "\"\""
+            menubar = String(menubar.dropLast()) + ",\"screen\":\(screen)}"
+        }
         let listName = config.watchlists.indices.contains(config.activeWatchlist) ? config.watchlists[config.activeWatchlist].name : ""
         let list = (try? JSONEncoder().encode(listName)).flatMap { String(data: $0, encoding: .utf8) } ?? "\"\""
         return "{\"phase\":\"\(engine.phaseName)\",\"queue\":\(engine.queueCount),\"pid\":\(getpid()),\"version\":\"\(Self.version)\",\"list\":\(list),\"menubar\":\(menubar),\"cols\":[\(cols.joined(separator: ","))]}"
