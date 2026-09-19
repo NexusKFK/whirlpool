@@ -47,10 +47,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         max(4, Int((Double(config.defaultWidth) * 3.0 / Double(LEDLayout(dot: dot).colW)).rounded()))
     }
 
+    /// 菜单栏面宽度上限:屏宽的 40%。整条行情流是浮动 bar 的主场,
+    /// 状态栏项过宽会让 AppKit 每帧重排吃满主线程(实测 55 字符 ≈28% CPU)。
+    private func menuBarCols(dot: Int) -> Int {
+        let screenW = NSScreen.main?.frame.width ?? 1440
+        let cap = Int((screenW * 0.40 - 8) / Double(6 * LEDLayout(dot: dot).colW))
+        return max(8, min(displayCols(dot: dot), cap))
+    }
+
     /// 引擎侧(画布覆盖/预取时机)按最宽可视面取值,保证任何一屏都滚得出内容
     private var maxViewportCols: Int {
         if isTextMarquee { return textViewportCols }
-        return max(displayCols(dot: min(config.ledDotSize, 2)), displayCols(dot: config.ledDotSize))
+        return max(menuBarCols(dot: min(config.ledDotSize, 2)), displayCols(dot: config.ledDotSize))
     }
 
     // ── 系统字体跑马灯(flat-text)──
@@ -58,7 +66,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // 文本无点阵放大问题,L 档(17pt 字号)菜单栏放得下,无需双面钳档。
     private var textStrip: TextStrip?
     private var isTextMarquee: Bool { config.marqueeFont != "led" }
-    private var textViewportCols: Int { max(4, config.defaultWidth * 6) }
+    /// 文本视口同样吃菜单栏 40% 屏宽上限(单帧双面共用,取宽的一方决定)
+    private var textViewportCols: Int {
+        let screenW = NSScreen.main?.frame.width ?? 1440
+        let cap = max(48, Int((screenW * 0.40 - 8) / 3.0))   // 3pt/虚拟列
+        return max(24, min(config.defaultWidth * 6, cap))
+    }
 
     private var marqueeNSFont: NSFont {
         let size: CGFloat = config.ledDotSize == 1 ? 12 : (config.ledDotSize == 3 ? 17 : 14)
@@ -78,6 +91,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var queue:     [TickerMessage] = []
     private let queueLock = NSLock()
     private var interrupted: TickerMessage? = nil    // sehr-dringend unterbrochene Msg
+    private var frameParity = false                  // 状态栏半帧率:滚动帧隔一亮一
 
     // ── Setup ──────────────────────────────────────────────────────────────────
 
@@ -85,6 +99,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         config           = loadConfig()
         L10n.language = config.language
         installMainMenu()
+        applyDockIcon()
         renderTransparent = config.transparent
         applyTint()
 
@@ -290,8 +305,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         return menu
     }
 
+    private func applyDockIcon() {
+        // 常驻行情工具默认不占程序坞;要看得见进程/随手重启的用户可打开图标
+        NSApp.setActivationPolicy(config.showDockIcon ? .regular : .accessory)
+    }
+
     @objc private func showAbout() {
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.7.0"
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.7.1"
         NSApp.activate(ignoringOtherApps: true)
         NSApp.orderFrontStandardAboutPanel(options: [
             .applicationName: "Whirlpool", .applicationVersion: version,
@@ -373,12 +393,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         case .standby:
             if let msg = currentMsg {
                 if isTextMarquee {
-                    setImage(renderSurfaces { _ in
+                    setImage(renderSurfaces { _, _ in
                         renderTextStandbyFrame(text: msg.text, viewportCols: maxViewportCols,
                                                font: marqueeNSFont, defaultColor: baseColor())
                     })
                 } else {
-                    setImage(renderSurfaces { dot in
+                    setImage(renderSurfaces { dot, _ in
                         renderStandbyFrame(text: msg.text, displayWidth: displayCols(dot: dot),
                                            defaultColor: baseColor(),
                                            customChars: config.customChars, dot: dot)
@@ -469,6 +489,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 self.config = c
                 L10n.language = c.language
                 self.installMainMenu()
+                self.applyDockIcon()
                 if resetSource { self.configureQuoteService(); self.lastTicks = [:]; self.board?.resetPriceHistory() }
                 self.quoteService.interval = c.boardRefresh
                 self.applyDisplayMode()
@@ -495,6 +516,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         case .openSettings:
             DispatchQueue.main.async { self.openConfigWindow() }
             return "ok"
+        case .setMode:
+            // 模式切换:与设置页/菜单同源,和 tickerEnabled 无关
+            let wanted = msg.text
+            let key = TickerConfig.displayModes.first { $0.key == wanted }?.key
+                ?? (wanted == "both" ? "marquee,board" : nil)
+            if let key {
+                config.displayMode = key
+                saveConfig(config)
+                DispatchQueue.main.async { self.applyDisplayMode() }
+            }
+            return "ok"
         case .quit:
             DispatchQueue.main.async { NSApp.terminate(nil) }
             return "ok"
@@ -514,7 +546,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return "ok"
         case .scroll, .standby:
             break
-        case .getStatus, .quit, .openSettings:
+        case .getStatus, .quit, .openSettings, .setMode:
             return "ok"   // bereits oben behandelt
         }
 
@@ -614,7 +646,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 return
             }
 
-            showScrollFrame()
+            frameParity.toggle()
+            showScrollFrame(statusPaint: frameParity)
             scrollOffset += 1
 
         case .pauseInStream(let until):
@@ -712,19 +745,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         case .standby:
             if isTextMarquee {
-                setImage(renderSurfaces { _ in
+                setImage(renderSurfaces { _, _ in
                     renderTextStandbyFrame(text: msg.text, viewportCols: maxViewportCols,
                                            font: marqueeNSFont, defaultColor: defColor)
                 })
             } else {
-                setImage(renderSurfaces { dot in
+                setImage(renderSurfaces { dot, _ in
                     renderStandbyFrame(text: msg.text, displayWidth: displayCols(dot: dot),
                                        defaultColor: defColor, customChars: config.customChars, dot: dot)
                 })
             }
             phase = .standby(until: Date().addingTimeInterval(msg.duration))
 
-        case .setWidth, .clearQueue, .getStatus, .quit, .openSettings:
+        case .setWidth, .setMode, .clearQueue, .getStatus, .quit, .openSettings:
             break
         }
     }
@@ -749,27 +782,28 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // ── Darstellung ────────────────────────────────────────────────────────────
 
-    private func showScrollFrame(blank: Bool = false) {
+    private func showScrollFrame(blank: Bool = false, statusPaint: Bool = true) {
         // 每段进入可读区域后独立闪一次;使用单调时钟,滚动不停、数字不消失。
         // 各面按自己的档位换算可视列数(物理宽度锚定),闪变时钟按面各自计时。
+        // 状态栏是全窗最贵的面(AppKit 每帧重排):滚动帧降为半帧率,bar 全帧率。
         if let strip = textStrip {
-            setImage(renderSurfaces { _ in
+            setImage(renderSurfaces(statusPaint: statusPaint) { _, _ in
                 let flash = blank ? [:] : priceFlashes.colors(
                     offset: scrollOffset, visibleColumns: maxViewportCols,
                     roundLength: roundLen, now: ProcessInfo.processInfo.systemUptime)
                 return renderTextFrame(strip: strip, offset: scrollOffset,
                                        viewportCols: maxViewportCols, blank: blank, flash: flash)
-            })
+            }, statusPaint: statusPaint)
             return
         }
-        setImage(renderSurfaces { dot in
-            let vw = displayCols(dot: dot)
+        setImage(renderSurfaces(statusPaint: statusPaint) { dot, menubar in
+            let vw = menubar ? menuBarCols(dot: dot) : displayCols(dot: dot)
             let flash = blank ? [:] : priceFlashes.colors(
                 offset: scrollOffset, visibleColumns: visCols(displayWidth: vw),
                 roundLength: roundLen, now: ProcessInfo.processInfo.systemUptime)
             return renderScrollFrame(columns: canvas, offset: scrollOffset,
                                      displayWidth: vw, blank: blank, flash: flash, dot: dot)
-        })
+        }, statusPaint: statusPaint)
     }
 
     /// 无缝环绕画布:把串拼几份,保证任何窗口位置都有内容,
@@ -788,25 +822,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var marqueeOn: Bool { config.displayMode.contains("marquee") }
 
-    private func renderSurfaces(_ make: (_ dot: Int) -> NSImage) -> (menubar: NSImage, bar: NSImage) {
+    /// menubar=false 时菜单栏份跳过渲染(nil),省掉最贵的一帧
+    private func renderSurfaces(statusPaint: Bool = true,
+                                _ make: (_ dot: Int, _ menubar: Bool) -> NSImage) -> (menubar: NSImage?, bar: NSImage) {
         if config.ledDotSize <= 2 {
             renderDotSize = config.ledDotSize
-            let img = make(config.ledDotSize)
+            let img = make(config.ledDotSize, true)
             return (img, img)
         }
         renderDotSize = 2
-        let menubar = make(2)
+        let menubar = statusPaint ? make(2, true) : nil
         if barWindow?.isVisible == true {
             renderDotSize = config.ledDotSize
-            return (menubar, make(config.ledDotSize))
+            return (menubar, make(config.ledDotSize, false))
         }
-        return (menubar, menubar)   // bar 不在时 bar 份不会被消费
+        if let menubar { return (menubar, menubar) }
+        return (nil, make(2, false))   // bar 不在且本帧不画菜单栏:bar 份占位不消费
     }
 
-    private func setImage(_ surfaces: (menubar: NSImage, bar: NSImage)) {
-        if let si = statusItem, marqueeOn {
-            si.button?.image = surfaces.menubar
-            si.button?.title = ""
+    private func setImage(_ surfaces: (menubar: NSImage?, bar: NSImage), statusPaint: Bool = true) {
+        if statusPaint, let img = surfaces.menubar, let si = statusItem, marqueeOn {
+            si.button?.image = img
         }
         if let bar = barWindow, bar.isVisible {
             bar.update(surfaces.bar)
@@ -816,8 +852,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func setIdle() {
         guard !idleRendered else { return }
         idleRendered = true
-        let surfaces = renderSurfaces { dot in renderIdleIcon(color: currentIdleColor(), dot: dot) }
-        statusItem?.button?.image = surfaces.menubar
+        let surfaces = renderSurfaces { dot, _ in renderIdleIcon(color: currentIdleColor(), dot: dot) }
+        if let img = surfaces.menubar { statusItem?.button?.image = img }
         barWindow?.update(surfaces.bar)
     }
 

@@ -13,6 +13,7 @@ struct TickerConfig: Codable {
     var defaultWidth:      Int               = 20
     var ledDotSize:        Int               = 2      // 点阵字号:1=S 2=M(默认) 3=L;菜单栏超限自动钳中档
     var marqueeFont:       String            = "led"  // 跑马灯字体:led=LED点阵 system=系统字体 mono=等宽字体
+    var showDockIcon:      Bool              = false  // 程序坞显示图标:给常驻进程一个可见抓手(可右键退出)
     var scrollSpeed:       Double            = 0.0222  // ≈45 列/秒
     var defaultPause:      Double            = 0      // 每轮开头停留秒数,0=连续滚
     var customChars:       [String: [UInt8]] = [:]
@@ -47,7 +48,7 @@ struct TickerConfig: Codable {
     init() {}
 
     private enum CodingKeys: String, CodingKey {
-        case tickerEnabled, defaultColor, defaultWidth, ledDotSize, marqueeFont, scrollSpeed, defaultPause, customChars, transparent, transparentColor, marqueeSeparator, changeArrows, quoteLoop, watchlist, pausePerSymbol, redUpMarkets, provider, displayMode, boardCorner, boardOrigin, boardRefresh, barOrigin, boardPixelFont, marqueeBlink, language
+        case tickerEnabled, defaultColor, defaultWidth, ledDotSize, marqueeFont, showDockIcon, scrollSpeed, defaultPause, customChars, transparent, transparentColor, marqueeSeparator, changeArrows, quoteLoop, watchlist, pausePerSymbol, redUpMarkets, provider, displayMode, boardCorner, boardOrigin, boardRefresh, barOrigin, boardPixelFont, marqueeBlink, language
     }
 
     init(from decoder: Decoder) throws {
@@ -58,6 +59,7 @@ struct TickerConfig: Codable {
         defaultWidth = try values.decodeIfPresent(type(of: defaultWidth), forKey: .defaultWidth) ?? defaultWidth
         ledDotSize = try values.decodeIfPresent(type(of: ledDotSize), forKey: .ledDotSize) ?? ledDotSize
         marqueeFont = try values.decodeIfPresent(type(of: marqueeFont), forKey: .marqueeFont) ?? marqueeFont
+        showDockIcon = try values.decodeIfPresent(type(of: showDockIcon), forKey: .showDockIcon) ?? showDockIcon
         scrollSpeed = try values.decodeIfPresent(type(of: scrollSpeed), forKey: .scrollSpeed) ?? scrollSpeed
         defaultPause = try values.decodeIfPresent(type(of: defaultPause), forKey: .defaultPause) ?? defaultPause
         customChars = try values.decodeIfPresent(type(of: customChars), forKey: .customChars) ?? customChars

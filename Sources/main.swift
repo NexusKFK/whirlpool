@@ -59,6 +59,29 @@ if CommandLine.arguments.count > 1 {
         cliSend(msg); exit(0)
     }
 
+    // --mode marquee|board|bar|marquee,board|marquee,bar
+    if let mode = value(for: ["--mode"]) {
+        let msg = TickerMessage(kind: .setMode, text: mode, priority: .normal,
+                                duration: 0, onClickCommand: nil, width: nil)
+        cliSend(msg); exit(0)
+    }
+
+    // --restart — 退出运行中的实例并重新拉起(常驻进程不可见时的抓手)
+    if has(["--restart"]) {
+        let quitMsg = TickerMessage(kind: .quit, text: "", priority: .normal,
+                                    duration: 0, onClickCommand: nil, width: nil)
+        cliSend(quitMsg)
+        for _ in 0..<30 {
+            if !FileManager.default.fileExists(atPath: socketPath) { break }
+            usleep(100_000)
+        }
+        let launcher = Process()
+        launcher.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        launcher.arguments = ["-a", "Whirlpool"]
+        try? launcher.run()
+        exit(0)
+    }
+
     guard let txt = text else {
         fputs("""
         Usage:
@@ -69,7 +92,9 @@ if CommandLine.arguments.count > 1 {
           whirlpool --standby-urgent TEXT --duration N
           whirlpool --standby-very-urgent TEXT --duration N
           whirlpool --width N
+          whirlpool --mode marquee|board|bar|marquee,board|marquee,bar
           whirlpool --settings
+          whirlpool --restart
           whirlpool --clear
           whirlpool --status
           whirlpool --quit

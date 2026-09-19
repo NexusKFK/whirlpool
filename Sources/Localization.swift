@@ -68,6 +68,8 @@ enum L10n {
         "seconds": "秒",
         "30 seconds is recommended. Short intervals may be rate-limited. All displays share one request cycle.": "建议 30 秒。频繁刷新可能被限流；所有显示共享一次行情请求。",
         "Red means up in China / Hong Kong": "A 股与港股使用红涨绿跌",
+        "Show Dock icon": "在程序坞显示图标",
+        "The Dock icon gives a visible handle on the running app — right-click it to quit or relaunch.": "程序坞图标让你随时看得到这个进程——右键即可退出或重新打开。",
         "Language changes apply after saving.": "语言切换在保存后生效。",
         "Cancel": "取消",
         "Save": "保存",
