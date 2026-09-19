@@ -20,6 +20,10 @@
 
 ---
 
+<p align="center">
+  <img src="docs/img/whirlpool-demo.gif" width="960" alt="Whirlpool: LED ticker in the menu bar, floating ticker and quote board, in dark and light">
+</p>
+
 [简体中文](README.zh-CN.md) · English
 
 A quiet desktop ticker for your watchlist. Whirlpool displays a scrolling LED ticker and a compact quote board, with price changes highlighted from the highest changed digit through the end of the price.
@@ -45,6 +49,8 @@ On macOS, open `Whirlpool.app`. Right-click the menu-bar ticker, floating ticker
 Colors follow the surface they are drawn on: symbols and prices are white on a dark menu bar and near-black on a light one, and red/green switch to darker, contrast-checked shades on light backgrounds (**Display → Colors**: Adaptive, Monochrome, Amber, Green). The floating ticker can sit on a glass capsule so it stays readable over light windows. Hover over a ticker to pause it; double-click a board row (or use **Open Chart** in the menu) to open TradingView/Yahoo.
 
 Scrolling is GPU-composited: each round is rendered once and Core Animation moves it at the display refresh rate, so the app itself stays near 0% CPU while scrolling.
+
+Pick the screen for the floating ticker and board in **Display → Screen** (macOS mirrors the menu bar ticker to every screen's menu bar; its width is sized for the chosen screen). **Lock Floating Windows** stops accidental drags, and **Click Through Floating Ticker** lets clicks reach the windows underneath — both are in the right-click menu of the menu bar icon and in Settings.
 
 Keep several named watchlists and switch them from the menu (**Watchlists**), by Option-clicking a ticker, or with `whirlpool --list NAME`. Price precision is automatic per instrument (FX 4 decimals, A-share ETFs 3, low-priced crypto more) and can be set per symbol in the Watchlist tab.
 

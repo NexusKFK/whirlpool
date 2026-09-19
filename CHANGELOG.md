@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.9.1
+
+- Screen choice: **Display → Screen** puts the floating ticker and board on a chosen display (stored by display UUID, so it survives reboots; a disconnected choice is kept and falls back to the main display). macOS mirrors a status item to every screen's menu bar (`NSStatusItemReplicantView`) with one shared width, so the menu bar ticker cannot be limited to one screen; its width is now sized for the chosen (or main) screen instead of whichever screen had keyboard focus, which made it jump between 810 and 450 pt.
+- Floating windows: **Lock Floating Windows** (no dragging; menus and hover pause still work) and **Click Through Floating Ticker** (clicks reach the windows below; turn it off from the menu bar icon). Same options on Windows (tray menu).
+- Settings: watchlist rows are vertically centered with more row height and column spacing, and the Decimals column no longer overflows the table; the window grows to fit the new options.
+- Defaults stay menu-bar-only (`displayMode = marquee`), now covered by tests on both platforms.
+- README demo GIF rendered by the app's own renderers (`tools/make-demo-gif.sh`).
+
+中文：新增「显示器」设置——浮动行情条与报价卡显示在所选屏幕（按显示器 UUID 记忆，重启不变；未连接时回落主屏）。macOS 会把状态项镜像到每块屏幕的菜单栏且共用宽度，无法只在一块屏显示菜单栏跑马灯；其宽度改为按所选屏（或主屏）固定计算，不再随键盘焦点在 810/450pt 间跳动。新增「锁定浮窗位置」与「浮动行情条点击穿透」（Windows 同步，在托盘菜单）。设置页自选表格行内垂直居中、加大行高与列距，小数位列不再溢出。默认仍只开菜单栏跑马灯，两端均有测试覆盖。README 新增由 app 渲染代码生成的演示动图。
+
 ## 1.9.0
 
 - Exchange holidays in smart refresh: NYSE holidays and 1:00 p.m. early closes are computed from the exchange rules (Easter, weekend observance) and match the official 2026–2027 calendar; China A-share closures (2026, State Council notice, cross-checked day by day against the SZSE trading calendar) and HKEX holidays and half days (2026–2027, HKEX schedule updated 2026-07-31) are built in. HKEX's extended morning session means Hong Kong now counts as open continuously 9:30–16:00. Years without a published calendar fall back to "weekdays are open", and a live safety net treats a market as open whenever its latest trade timestamp is under five minutes old.

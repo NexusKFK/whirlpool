@@ -160,5 +160,17 @@
   "Ctrl-click the ticker to switch": "Ctrl + 单击行情条可快速切换",
   "The list selected here is shown after saving. Switch lists from the menu or Ctrl-click the ticker.": "保存后显示这里选中的自选池。平时可在托盘菜单里切换，或 Ctrl + 单击行情条。",
   "A new version is available. Click to download.": "有新版本可用，点击前往下载。",
-  "Once a day Whirlpool asks GitHub for the latest release (no identifiers sent). New versions appear in the menu and as a notification.": "每天向 GitHub 查询一次最新发布（不发送任何标识）。有新版本时出现在托盘菜单里，并弹出一次通知。"
+  "Once a day Whirlpool asks GitHub for the latest release (no identifiers sent). New versions appear in the menu and as a notification.": "每天向 GitHub 查询一次最新发布（不发送任何标识）。有新版本时出现在托盘菜单里，并弹出一次通知。",
+  "Screen": "显示器",
+  "Main display": "主显示器",
+  "Automatic (primary display)": "自动（主显示器）",
+  "Disconnected display": "未连接的显示器",
+  "The floating ticker and board open on this screen.": "浮动行情条和报价卡会显示在所选屏幕。",
+  "The floating ticker and board appear on this screen. macOS mirrors the menu bar ticker to every screen's menu bar; its width is sized for this screen.": "浮动行情条和报价卡显示在所选屏幕。菜单栏跑马灯会由 macOS 同步显示在每块屏幕的菜单栏里，宽度按所选屏幕计算。",
+  "Lock Floating Windows": "锁定浮窗位置",
+  "Click Through Floating Ticker": "浮动行情条点击穿透",
+  "Click Through Ticker": "行情条点击穿透",
+  "Lock floating windows in place": "锁定浮动行情条与报价卡的位置",
+  "Let clicks pass through the floating ticker (turn off from the menu bar icon)": "浮动行情条点击穿透（可在菜单栏图标的右键菜单里关闭）",
+  "Let clicks pass through the floating ticker (turn off from the tray menu)": "浮动行情条点击穿透（可在托盘菜单里关闭）"
 }

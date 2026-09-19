@@ -17,7 +17,7 @@ public sealed class QuoteFeed : IDisposable
     private string key = "";
     public string Status { get; private set; } = "Waiting for quotes";
     public DateTimeOffset? LastUpdated { get; private set; }
-    public static string Version { get; set; } = "1.9.0";
+    public static string Version { get; set; } = "1.9.1";
 
     public QuoteFeed(HttpMessageHandler? handler = null, Func<DateTimeOffset>? clock = null)
     {

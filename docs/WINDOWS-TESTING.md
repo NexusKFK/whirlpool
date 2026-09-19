@@ -28,6 +28,9 @@ Status: cross-compilation and core checks can run on macOS. Native Windows execu
 - [ ] Lock the session or sleep; verify polling stops (no network traffic) and resumes after unlock/wake.
 - [ ] Run Check for Updates… (newer release → Download/Later/Skip; otherwise "up to date"); verify the automatic check shows one notification per version.
 - [ ] With an old `%APPDATA%\Pinwheel\config.json` and no Whirlpool config, verify the watchlist is carried over on first launch.
+- [ ] With two monitors, choose each screen in Settings → Display → Screen; verify the ticker and board move there and stay after restart.
+- [ ] Enable Lock Floating Windows; verify the ticker and board cannot be dragged and the tray menu still works.
+- [ ] Enable Click Through Ticker; verify clicks reach the window underneath; turn it off from the tray menu.
 - [ ] Run `Whirlpool.exe --smoke-test` and inspect the process exit code.
 
 Config: `%APPDATA%\Whirlpool\config.json`. To report issues, include OS version, display scaling, app version, and steps. Remove personal information from screenshots/configs before sharing.

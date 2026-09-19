@@ -19,6 +19,7 @@ final class BarWindow: NSPanel, NSWindowDelegate {
     var config: TickerConfig {
         didSet {
             if oldValue.barBackground != config.barBackground { installBackdrop() }
+            applyLock()
             reposition()
         }
     }
@@ -47,7 +48,14 @@ final class BarWindow: NSPanel, NSWindowDelegate {
         becomesKeyOnlyIfNeeded = true
         contentView = root
         installBackdrop()
+        applyLock()
         reposition()
+    }
+
+    /// 锁定:不能拖;点击穿透:整条不接鼠标,点击直接落到下面的窗口
+    private func applyLock() {
+        root.locked = config.lockPosition
+        ignoresMouseEvents = config.barClickThrough
     }
 
     private func installBackdrop() {
@@ -115,7 +123,7 @@ final class BarWindow: NSPanel, NSWindowDelegate {
             programmaticMove = false
             return
         }
-        guard let screen = NSScreen.main ?? NSScreen.screens.first else { return }
+        guard let screen = placementScreen(config.displayScreen) else { return }
         let f = screen.frame
         programmaticMove = true
         setFrameOrigin(NSPoint(x: (f.midX - frame.width / 2).rounded(), y: f.minY + 10))
@@ -144,14 +152,15 @@ private final class BarRootView: NSView {
     var menuProvider: (() -> NSMenu)?
     var onHover: ((Bool) -> Void)?
     var onOptionClick: (() -> Void)?
+    var locked = false
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         frame.contains(point) ? self : nil
     }
-    override var mouseDownCanMoveWindow: Bool { true }
+    override var mouseDownCanMoveWindow: Bool { !locked }
     override func mouseDown(with event: NSEvent) {
         if event.modifierFlags.contains(.option) { onOptionClick?(); return }   // ⌥+单击切自选池
-        window?.performDrag(with: event)
+        if !locked { window?.performDrag(with: event) }
     }
     override func rightMouseDown(with event: NSEvent) {
         if let menu = menuProvider?() { NSMenu.popUpContextMenu(menu, with: event, for: self) }

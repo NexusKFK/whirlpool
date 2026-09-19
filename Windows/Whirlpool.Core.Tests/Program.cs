@@ -40,6 +40,8 @@ var yahoo = QuoteFeed.ParseYahoo(Encoding.UTF8.GetBytes("{\"chart\":{\"result\":
 Check(yahoo?.Decimals == 4 && yahoo.MarketTime == DateTimeOffset.FromUnixTimeSeconds(1789761600), "Yahoo precision hint and time");
 
 // ── Settings: validation, migration, multiple watchlists ──
+var defaults = new Settings();
+Check(defaults.ShowTicker && !defaults.ShowBoard && defaults.DisplayScreen == "auto", "defaults: ticker only, automatic screen");
 Check(!Settings.ValidEntries([new("700", "hk"), new("00700", "hk")]), "canonical duplicate validation");
 Check(!Settings.ValidEntries([new("AAPL\\c[red]", "us")]), "invalid symbol rejected");
 I18n.Language = "en"; Check(I18n.T("Settings…") == "Settings…", "English");

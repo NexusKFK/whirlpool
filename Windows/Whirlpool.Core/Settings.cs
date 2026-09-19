@@ -25,6 +25,12 @@ public sealed class Settings
     public bool CheckUpdates { get; set; } = true;
     /// <summary>system | light | dark</summary>
     public string Theme { get; set; } = "system";
+    /// <summary>Floating windows cannot be dragged (menus and hover still work).</summary>
+    public bool LockPosition { get; set; }
+    /// <summary>Mouse clicks pass through the ticker to the windows below (turn off from the tray menu).</summary>
+    public bool ClickThrough { get; set; }
+    /// <summary>Screen device name for the floating windows; "auto" = primary screen.</summary>
+    public string DisplayScreen { get; set; } = "auto";
     public List<string> RedUpMarkets { get; set; } = ["cn", "hk"];
     public int[]? TickerOrigin { get; set; }
     public int[]? BoardOrigin { get; set; }
@@ -73,6 +79,7 @@ public sealed class Settings
         WidthCharacters = Math.Clamp(WidthCharacters, 8, 60);
         Language = new[] { "system", "en", "zh-Hans" }.Contains(Language) ? Language : "system";
         Theme = new[] { "system", "light", "dark" }.Contains(Theme) ? Theme : "system";
+        DisplayScreen = string.IsNullOrWhiteSpace(DisplayScreen) ? "auto" : DisplayScreen.Trim();
         Provider = Provider == "demo" ? "demo" : "real";
         RedUpMarkets ??= [];
         Watchlists ??= [];

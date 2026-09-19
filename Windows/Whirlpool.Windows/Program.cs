@@ -120,9 +120,15 @@ internal sealed class TickerApplication : ApplicationContext
         var tickerItem = new ToolStripMenuItem(T("Show Ticker")) { Checked = settings.ShowTicker };
         tickerItem.Click += (_, _) => { settings.ShowTicker = !settings.ShowTicker; if (!settings.ShowTicker) settings.ShowBoard = true; Apply(); SaveSettings(); };
         menu.Items.Add(tickerItem);
+        var lockItem = new ToolStripMenuItem(T("Lock Floating Windows")) { Checked = settings.LockPosition };
+        lockItem.Click += (_, _) => { settings.LockPosition = !settings.LockPosition; Apply(); SaveSettings(); };
+        var throughItem = new ToolStripMenuItem(T("Click Through Ticker")) { Checked = settings.ClickThrough, Enabled = settings.ShowTicker };
+        throughItem.Click += (_, _) => { settings.ClickThrough = !settings.ClickThrough; Apply(); SaveSettings(); };
         var boardItem = new ToolStripMenuItem(T("Show Board")) { Checked = settings.ShowBoard };
         boardItem.Click += (_, _) => { settings.ShowBoard = !settings.ShowBoard; if (!settings.ShowBoard) settings.ShowTicker = true; Apply(); SaveSettings(); };
         menu.Items.Add(boardItem);
+        menu.Items.Add(lockItem);
+        menu.Items.Add(throughItem);
         menu.Items.Add(T("Show Configuration File…"), null, (_, _) =>
         {
             if (File.Exists(Settings.ConfigPath)) Open("explorer.exe", "/select,\"" + Settings.ConfigPath + "\"");
@@ -329,9 +335,16 @@ internal sealed class TickerApplication : ApplicationContext
 
 internal static class WindowPlacement
 {
-    public static void Apply(Form form, int[]? origin, bool board)
+    /// <summary>The chosen screen, or the primary one for "auto" / a disconnected screen.</summary>
+    public static Screen? Target(string key) =>
+        (key == "auto" ? null : Screen.AllScreens.FirstOrDefault(s => s.DeviceName == key)) ?? Screen.PrimaryScreen;
+
+    public static string Label(Screen screen, int index) =>
+        $"{index + 1}. {screen.Bounds.Width}×{screen.Bounds.Height}" + (screen.Primary ? " · " + T("Main display") : "");
+
+    public static void Apply(Form form, int[]? origin, bool board, string screenKey = "auto")
     {
-        var work = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1280, 720);
+        var work = Target(screenKey)?.WorkingArea ?? new Rectangle(0, 0, 1280, 720);
         var point = origin is { Length: 2 } ? new Point(origin[0], origin[1])
             : new Point(board ? work.Right - form.Width - 20 : work.Left + (work.Width - form.Width) / 2, work.Bottom - form.Height - (board ? 80 : 18));
         var rect = new Rectangle(point, form.Size);

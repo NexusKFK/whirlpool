@@ -65,13 +65,16 @@ struct TickerConfig: Codable {
     var hoverPause:        Bool              = true      // 鼠标悬停时暂停滚动,方便读数
     var smartRefresh:      Bool              = true      // 所有自选市场休市时放慢拉取,开盘前自动恢复
     var checkUpdates:      Bool              = true      // 每天查一次 GitHub Release,有新版在菜单与跑马灯里提示
+    var lockPosition:      Bool              = false     // 锁定浮动条/报价卡位置(不能拖动,右键与悬停照常)
+    var barClickThrough:   Bool              = false     // 浮动条点击穿透:鼠标直接落到下面的窗口(从菜单栏图标关闭)
+    var displayScreen:     String            = "auto"    // 显示器 UUID:跑马灯只在该屏菜单栏滚动,浮窗落在该屏;auto=不指定
     var language: String = "system"
 
     init() {}
 
     private enum CodingKeys: String, CodingKey {
         case tickerEnabled, defaultColor, defaultWidth, ledDotSize, marqueeFont, showDockIcon, scrollSpeed, defaultPause, customChars, transparent, transparentColor, marqueeSeparator, changeArrows, quoteLoop, watchlist, pausePerSymbol, redUpMarkets, provider, displayMode, boardCorner, boardOrigin, boardRefresh, barOrigin, boardPixelFont, marqueeBlink, barBackground, hoverPause, smartRefresh, language
-        case watchlists, activeWatchlist, checkUpdates
+        case watchlists, activeWatchlist, checkUpdates, displayScreen, lockPosition, barClickThrough
     }
 
     init(from decoder: Decoder) throws {
@@ -116,6 +119,9 @@ struct TickerConfig: Codable {
         hoverPause = try values.decodeIfPresent(type(of: hoverPause), forKey: .hoverPause) ?? hoverPause
         smartRefresh = try values.decodeIfPresent(type(of: smartRefresh), forKey: .smartRefresh) ?? smartRefresh
         checkUpdates = try values.decodeIfPresent(type(of: checkUpdates), forKey: .checkUpdates) ?? checkUpdates
+        displayScreen = try values.decodeIfPresent(type(of: displayScreen), forKey: .displayScreen) ?? displayScreen
+        lockPosition = try values.decodeIfPresent(type(of: lockPosition), forKey: .lockPosition) ?? lockPosition
+        barClickThrough = try values.decodeIfPresent(type(of: barClickThrough), forKey: .barClickThrough) ?? barClickThrough
         language = try values.decodeIfPresent(type(of: language), forKey: .language) ?? language
         boardOrigin = try values.decodeIfPresent([Double].self, forKey: .boardOrigin)
         barOrigin = try values.decodeIfPresent([Double].self, forKey: .barOrigin)
@@ -156,6 +162,9 @@ struct TickerConfig: Codable {
         try c.encode(hoverPause, forKey: .hoverPause)
         try c.encode(smartRefresh, forKey: .smartRefresh)
         try c.encode(checkUpdates, forKey: .checkUpdates)
+        try c.encode(displayScreen, forKey: .displayScreen)
+        try c.encode(lockPosition, forKey: .lockPosition)
+        try c.encode(barClickThrough, forKey: .barClickThrough)
         try c.encode(language, forKey: .language)
     }
 
@@ -171,6 +180,8 @@ struct TickerConfig: Codable {
         if !["real", "demo"].contains(provider) { provider = "real" }
         transparentColor = ColorScheme(configKey: transparentColor).rawValue
         if !["glass", "none"].contains(barBackground) { barBackground = "glass" }
+        displayScreen = displayScreen.trimmingCharacters(in: .whitespaces)
+        if displayScreen.isEmpty { displayScreen = "auto" }
         if displayMode == "both" { displayMode = "marquee,board" }
         if !Self.displayModes.contains(where: { $0.key == displayMode }) { displayMode = "marquee" }
         for li in watchlists.indices {

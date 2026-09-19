@@ -16,6 +16,8 @@ internal sealed class SettingsForm : Form
     private readonly ComboBox source = Combo([T("Yahoo / Tencent"), T("Demo (simulated prices)")]);
     private readonly ComboBox mode = Combo([T("Floating Ticker"), T("Quote Board"), T("Ticker + Board")]);
     private readonly ComboBox theme = Combo([T("System Default"), T("Light"), T("Dark")]);
+    private readonly ComboBox screen = Combo([]);
+    private readonly List<string> screenKeys = [];
     private readonly NumericUpDown interval = new() { Minimum = 5, Maximum = 3600, Width = 110 };
     private readonly NumericUpDown speed = new() { Minimum = 10, Maximum = 50, Width = 110 };
     private readonly NumericUpDown width = new() { Minimum = 8, Maximum = 60, Width = 110 };
@@ -23,6 +25,8 @@ internal sealed class SettingsForm : Form
     private readonly CheckBox flash = Check("Flash changed price suffixes");
     private readonly CheckBox topmost = Check("Always on top");
     private readonly CheckBox hover = Check("Pause scrolling while the pointer is over the ticker");
+    private readonly CheckBox locked = Check("Lock floating windows in place");
+    private readonly CheckBox through = Check("Let clicks pass through the floating ticker (turn off from the tray menu)");
     private readonly CheckBox redUp = Check("Red means up in China / Hong Kong");
     private readonly CheckBox smart = Check("Refresh slowly while all watched markets are closed");
     private readonly CheckBox login = Check("Launch at login");
@@ -47,9 +51,15 @@ internal sealed class SettingsForm : Form
         source.SelectedIndex = draft.Provider == "real" ? 0 : 1;
         mode.SelectedIndex = draft.ShowTicker && draft.ShowBoard ? 2 : draft.ShowBoard ? 1 : 0;
         theme.SelectedIndex = Math.Max(0, Array.IndexOf(new[] { "system", "light", "dark" }, draft.Theme));
+        screenKeys.Add("auto"); screen.Items.Add(T("Automatic (primary display)"));
+        var screens = Screen.AllScreens;
+        for (int i = 0; i < screens.Length; i++) { screenKeys.Add(screens[i].DeviceName); screen.Items.Add(WindowPlacement.Label(screens[i], i)); }
+        if (!screenKeys.Contains(draft.DisplayScreen)) { screenKeys.Add(draft.DisplayScreen); screen.Items.Add(T("Disconnected display")); }
+        screen.SelectedIndex = Math.Max(0, screenKeys.IndexOf(draft.DisplayScreen));
         interval.Value = draft.RefreshSeconds; speed.Value = draft.ColumnsPerSecond; width.Value = draft.WidthCharacters;
         arrows.Checked = draft.ChangeArrows; flash.Checked = draft.FlashChanges; topmost.Checked = draft.AlwaysOnTop;
         hover.Checked = draft.HoverPause; smart.Checked = draft.SmartRefresh; updates.Checked = draft.CheckUpdates;
+        locked.Checked = draft.LockPosition; through.Checked = draft.ClickThrough;
         login.Checked = LoginItem.Enabled;
         redUp.Checked = draft.RedUpMarkets.Contains("cn") && draft.RedUpMarkets.Contains("hk");
         ReloadPicker(); LoadGrid();
@@ -155,14 +165,16 @@ internal sealed class SettingsForm : Form
     private TabPage DisplayTab()
     {
         var form = FormRows();
-        Row(form, "Display mode", mode); Row(form, "Scroll speed", speed); Row(form, "Display width", width); Row(form, "Colors", theme);
+        Row(form, "Display mode", mode); Row(form, "Screen", screen);
+        Wide(form, Note("The floating ticker and board open on this screen."));
+        Row(form, "Scroll speed", speed); Row(form, "Display width", width); Row(form, "Colors", theme);
         Wide(form, new Label { Text = T("columns / sec") + " · " + T("characters"), AutoSize = true, ForeColor = SystemColors.GrayText });
-        Wide(form, arrows); Wide(form, flash); Wide(form, topmost); Wide(form, hover);
+        Wide(form, arrows); Wide(form, flash); Wide(form, topmost); Wide(form, hover); Wide(form, locked); Wide(form, through);
         Wide(form, Note("Flash color follows the previous quote; daily change keeps its own color."));
         var resetLabel = new Label { AutoSize = true, ForeColor = SystemColors.GrayText };
         Wide(form, Button("Reset Floating Windows", (_, _) => { draft.TickerOrigin = null; draft.BoardOrigin = null; resetLabel.Text = T("Window positions will reset after you save."); }));
         Wide(form, resetLabel);
-        var page = Page("Display"); page.Controls.Add(form); return page;
+        var page = Page("Display"); page.AutoScroll = true; page.Controls.Add(form); return page;
     }
 
     private TabPage GeneralTab()
@@ -215,6 +227,9 @@ internal sealed class SettingsForm : Form
         draft.ShowTicker = mode.SelectedIndex != 1; draft.ShowBoard = mode.SelectedIndex != 0;
         draft.ChangeArrows = arrows.Checked; draft.FlashChanges = flash.Checked; draft.AlwaysOnTop = topmost.Checked;
         draft.HoverPause = hover.Checked; draft.SmartRefresh = smart.Checked; draft.CheckUpdates = updates.Checked;
+        draft.LockPosition = locked.Checked; draft.ClickThrough = through.Checked;
+        var screenKey = screenKeys[Math.Max(0, screen.SelectedIndex)];
+        if (screenKey != draft.DisplayScreen) { draft.DisplayScreen = screenKey; draft.TickerOrigin = null; draft.BoardOrigin = null; }
         draft.RedUpMarkets.RemoveAll(m => m is "cn" or "hk"); if (redUp.Checked) draft.RedUpMarkets.AddRange(["cn", "hk"]);
         draft.Normalize();
         try
