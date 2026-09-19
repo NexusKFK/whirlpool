@@ -31,7 +31,7 @@ A quiet desktop ticker for your watchlist. Whirlpool displays a scrolling LED ti
 | System integration | Menu bar + floating ticker + quote board |
 | Language | English / Simplified Chinese / system default |
 | Quotes | Yahoo Finance / Tencent, or clearly labeled demo data |
-| Display | LED ticker with three dot sizes; pixel or system-font board; intraday chart |
+| Display | LED dots or system-font ticker with three sizes; pixel or system-font board; intraday chart |
 | Configuration | Native tabbed settings, ordered watchlist |
 | Minimum system | macOS 13 |
 
