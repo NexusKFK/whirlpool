@@ -53,10 +53,28 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // ── 系统字体跑马灯:3pt 一虚拟列,两面同宽 ──
     private var isTextMarquee: Bool { config.marqueeFont != "led" }
-    private var textViewportCols: Int {
-        let screenW = menuBarScreenWidth
-        let cap = max(48, Int((screenW * 0.40 - 8) / 3.0))
-        return max(24, min(config.defaultWidth * 6, cap))
+    /// 文本视口按显示面各自封顶:菜单栏吃 40% 屏宽上限(过宽会被 macOS 藏掉);
+    /// 浮动条只受它所在屏的宽度限制(以前与菜单栏共用 40% 上限,只开浮动条时也被卡在 ~810pt)
+    private func textViewportCols(for view: MarqueeView?) -> Int {
+        let wanted = config.defaultWidth * 6
+        let cap: Int
+        if view == nil || view === menuSurface {
+            cap = max(48, Int((menuBarScreenWidth * 0.40 - 8) / 3.0))
+        } else {
+            cap = max(48, Int((barScreenWidth - 60) / 3.0))
+        }
+        return max(24, min(wanted, cap))
+    }
+
+    /// 浮动条所在屏的宽度(已放好就按实际所在屏,否则按设置里选的屏)
+    private var barScreenWidth: CGFloat {
+        (barWindow?.screen ?? placementScreen(config.displayScreen))?.frame.width ?? 1440
+    }
+
+    /// 浮动条 LED 列数:按宽度设置,但不超出所在屏(留出胶囊边距)
+    private func barCols(dot: Int) -> Int {
+        let cap = Int((barScreenWidth - 60) / Double(6 * LEDLayout(dot: dot).colW))
+        return max(8, min(displayCols(dot: dot), cap))
     }
 
     private var marqueeNSFont: NSFont {
@@ -269,9 +287,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         engine.viewportCols = { [weak self] view in
             guard let self else { return 60 }
-            if self.isTextMarquee { return self.textViewportCols }
+            if self.isTextMarquee { return self.textViewportCols(for: view) }
             let d = self.dot(for: view)
-            return visCols(displayWidth: view === self.menuSurface ? self.menuBarCols(dot: d) : self.displayCols(dot: d))
+            return visCols(displayWidth: view === self.menuSurface ? self.menuBarCols(dot: d) : self.barCols(dot: d))
         }
         engine.viewportWidth = { [weak self] view in
             guard let self else { return 180 }
@@ -333,7 +351,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return renderTextStandbyFrame(text: msg.text, viewportCols: engine.viewportCols(view),
                                           font: marqueeNSFont, defaultColor: baseColor, style: st)
         }
-        let chars = view === menuSurface ? menuBarCols(dot: d) : displayCols(dot: d)
+        let chars = view === menuSurface ? menuBarCols(dot: d) : barCols(dot: d)
         return renderStandbyFrame(text: msg.text, displayWidth: chars, defaultColor: baseColor,
                                   customChars: config.customChars, dot: d, style: st, scale: scale)
     }
@@ -696,7 +714,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         switch msg.kind {
         case .setWidth:
             // 运行时覆盖宽度(不落盘);物理锚定下只改基准值,各面自行换算,下一轮生效
-            if let w = msg.width, w >= 5 { config.defaultWidth = min(60, max(8, w)) }
+            if let w = msg.width, w >= 5 { config.defaultWidth = min(TickerConfig.maxWidth, max(8, w)) }
             return "ok"
         case .clearQueue:
             restartMarquee()

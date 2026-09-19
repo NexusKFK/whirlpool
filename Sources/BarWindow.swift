@@ -96,11 +96,20 @@ final class BarWindow: NSPanel, NSWindowDelegate {
         if abs(target.width - frame.width) > 0.5 || abs(target.height - frame.height) > 0.5 {
             let cx = frame.midX
             programmaticMove = true
-            setFrame(NSRect(x: (cx - target.width / 2).rounded(), y: frame.origin.y,
-                            width: target.width, height: target.height), display: true)
+            setFrame(keptOnScreen(NSRect(x: (cx - target.width / 2).rounded(), y: frame.origin.y,
+                                         width: target.width, height: target.height)), display: true)
             programmaticMove = false
         }
         layoutContent()
+    }
+
+    /// 变宽后保持水平中心,但不许伸出所在屏(靠边放置时会被推回屏内)
+    private func keptOnScreen(_ rect: NSRect) -> NSRect {
+        guard let area = (screen ?? placementScreen(config.displayScreen))?.frame else { return rect }
+        var r = rect
+        let margin: CGFloat = 8
+        r.origin.x = min(max(r.origin.x, area.minX + margin), max(area.minX + margin, area.maxX - r.width - margin))
+        return r
     }
 
     private func layoutContent() {

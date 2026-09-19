@@ -1,4 +1,4 @@
-# NOTICE — Whirlpool 涡状星系
+# NOTICE — Whirlpool · WP行情带
 
 This file is part of Whirlpool.
 Whirlpool is authored and maintained by **NexusKFK** with contributions from
@@ -17,7 +17,7 @@ Astra, 2026. Project of origin: <https://github.com/NexusKFK/whirlpool>
 - You may study, modify and redistribute Whirlpool under GPL-3.0, provided you
   keep this notice, the copyright lines and the license texts, and release
   your modifications under GPL-3.0 as well.
-- The app icon, the "Whirlpool 涡状星系" product name, screenshots and docs
+- The app icon, the "Whirlpool" / "WP行情带" product names, screenshots and docs
   are **non-commercial**: do not rebrand, repackage or monetize them without
   written permission. Forks must not present this project's artwork as their own.
 - Mirrors and media coverage are welcome — please link back to the original

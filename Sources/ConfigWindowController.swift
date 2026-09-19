@@ -19,7 +19,7 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
     private let font = NSPopUpButton()
     private let refresh = NSTextField()
     private let speed = NSSlider(value: 30, minValue: 10, maxValue: 50, target: nil, action: nil)
-    private let width = NSSlider(value: 20, minValue: 8, maxValue: 60, target: nil, action: nil)
+    private let width = NSSlider(value: 20, minValue: 8, maxValue: Double(TickerConfig.maxWidth), target: nil, action: nil)
     private let speedValue = NSTextField(labelWithString: "")
     private let widthValue = NSTextField(labelWithString: "")
     private let arrows = NSButton(checkboxWithTitle: "", target: nil, action: nil)
