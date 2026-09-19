@@ -1,75 +1,54 @@
 import AppKit
+import os
 
-private let maxPending = 3
-private let blinkDuration = 0.4   // Sekunden pro Blink-Phase
-
-// ── Animations-Phase ───────────────────────────────────────────────────────────
-
-private enum Phase {
-    case idle
-    case scrolling                              // scrollIn + scrollOut in einem
-    case pauseInStream(until: Date)             // \p[N] getriggert
-    case stickyBlink(phase: Int, until: Date, cmd: String?, blinks: Int)
-    case stickyWait(cmd: String?)               // wartet auf Klick
-    case defaultPause(until: Date)              // End-of-message Pause
-    case standby(until: Date)                   // Standby-Text
-}
+/// 生命周期日志:`log show --last 1d --predicate 'subsystem == "local.whirlpool"'`
+/// 进程为什么退出(菜单、CLI、其他 app 发来的退出事件、系统注销)都记在这里。
+let appLog = Logger(subsystem: "local.whirlpool", category: "app")
 
 // ── App Delegate ───────────────────────────────────────────────────────────────
 
 class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var statusItem: NSStatusItem?
-    private var animTimer:  Timer?
-    private var pauseItem:  NSMenuItem?
-    private var config:     TickerConfig!
+    private var menuSurface: MarqueeView?
+    private var config: TickerConfig!
     private var quoteService: QuoteService!
+    private var provider: QuoteProvider?
     private var configRevision = 0
     private var cycleInFlight = false
-    private var prefetchArmed = true   // 每轮只预取一次;预取窗口比轮尾长,不设闸会连环重拉
     private var lastTicks: [String: Double] = [:]   // symbol → 上轮价格(判跳动方向)
-    private var priceFlashes = ScrollFlashes()
     private var board: BoardWindow?
     private var boardTimer: Timer?
     private var barWindow: BarWindow?
     private var configWindow: ConfigWindowController?
-
-    // Zustand
-    private var tintColor: LEDColor?   // im Menü gewählte Grundfarbe, nil = Menüleiste
-    private var phase: Phase = .idle
+    private let engine = MarqueeEngine()
     private var userPaused = false
-    private var idleRendered = false
+    private var suspended = false                   // 屏幕休眠 / 切走用户:停拉取、停滚动
+    private var artRefreshPending = false
+    private var retryPending = false
+    private var quitReason = "unknown"
+    private var hoverWatch: Timer?
+    private var updater: UpdateChecker?
 
     // ── 显示宽度=物理宽度,按 M 档字符数锚定(1 字符≈18pt)──
     // 字号切换时按各面点距换算字符数,换字号不再改变条在屏上的实际宽度。
-    // S 档一字符 12pt → 同宽度容 1.5× 字符;L 档 24pt → 0.75×。
     private func displayCols(dot: Int) -> Int {
         max(4, Int((Double(config.defaultWidth) * 3.0 / Double(LEDLayout(dot: dot).colW)).rounded()))
     }
 
     /// 菜单栏面宽度上限:屏宽的 40%。整条行情流是浮动 bar 的主场,
-    /// 状态栏项过宽会让 AppKit 每帧重排吃满主线程(实测 55 字符 ≈28% CPU)。
+    /// 状态项过宽时 macOS 会在应用菜单较长时把它整个藏掉(看上去像"退出了")。
     private func menuBarCols(dot: Int) -> Int {
         let screenW = NSScreen.main?.frame.width ?? 1440
         let cap = Int((screenW * 0.40 - 8) / Double(6 * LEDLayout(dot: dot).colW))
         return max(8, min(displayCols(dot: dot), cap))
     }
 
-    /// 引擎侧(画布覆盖/预取时机)按最宽可视面取值,保证任何一屏都滚得出内容
-    private var maxViewportCols: Int {
-        if isTextMarquee { return textViewportCols }
-        return max(menuBarCols(dot: min(config.ledDotSize, 2)), displayCols(dot: config.ledDotSize))
-    }
-
-    // ── 系统字体跑马灯(flat-text)──
-    // 文本按 3pt 一虚拟列计量(与 M 档 LED 点距一致),滚速/暂停/闪变引擎全复用;
-    // 文本无点阵放大问题,L 档(17pt 字号)菜单栏放得下,无需双面钳档。
-    private var textStrip: TextStrip?
+    // ── 系统字体跑马灯:3pt 一虚拟列,两面同宽 ──
     private var isTextMarquee: Bool { config.marqueeFont != "led" }
-    /// 文本视口同样吃菜单栏 40% 屏宽上限(单帧双面共用,取宽的一方决定)
     private var textViewportCols: Int {
         let screenW = NSScreen.main?.frame.width ?? 1440
-        let cap = max(48, Int((screenW * 0.40 - 8) / 3.0))   // 3pt/虚拟列
+        let cap = max(48, Int((screenW * 0.40 - 8) / 3.0))
         return max(24, min(config.defaultWidth * 6, cap))
     }
 
@@ -80,36 +59,46 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             : .monospacedDigitSystemFont(ofSize: size, weight: .regular)
     }
 
-    // Aktuelle Scroll-Animation
-    private var canvas:      [ColoredColumn] = []
-    private var scrollOffset = 0
-    private var roundLen     = 0             // 一轮 = 一份完整串(环绕画布的一半)
-    private var pendingPauses: [PauseMarker] = []   // noch nicht getriggert
-    private var currentMsg:  TickerMessage?          // für very-urgent Replay
+    private var marqueeOn: Bool { config.displayMode.contains("marquee") }
+    private var barOn: Bool { config.displayMode.contains("bar") }
+    private var boardOn: Bool { config.displayMode.contains("board") }
 
-    // Queue
-    private var queue:     [TickerMessage] = []
-    private let queueLock = NSLock()
-    private var interrupted: TickerMessage? = nil    // sehr-dringend unterbrochene Msg
+    /// 菜单栏放不下 L 档点阵(宿主窗口约 30pt 高),钳回 M;浮动条三档全可用
+    private func dot(for view: MarqueeView) -> Int {
+        view === menuSurface ? min(config.ledDotSize, 2) : config.ledDotSize
+    }
+
+    private func style(for view: MarqueeView) -> LEDStyle {
+        LEDStyle(tone: view.tone,
+                 mono: config.transparent && config.colorScheme == .mono,
+                 panel: !config.transparent)
+    }
+
+    /// 代码/价格的底色:透明模式由外观方案决定,黑底面板沿用 defaultColor
+    private var baseColor: LEDColor {
+        config.transparent ? config.colorScheme.baseColor : LEDColor.from(config.defaultColor)
+    }
 
     // ── Setup ──────────────────────────────────────────────────────────────────
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         config           = loadConfig()
         L10n.language = config.language
+        appLog.notice("launch v\(Self.version, privacy: .public) pid \(getpid())")
         installMainMenu()
         applyDockIcon()
-        renderTransparent = config.transparent
-        applyTint()
+        configureEngine()
 
-        updateRenderScale()
         NotificationCenter.default.addObserver(
             self, selector: #selector(screensChanged),
             name: NSApplication.didChangeScreenParametersNotification, object: nil)
-
-        // Idle-Icon sofort zeigen — der Timer läuft erst, wenn es etwas zu
-        // animieren gibt (siehe startTimer/stopTimer)
-        setIdle()
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(windowWillClose(_:)), name: NSWindow.willCloseNotification, object: nil)
+        let ws = NSWorkspace.shared.notificationCenter
+        ws.addObserver(self, selector: #selector(systemAsleep), name: NSWorkspace.screensDidSleepNotification, object: nil)
+        ws.addObserver(self, selector: #selector(systemAwake), name: NSWorkspace.screensDidWakeNotification, object: nil)
+        ws.addObserver(self, selector: #selector(systemAsleep), name: NSWorkspace.sessionDidResignActiveNotification, object: nil)
+        ws.addObserver(self, selector: #selector(systemAwake), name: NSWorkspace.sessionDidBecomeActiveNotification, object: nil)
 
         runSocketServer { [weak self] msg -> String in
             guard let self else { return "error" }
@@ -120,6 +109,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         configureQuoteService()
         applyDisplayMode()
+        configureUpdater()
         if let error = configReadError {
             let alert = NSAlert()
             alert.messageText = L("Configuration Could Not Be Read")
@@ -128,11 +118,53 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    static var version: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
+    }
+
+    // ── 退出:记录原因,清理 socket ──────────────────────────────────────────────
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        // 其他进程发来的 Quit Apple Event(Dock 右键退出、osascript、注销、清理工具…)
+        if let event = NSAppleEventManager.shared().currentAppleEvent,
+           event.eventClass == kCoreEventClass, event.eventID == kAEQuitApplication {
+            let pid = event.attributeDescriptor(forKeyword: keySenderPIDAttr)?.int32Value ?? 0
+            let name = NSRunningApplication(processIdentifier: pid)?.localizedName ?? "pid \(pid)"
+            let why = event.attributeDescriptor(forKeyword: kAEQuitReason)?.typeCodeValue
+            quitReason = "quit event from \(name)" + (why.map { " (reason \($0))" } ?? "")
+        }
+        return .terminateNow
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        appLog.notice("terminate: \(self.quitReason, privacy: .public)")
+        unlink(socketPath)
+    }
+
+    /// Dock 图标模式下点图标:打开设置(否则激活了却没窗口,⌘Q 会误退本 app)
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        openConfigWindow()   // 浮动条/报价卡算"可见窗口",不能靠 flag 判断
+        return false
+    }
+
+    /// 设置/关于窗口关掉后把前台还给上一个 app:
+    /// 否则本 app 仍是前台,用户按 ⌘Q 想退别的程序,退掉的却是行情
+    @objc private func windowWillClose(_ note: Notification) {
+        DispatchQueue.main.async {
+            let others = NSApp.windows.filter {
+                $0.isVisible && !($0 is BarWindow) && !($0 is BoardWindow) && $0.className != "NSStatusBarWindow"
+                    && $0 !== note.object as? NSWindow && $0.level == .normal
+            }
+            if others.isEmpty, NSApp.isActive { NSApp.deactivate() }
+        }
+    }
+
     private func installMainMenu() {
         let root = NSMenu()
         let application = NSMenuItem(title: "Whirlpool", action: nil, keyEquivalent: "")
         let appMenu = NSMenu(title: "Whirlpool")
         for (title, action, key) in [("About Whirlpool", #selector(showAbout), ""),
+                                      ("Check for Updates…", #selector(checkForUpdates), ""),
                                       ("Settings…", #selector(openConfigWindow), ","),
                                       ("Quit Whirlpool", #selector(quit), "q")] {
             let item = NSMenuItem(title: L(title), action: action, keyEquivalent: key)
@@ -152,94 +184,206 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func ensureStatusItem() {
         guard statusItem == nil else { return }
-        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        item.button?.title = ""
-        item.button?.action = #selector(statusItemClicked)
-        item.button?.target = self
-        item.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        let item = NSStatusBar.system.statusItem(withLength: 24)
+        guard let button = item.button else { statusItem = item; return }
+        button.title = ""
+        button.image = nil
+        button.action = #selector(statusItemClicked)
+        button.target = self
+        button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        button.setAccessibilityLabel("Whirlpool")
+        let surface = MarqueeView(frame: button.bounds)
+        surface.autoresizingMask = [.width, .height]
+        button.addSubview(surface)
+        hook(surface)
+        menuSurface = surface
         statusItem = item
     }
 
-    /// Grundfarbe einer Nachricht. Im gefärbten Transparentmodus gilt die im Menü
-    /// gewählte Farbe; \c[…] im Text überschreibt sie danach spaltenweise.
-    private func baseColor() -> LEDColor {
-        if renderColoredTransparent, let tint = tintColor { return tint }
-        return LEDColor.from(config.defaultColor)
+    /// 显示面的系统事件:明暗/倍率变化 → 原位重出纹理;悬停 → 暂停
+    private func hook(_ surface: MarqueeView) {
+        surface.onAppearanceChange = { [weak self] in self?.scheduleArtRefresh() }
+        surface.onBackingChange = { [weak self] in self?.scheduleArtRefresh() }
+        surface.onHover = { [weak self] inside in self?.hover(inside) }
     }
 
-    private func currentIdleColor() -> LEDColor {
-        baseColor()
+    private func hover(_ inside: Bool) {
+        guard config.hoverPause else { return }
+        if inside {
+            engine.hold()
+            // 菜单弹出等场景可能收不到 mouseExited:悬停期间每 0.5s 核对一次指针位置,离开就恢复
+            hoverWatch?.invalidate()
+            let t = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
+                guard let self else { return }
+                if !self.pointerOverTicker() { self.endHover() }
+            }
+            RunLoop.main.add(t, forMode: .common)
+            hoverWatch = t
+        } else {
+            endHover()
+        }
     }
 
-    // ── Pixeldichte ────────────────────────────────────────────────────────────
-    //
-    // Der Renderer schreibt Pixel direkt und braucht dafür die Auflösung des
-    // Bildschirms, auf dem die Menüleiste liegt.
-
-    private func updateRenderScale() {
-        let s = statusItem?.button?.window?.backingScaleFactor
-             ?? NSScreen.main?.backingScaleFactor ?? 2
-        renderScale = max(1, Int(s.rounded()))
+    private func endHover() {
+        hoverWatch?.invalidate(); hoverWatch = nil
+        engine.resume()
     }
+
+    private func pointerOverTicker() -> Bool {
+        let p = NSEvent.mouseLocation
+        var views: [NSView] = []
+        if let s = menuSurface { views.append(s) }
+        if let bar = barWindow, bar.isVisible, let root = bar.contentView { views.append(root) }
+        return views.contains { view in
+            guard let window = view.window else { return false }
+            return window.convertToScreen(view.convert(view.bounds, to: nil)).contains(p)
+        }
+    }
+
+    private func scheduleArtRefresh() {
+        guard !artRefreshPending else { return }
+        artRefreshPending = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.artRefreshPending = false
+            self.engine.refreshArt()
+        }
+    }
+
+    // ── 引擎接线 ───────────────────────────────────────────────────────────────
+
+    private func configureEngine() {
+        engine.surfaces = { [weak self] in
+            guard let self else { return [] }
+            var list: [MarqueeView] = []
+            if self.marqueeOn, let s = self.menuSurface { list.append(s) }
+            if self.barOn, let bar = self.barWindow, bar.isVisible { list.append(bar.surface) }
+            return list
+        }
+        engine.viewportCols = { [weak self] view in
+            guard let self else { return 60 }
+            if self.isTextMarquee { return self.textViewportCols }
+            let d = self.dot(for: view)
+            return visCols(displayWidth: view === self.menuSurface ? self.menuBarCols(dot: d) : self.displayCols(dot: d))
+        }
+        engine.viewportWidth = { [weak self] view in
+            guard let self else { return 180 }
+            let pitch = self.isTextMarquee ? 3 : LEDLayout(dot: self.dot(for: view)).colW
+            return CGFloat(self.engine.viewportCols(view) * pitch)
+        }
+        engine.buildRound = { [weak self] msg in self?.buildRound(msg) }
+        engine.stillImage = { [weak self] msg, view in self?.stillImage(msg, view) }
+        engine.loopsQuotes = { [weak self] in
+            guard let self else { return false }
+            return self.config.quoteLoop && self.config.tickerEnabled && !self.userPaused && !self.suspended
+        }
+        engine.onNeedsQuotes = { [weak self] in self?.fetchNextQuoteCycle() }
+        engine.onContentSizeChange = { [weak self] in self?.syncSurfaceSizes() }
+        applyEngineTiming()
+    }
+
+    private func applyEngineTiming() {
+        // 滚速语义=屏幕上的物理速度(菜单栏一侧):点阵愈大每列位移愈大,按点距归一
+        let pitch = isTextMarquee ? 3 : min(config.ledDotSize, 2) + 1
+        engine.colsPerSecond = 1 / (config.scrollSpeed * Double(pitch) / 3.0)
+        engine.defaultPause = config.defaultPause
+        engine.flashesEnabled = config.marqueeBlink
+    }
+
+    private func buildRound(_ msg: TickerMessage) -> MarqueeRound? {
+        let base = baseColor
+        if isTextMarquee {
+            let stream = buildTextScrollStream(text: msg.text, defaultColor: base, onClickCommand: msg.onClickCommand)
+            guard !stream.runs.isEmpty else { return nil }
+            let font = marqueeNSFont
+            let geometry = TextStrip(stream: stream, font: font, defaultColor: base)
+            return MarqueeRound(totalCols: geometry.totalCols, pauses: geometry.pauses,
+                                flashes: flashGroups(geometry.blinkCols)) { [weak self] view in
+                let style = self?.style(for: view) ?? LEDStyle()
+                return TextStrip(stream: stream, font: font, defaultColor: base, style: style)
+                    .makeArt(scale: view.backingScale)
+            }
+        }
+        let stream = buildScrollStream(text: msg.text, defaultColor: base,
+                                       onClickCommand: msg.onClickCommand, customChars: config.customChars)
+        guard !stream.columns.isEmpty else { return nil }
+        return MarqueeRound(totalCols: stream.columns.count, pauses: stream.pauses,
+                            flashes: flashGroups(stream.blinkCols)) { [weak self] view in
+            guard let self else { return makeLEDArt(stream: stream, dot: 2, style: LEDStyle(), scale: 2) }
+            return makeLEDArt(stream: stream, dot: self.dot(for: view), style: self.style(for: view),
+                              scale: view.backingScale)
+        }
+    }
+
+    /// idle 图标(msg=nil)或 standby 静态帧
+    private func stillImage(_ msg: TickerMessage?, _ view: MarqueeView) -> NSImage? {
+        let st = style(for: view), scale = view.backingScale, d = dot(for: view)
+        guard let msg, msg.kind == .standby else {
+            return renderIdleIcon(color: baseColor, dot: d, style: st, scale: scale)
+        }
+        if isTextMarquee {
+            let old = renderScale; renderScale = scale; defer { renderScale = old }
+            return renderTextStandbyFrame(text: msg.text, viewportCols: engine.viewportCols(view),
+                                          font: marqueeNSFont, defaultColor: baseColor, style: st)
+        }
+        let chars = view === menuSurface ? menuBarCols(dot: d) : displayCols(dot: d)
+        return renderStandbyFrame(text: msg.text, displayWidth: chars, defaultColor: baseColor,
+                                  customChars: config.customChars, dot: d, style: st, scale: scale)
+    }
+
+    /// 状态项长度与浮动条尺寸跟随内容;固定长度免得 AppKit 反复重解内在尺寸
+    private func syncSurfaceSizes() {
+        if let si = statusItem, let surface = menuSurface {
+            let w = max(8, surface.contentWidth.rounded(.up))
+            if abs(si.length - w) > 0.5 { si.length = w }
+        }
+        barWindow?.fitContent()
+    }
+
+    // ── Pixeldichte / Bildschirme ──────────────────────────────────────────────
 
     @objc private func screensChanged() {
         if let saved = try? readConfig(at: configURL) {
             config.boardOrigin = saved.boardOrigin; config.barOrigin = saved.barOrigin
         }
         board?.config = config; barWindow?.config = config
-        let previous = renderScale
-        updateRenderScale()
-        guard renderScale != previous else { return }
-        idleRendered = false
-        if case .idle = phase { setIdle() }
+        scheduleArtRefresh()
     }
 
-    // ── Animations-Timer ───────────────────────────────────────────────────────
-    //
-    // Der Timer läuft nur, solange sich etwas bewegt. Im Leerlauf (leere Queue,
-    // sticky-Wartezustand, Ticker aus, pausiert) wird er gestoppt — sonst weckt
-    // er den Prozess dauerhaft 1/scrollSpeed-mal pro Sekunde für nichts.
-    // Alles, was wieder etwas zu tun gibt, ruft startTimer().
+    // ── 休眠 / 锁屏:不拉行情、不滚动 ─────────────────────────────────────────
 
-    private func startTimer() {
-        guard animTimer == nil, config.tickerEnabled, !userPaused else { return }
-        // 滚速语义=屏幕上的物理速度:点阵愈大每列位移愈大,按点距归一,
-        // 换字号不改变视觉快慢(M 档与 1.6.x 完全一致;菜单栏侧 L 恒钳 M)。
-        // 文本模式固定 3pt/虚拟列,各字号同速。
-        let pitch = isTextMarquee ? 3 : min(config.ledDotSize, 2) + 1
-        let interval = config.scrollSpeed * Double(pitch) / 3.0
-        let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
-            self?.tick()
-        }
-        timer.tolerance = interval * 0.1   // erlaubt dem Kernel, Wakeups zu bündeln
-        RunLoop.main.add(timer, forMode: .common)
-        animTimer = timer
+    @objc private func systemAsleep() {
+        guard !suspended else { return }
+        suspended = true
+        appLog.notice("suspend (screens asleep or session inactive)")
+        engine.clearKeepingFrame()
+        boardTimer?.invalidate(); boardTimer = nil
     }
 
-    private func stopTimer() {
-        animTimer?.invalidate()
-        animTimer = nil
+    @objc private func systemAwake() {
+        guard suspended else { return }
+        suspended = false
+        appLog.notice("resume")
+        guard !userPaused, config.tickerEnabled else { return }
+        quoteService.requestRefresh()
+        if marqueeOn || barOn { fetchNextQuoteCycle() }
+        if boardOn { startBoardTimer(); refreshBoard() }
     }
 
     // ── Menü ───────────────────────────────────────────────────────────────────
 
     @objc private func statusItemClicked() {
         guard let statusItem else { return }
-        if case .stickyWait(let cmd) = phase {
-            if let cmd = cmd {
-                let proc = Process()
-                proc.executableURL = URL(fileURLWithPath: "/bin/sh")
-                proc.arguments     = ["-c", cmd]
-                try? proc.run()
-            }
-            phase = .scrolling
-            startTimer()
+        if engine.isWaitingForClick {
+            engine.clickSticky()
         } else if NSApp.currentEvent?.type == .rightMouseUp {
             statusItem.menu = buildMenu()
             statusItem.button?.performClick(nil)
             statusItem.menu = nil
+        } else if NSApp.currentEvent?.modifierFlags.contains(.option) == true {
+            nextWatchlist()   // ⌥+单击:切到下一套自选池
         } else {
-            // 左键单击 = 收起/展开(收起时缩成 < 小图标);右键才是菜单
+            // 左键单击 = 收起/展开(收起时缩成 <w 小图标);右键才是菜单
             toggleCollapsed()
         }
     }
@@ -247,19 +391,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func toggleCollapsed() {
         userPaused = !userPaused
         if userPaused {
-            stopTimer()
-            idleRendered = false
-            setIdle()
+            engine.stop()
             barWindow?.orderOut(nil)
             board?.orderOut(nil)
         } else {
-            if config.quoteLoop, config.tickerEnabled {
-                clearAllMessages()     // 展开立即拉新行情,不吃旧轮残帧
-            } else {
-                startTimer()
-            }
-            if config.displayMode.contains("bar") { barWindow?.orderFrontRegardless() }
-            if config.displayMode.contains("board") { board?.orderFrontRegardless(); refreshBoard() }
+            if barOn { barWindow?.orderFrontRegardless() }
+            if boardOn { board?.orderFrontRegardless(); refreshBoard() }
+            restartMarquee()
         }
     }
 
@@ -269,7 +407,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let entry = NSMenuItem(title: L(title), action: action, keyEquivalent: key)
             entry.target = self; menu.addItem(entry)
         }
+        if let release = updater?.available, updater?.isSkipped(release) == false {
+            let update = NSMenuItem(title: String(format: L("Whirlpool %@ is available…"), release.version),
+                                    action: #selector(openUpdatePage), keyEquivalent: "")
+            update.target = self
+            menu.addItem(update)
+            menu.addItem(.separator())
+        }
         item("About Whirlpool", #selector(showAbout))
+        item("Check for Updates…", #selector(checkForUpdates))
         menu.addItem(.separator())
         let status = NSMenuItem(title: userPaused ? L("Paused") : L(quoteService?.status ?? "Waiting for quotes"), action: nil, keyEquivalent: "")
         status.isEnabled = false; menu.addItem(status)
@@ -279,6 +425,32 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         item(userPaused ? "Resume" : "Pause", #selector(toggleCollapsed))
         item("Refresh Quotes", #selector(refreshQuotes))
+        let lists = NSMenuItem(title: L("Watchlists"), action: nil, keyEquivalent: "")
+        let listMenu = NSMenu()
+        for (i, list) in config.watchlists.enumerated() {
+            let entry = NSMenuItem(title: list.name, action: #selector(selectWatchlist(_:)), keyEquivalent: "")
+            entry.target = self
+            entry.tag = i
+            entry.state = i == config.activeWatchlist ? .on : .off
+            listMenu.addItem(entry)
+        }
+        listMenu.addItem(.separator())
+        let hint = NSMenuItem(title: L("Option-click the ticker to switch"), action: nil, keyEquivalent: "")
+        hint.isEnabled = false
+        listMenu.addItem(hint)
+        let edit = NSMenuItem(title: L("Edit Watchlists…"), action: #selector(openConfigWindow), keyEquivalent: "")
+        edit.target = self
+        listMenu.addItem(edit)
+        lists.submenu = listMenu; menu.addItem(lists)
+        let charts = NSMenuItem(title: L("Open Chart"), action: nil, keyEquivalent: "")
+        let chartMenu = NSMenu()
+        for entry in config.watchlist {
+            let i = NSMenuItem(title: entry.symbol, action: #selector(openChart(_:)), keyEquivalent: "")
+            i.target = self
+            i.representedObject = [entry.symbol, entry.market]
+            chartMenu.addItem(i)
+        }
+        charts.submenu = chartMenu; menu.addItem(charts)
         menu.addItem(.separator())
         item("Settings…", #selector(openConfigWindow), ",")
         let display = NSMenuItem(title: L("Display"), action: nil, keyEquivalent: "")
@@ -300,7 +472,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         advanced.submenu = advancedMenu; menu.addItem(advanced)
         item("Help", #selector(showHelp))
         menu.addItem(.separator())
-        item("Quit Whirlpool", #selector(quit), "q")
+        item("Quit Whirlpool", #selector(quit))
         return menu
     }
 
@@ -310,10 +482,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func showAbout() {
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.7.2"
         NSApp.activate(ignoringOtherApps: true)
         NSApp.orderFrontStandardAboutPanel(options: [
-            .applicationName: "Whirlpool", .applicationVersion: version,
+            .applicationName: "Whirlpool", .applicationVersion: Self.version,
             .credits: NSAttributedString(string: L("A quiet desktop ticker for your watchlist.") + "\n\nmade by KFK with GPT-Astra, for all my lovely besties.")
         ])
     }
@@ -324,15 +495,28 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         } else { showAbout() }
     }
 
+    @objc private func openChart(_ sender: NSMenuItem) {
+        guard let pair = sender.representedObject as? [String], pair.count == 2 else { return }
+        openChart(for: WatchEntry(symbol: pair[0], market: pair[1]))
+    }
+
+    private func openChart(for entry: WatchEntry) {
+        if let url = chartURL(for: entry) { NSWorkspace.shared.open(url) }
+    }
+
     @objc private func refreshQuotes() {
         if userPaused { toggleCollapsed(); return }
         quoteService.requestRefresh()
-        clearAllMessages()
-        if config.displayMode.contains("board") { refreshBoard() }
+        restartMarquee()
+        if boardOn { refreshBoard() }
     }
 
     private func configureQuoteService() {
-        quoteService = QuoteService(provider: QuoteEngine.provider(for: config.provider), interval: config.boardRefresh)
+        let p = QuoteEngine.provider(for: config.provider)
+        provider = p
+        (p as? RealProvider)?.includeSeries = boardOn
+        quoteService = QuoteService(provider: p, interval: config.boardRefresh)
+        applyCadence()
         quoteService.onUpdate = { [weak self] in
             guard let self else { return }
             let text = "Whirlpool · " + L(self.quoteService.status)
@@ -342,23 +526,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    private func applyCadence() {
+        quoteService.cadence = config.smartRefresh
+            ? { entries, base, now, lastTrade in
+                MarketClock.refreshInterval(entries, base: base, now: now, lastTrade: lastTrade) }
+            : nil
+    }
+
     private func buildColorMenu() -> NSMenu {
         let menu    = NSMenu()
-        let current = config.transparentColor.lowercased()
-        // Nur die gängigen Grundfarben — \c[red] und \c[yellow] bleiben im Text
-        // natürlich weiter möglich, sie brauchen nur keinen Menüeintrag.
-        let entries = [("Adaptive (monochrome)", "auto"),
-                       ("Amber", "amber"),
-                       ("Green", "green"),
-                       ("White", "white"),
-                       ("Black", "black")]
-        for (title, key) in entries {
-            let item = NSMenuItem(title: L(title), action: #selector(setTintColor(_:)), keyEquivalent: "")
+        let current = config.colorScheme
+        for scheme in ColorScheme.allCases {
+            let item = NSMenuItem(title: scheme.label, action: #selector(setTintColor(_:)), keyEquivalent: "")
             item.target           = self
-            item.representedObject = key
-            item.state            = (current == key) ? .on : .off
+            item.representedObject = scheme.rawValue
+            item.state            = (current == scheme) ? .on : .off
             menu.addItem(item)
-            if key == "auto" { menu.addItem(.separator()) }
+            if scheme == .mono { menu.addItem(.separator()) }
         }
         return menu
     }
@@ -369,107 +553,37 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard let key = sender.representedObject as? String else { return }
         config.transparentColor = key
         saveConfig(config)
-        applyTint()
-        refreshDisplay()
-    }
-
-    /// "auto" (oder ein unbekannter Name) → Template, sonst gefärbt
-    private func applyTint() {
-        let key = config.transparentColor.lowercased()
-        tintColor = key == "auto" ? nil : LEDColor(rawValue: key)
-        renderColoredTransparent = renderTransparent && tintColor != nil
-    }
-
-    /// Zeichnet das aktuell Sichtbare in der neuen Farbe neu, ohne den Ablauf
-    /// zu stören. Die laufende Nachricht wird neu aufgebaut, weil die Farben
-    /// beim Erzeugen des Streams in die Spalten eingebacken werden.
-    private func refreshDisplay() {
-        idleRendered = false
-        switch phase {
-        case .idle:
-            setIdle()
-
-        case .standby:
-            if let msg = currentMsg {
-                if isTextMarquee {
-                    setImage(renderSurfaces { _, _ in
-                        renderTextStandbyFrame(text: msg.text, viewportCols: maxViewportCols,
-                                               font: marqueeNSFont, defaultColor: baseColor())
-                    })
-                } else {
-                    setImage(renderSurfaces { dot, _ in
-                        renderStandbyFrame(text: msg.text, displayWidth: displayCols(dot: dot),
-                                           defaultColor: baseColor(),
-                                           customChars: config.customChars, dot: dot)
-                    })
-                }
-            }
-
-        default:
-            guard let msg = currentMsg, msg.kind == .scroll, !canvas.isEmpty else { break }
-            if let strip = textStrip {
-                // 同文本同字体几何不变,只重着色;滚动位置与开放暂停保持
-                let stream = buildTextScrollStream(text: msg.text, defaultColor: baseColor(),
-                                                   onClickCommand: msg.onClickCommand)
-                let rebuilt = TextStrip(stream: stream, font: marqueeNSFont, defaultColor: baseColor())
-                guard rebuilt.totalCols == strip.totalCols else { break }
-                textStrip = rebuilt
-                showScrollFrame()
-                return
-            }
-            let stream = buildScrollStream(text: msg.text, defaultColor: baseColor(),
-                                           onClickCommand: msg.onClickCommand,
-                                           customChars: config.customChars)
-            let rebuilt = wrapCanvas(stream.columns)
-            // Gleicher Text, gleiche Breite → gleiche Geometrie; nur die Farben
-            // ändern sich, Scrollposition und offene Pausen bleiben gültig.
-            if rebuilt.count == canvas.count {
-                canvas = rebuilt
-                showScrollFrame()
-            }
-        }
+        engine.refreshArt()
     }
 
     @objc private func toggleTickerEnabled() {
         config.tickerEnabled.toggle()
         saveConfig(config)
-        idleRendered = false
-        if case .idle = phase { setIdle() }
-        if config.tickerEnabled { startTimer() } else { stopTimer() }
+        if config.tickerEnabled { restartMarquee() } else { engine.stop() }
     }
 
     @objc private func clearQueue() {
-        clearAllMessages()
+        restartMarquee()
     }
 
-    private func clearAllMessages() {
-        queueLock.lock(); queue.removeAll(); queueLock.unlock()
-        interrupted = nil
-        currentMsg  = nil
-        phase = .idle
-        stopTimer()
-        // 行情循环还开着就续上下一轮,否则 Clear queue 会把跑马灯清死;
-        // 重拉期间保留最后一帧,不闪 idle 图标。
-        if config.quoteLoop, config.tickerEnabled, !userPaused {
+    /// 清掉插播与当前轮,按当前配置重开一轮(行情循环开着就立刻重拉)
+    private func restartMarquee() {
+        guard marqueeOn || barOn else { engine.stop(); return }
+        guard config.tickerEnabled, !userPaused else { engine.stop(); return }
+        if config.quoteLoop {
+            engine.clearKeepingFrame()
+            cycleInFlight = false
+            configRevision += 1
             fetchNextQuoteCycle()
         } else {
-            setIdle()
+            engine.stop()
         }
-    }
-
-    @objc private func togglePause() {
-        userPaused = !userPaused
-        pauseItem?.title = userPaused ? L("Resume") : L("Pause")
-        if userPaused { stopTimer() } else { startTimer() }
     }
 
     @objc private func toggleQuoteLoop() {
         config.quoteLoop.toggle()
         saveConfig(config)
-        if config.quoteLoop, config.tickerEnabled, !userPaused {
-            fetchNextQuoteCycle()
-            startTimer()
-        }
+        if config.quoteLoop { restartMarquee() }
     }
 
     @objc private func editConfigFile() {
@@ -491,7 +605,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 self.applyDockIcon()
                 if resetSource { self.configureQuoteService(); self.lastTicks = [:]; self.board?.resetPriceHistory() }
                 self.quoteService.interval = c.boardRefresh
+                self.applyCadence()
                 self.applyDisplayMode()
+                self.configureUpdater()
             }
         }
         configWindow?.reload(config: config)
@@ -499,8 +615,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func quit() {
-        animTimer?.invalidate()
-        unlink(socketPath)
+        quitReason = "menu"
         NSApp.terminate(nil)
     }
 
@@ -520,13 +635,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let wanted = msg.text
             let key = TickerConfig.displayModes.first { $0.key == wanted }?.key
                 ?? (wanted == "both" ? "marquee,board" : nil)
-            if let key {
-                config.displayMode = key
-                saveConfig(config)
-                DispatchQueue.main.async { self.applyDisplayMode() }
-            }
+            guard let key else { return "error" }
+            config.displayMode = key
+            saveConfig(config)
+            DispatchQueue.main.async { self.applyDisplayMode() }
+            return "ok"
+        case .setList:
+            guard let index = watchlistIndex(for: msg.text) else { return "error: unknown watchlist" }
+            DispatchQueue.main.async { self.switchWatchlist(to: index) }
             return "ok"
         case .quit:
+            quitReason = "CLI --quit/--restart"
             DispatchQueue.main.async { NSApp.terminate(nil) }
             return "ok"
         default:
@@ -537,359 +656,48 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         switch msg.kind {
         case .setWidth:
-            // 运行时覆盖宽度(不落盘);物理锚定下只改基准值,各面自行换算
+            // 运行时覆盖宽度(不落盘);物理锚定下只改基准值,各面自行换算,下一轮生效
             if let w = msg.width, w >= 5 { config.defaultWidth = min(60, max(8, w)) }
             return "ok"
         case .clearQueue:
-            clearAllMessages()
+            restartMarquee()
             return "ok"
         case .scroll, .standby:
             break
-        case .getStatus, .quit, .openSettings, .setMode:
+        case .getStatus, .quit, .openSettings, .setMode, .setList:
             return "ok"   // bereits oben behandelt
         }
 
         switch msg.priority {
-        case .normal:
-            enqueue(msg)
-        case .urgent:
-            prependQueue(msg)
-        case .veryUrgent:
-            // Sofort starten statt einreihen — die unterbrochene Nachricht
-            // wird danach von vorn wiederholt
-            switch phase {
-            case .scrolling, .pauseInStream, .defaultPause:
-                interrupted = currentMsg
-            default:
-                break
-            }
-            startMessage(msg)
+        case .normal:     engine.enqueue(msg)
+        case .urgent:     engine.prepend(msg)
+        case .veryUrgent: engine.interrupt(with: msg)   // 被打断的消息之后从头重播
         }
-        startTimer()
         return "ok"
     }
 
-    // ── Status ─────────────────────────────────────────────────────────────────
-
     private func statusJSON() -> String {
-        let phaseName: String
-        switch phase {
-        case .idle:                    phaseName = "idle"
-        case .scrolling:               phaseName = "scrolling"
-        case .pauseInStream:           phaseName = "scrolling"
-        case .defaultPause:            phaseName = "scrolling"
-        case .stickyBlink, .stickyWait: phaseName = "sticky"
-        case .standby:                 phaseName = "standby"
+        // menubar:状态项窗口是否真的在屏上(菜单栏挤不下时 macOS 会整个藏掉它)
+        var menubar = "null"
+        if marqueeOn || statusItem != nil, let window = statusItem?.button?.window {
+            let f = window.frame
+            menubar = "{\"visible\":\(window.occlusionState.contains(.visible)),\"x\":\(Int(f.minX)),\"y\":\(Int(f.minY)),\"w\":\(Int(f.width)),\"h\":\(Int(f.height)),\"length\":\(Int(statusItem?.length ?? 0))}"
         }
-        queueLock.lock()
-        let count = queue.count
-        queueLock.unlock()
-        return "{\"phase\":\"\(phaseName)\",\"queue\":\(count)}"
-    }
-
-    // ── Timer-Tick (Main-Thread) ───────────────────────────────────────────────
-
-    private func tick() {
-        guard config.tickerEnabled, !userPaused else { stopTimer(); return }
-
-        switch phase {
-
-        case .idle:
-            if let saved = interrupted {
-                interrupted = nil
-                startMessage(saved)
-                return
-            }
-            guard let msg = dequeueNext() else {
-                // 队列空:行情循环开着就拉下一轮(拉取期间保留当前画面,
-                // 回调里 enqueue + startTimer);否则回 idle 图标并停表。
-                if config.quoteLoop, config.tickerEnabled, !userPaused {
-                    if !cycleInFlight { fetchNextQuoteCycle() }
-                    stopTimer()
-                } else {
-                    setIdle(); stopTimer()
-                }
-                return
-            }
-            startMessage(msg)
-
-        case .scrolling:
-            if let p = pendingPauses.first, p.at == scrollOffset {
-                pendingPauses.removeFirst()
-                triggerPause(p.kind)
-                return
-            }
-
-            // 预取:离本轮结束还有约一屏时提前拉下一轮(每轮只发一次),
-            // 滚到头时新数据已入队,消除轮尾的冻结停顿感。
-            if prefetchArmed, config.quoteLoop, config.tickerEnabled, !userPaused,
-               !cycleInFlight, roundLen > 0,
-               scrollOffset >= roundLen - maxViewportCols {
-                prefetchArmed = false
-                fetchNextQuoteCycle()
-            }
-
-            // 一轮 = 一份完整串。画布是双拼环绕,窗口末端恰是"串尾接串头"。
-            if roundLen > 0, scrollOffset >= roundLen {
-                // 队列里已有下一轮:同 tick 直接接线渲染,零冻结
-                if let next = dequeueNext() {
-                    startMessage(next)
-                    return
-                }
-                phase = .idle
-                if config.quoteLoop, config.tickerEnabled, !userPaused, !cycleInFlight {
-                    fetchNextQuoteCycle()   // 保险:预取没赶上时兜底
-                } else {
-                    setIdle()
-                }
-                return
-            }
-
-            showScrollFrame()
-            scrollOffset += 1
-
-        case .pauseInStream(let until):
-            if Date() >= until {
-                phase = .scrolling
-            }
-
-        case .stickyBlink(let bphase, let until, let cmd, let blinks):
-            if Date() >= until {
-                let next = bphase + 1
-                if next >= blinks * 2 {
-                    showScrollFrame()
-                    phase = .stickyWait(cmd: cmd)
-                } else {
-                    let on = (next % 2 != 0)
-                    showScrollFrame(blank: !on)
-                    phase = .stickyBlink(phase: next,
-                                         until: Date().addingTimeInterval(blinkDuration),
-                                         cmd: cmd, blinks: blinks)
-                }
-            }
-
-        case .stickyWait:
-            stopTimer()   // wartet auf Klick — statusItemClicked startet neu
-
-        case .defaultPause(let until):
-            if Date() >= until {
-                phase = .scrolling
-            }
-
-        case .standby(let until):
-            if Date() >= until {
-                phase = .idle
-                setIdle()
-            }
-        }
-    }
-
-    // ── Nachricht starten ──────────────────────────────────────────────────────
-
-    private func startMessage(_ msg: TickerMessage) {
-        idleRendered = false
-        currentMsg = msg
-        let defColor = baseColor()
-
-        switch msg.kind {
-        case .scroll:
-            if isTextMarquee {
-                let stream = buildTextScrollStream(text: msg.text, defaultColor: defColor,
-                                                   onClickCommand: msg.onClickCommand)
-                guard !stream.runs.isEmpty else {
-                    phase = .idle
-                    return
-                }
-                let strip = TextStrip(stream: stream, font: marqueeNSFont, defaultColor: defColor)
-                textStrip = strip
-                priceFlashes = ScrollFlashes(columns: strip.blinkCols)
-                canvas = Array(repeating: ColoredColumn(value: 0, color: defColor),
-                               count: strip.totalCols)   // 引擎占位:文本帧只读 totalCols/offset
-                roundLen = strip.totalCols
-                scrollOffset = 0
-                prefetchArmed = config.quoteLoop   // 新一轮重新武装预取
-
-                var pauses = strip.pauses.map { PauseMarker(at: $0.at, kind: $0.kind) }
-                if config.defaultPause > 0, !pauses.contains(where: { $0.at == 0 }) {
-                    pauses.insert(PauseMarker(at: 0, kind: .timed(seconds: config.defaultPause)), at: 0)
-                }
-                pendingPauses = pauses.sorted { $0.at < $1.at }
-                phase         = .scrolling
-                showScrollFrame()
-                return
-            }
-            textStrip = nil
-            let stream = buildScrollStream(text: msg.text, defaultColor: defColor,
-                                           onClickCommand: msg.onClickCommand,
-                                           customChars: config.customChars)
-            guard stream.columns.count > 0 else {
-                phase = .idle
-                return
-            }
-            priceFlashes = ScrollFlashes(columns: stream.blinkCols)
-
-            canvas       = wrapCanvas(stream.columns)
-            roundLen     = stream.columns.count
-            scrollOffset = 0
-            prefetchArmed = config.quoteLoop   // 新一轮重新武装预取
-
-            var pauses = stream.pauses.map { PauseMarker(at: $0.at, kind: $0.kind) }
-            if config.defaultPause > 0, !pauses.contains(where: { $0.at == 0 }) {
-                pauses.insert(PauseMarker(at: 0, kind: .timed(seconds: config.defaultPause)), at: 0)
-            }
-            pendingPauses = pauses.sorted { $0.at < $1.at }
-            phase         = .scrolling
-            showScrollFrame()
-
-        case .standby:
-            if isTextMarquee {
-                setImage(renderSurfaces { _, _ in
-                    renderTextStandbyFrame(text: msg.text, viewportCols: maxViewportCols,
-                                           font: marqueeNSFont, defaultColor: defColor)
-                })
-            } else {
-                setImage(renderSurfaces { dot, _ in
-                    renderStandbyFrame(text: msg.text, displayWidth: displayCols(dot: dot),
-                                       defaultColor: defColor, customChars: config.customChars, dot: dot)
-                })
-            }
-            phase = .standby(until: Date().addingTimeInterval(msg.duration))
-
-        case .setWidth, .setMode, .clearQueue, .getStatus, .quit, .openSettings:
-            break
-        }
-    }
-
-    // ── Pause auslösen ─────────────────────────────────────────────────────────
-
-    private func triggerPause(_ kind: PauseKind) {
-        switch kind {
-        case .timed(let secs):
-            phase = .pauseInStream(until: Date().addingTimeInterval(secs))
-        case .sticky(let cmd, let blinks):
-            if blinks == 0 {
-                phase = .stickyWait(cmd: cmd)
-            } else {
-                showScrollFrame(blank: true)
-                phase = .stickyBlink(phase: 0,
-                                      until: Date().addingTimeInterval(blinkDuration),
-                                      cmd: cmd, blinks: blinks)
-            }
-        }
-    }
-
-    // ── Darstellung ────────────────────────────────────────────────────────────
-
-    private func showScrollFrame(blank: Bool = false) {
-        // 每段进入可读区域后独立闪一次;使用单调时钟,滚动不停、数字不消失。
-        // 各面按自己的档位换算可视列数(物理宽度锚定),闪变时钟按面各自计时。
-        // 流畅度优先,两面全帧率;状态栏每帧的开销靠固定 button 宽度压(免重排)。
-        if let strip = textStrip {
-            setImage(renderSurfaces { _, _ in
-                let flash = blank ? [:] : priceFlashes.colors(
-                    offset: scrollOffset, visibleColumns: maxViewportCols,
-                    roundLength: roundLen, now: ProcessInfo.processInfo.systemUptime)
-                return renderTextFrame(strip: strip, offset: scrollOffset,
-                                       viewportCols: maxViewportCols, blank: blank, flash: flash)
-            })
-            return
-        }
-        setImage(renderSurfaces { dot, menubar in
-            let vw = menubar ? menuBarCols(dot: dot) : displayCols(dot: dot)
-            let flash = blank ? [:] : priceFlashes.colors(
-                offset: scrollOffset, visibleColumns: visCols(displayWidth: vw),
-                roundLength: roundLen, now: ProcessInfo.processInfo.systemUptime)
-            return renderScrollFrame(columns: canvas, offset: scrollOffset,
-                                     displayWidth: vw, blank: blank, flash: flash, dot: dot)
-        })
-    }
-
-    /// 无缝环绕画布:把串拼几份,保证任何窗口位置都有内容,
-    /// 窗口末端恰好是"串尾接串头",轮与轮之间没有空白垫。
-    private func wrapCanvas(_ columns: [ColoredColumn]) -> [ColoredColumn] {
-        let vc = maxViewportCols
-        let reps = max(2, 1 + Int((Double(vc) / Double(max(1, columns.count))).rounded(.up)))
-        return (0..<reps).flatMap { _ in columns }
-    }
-
-    // ── 双面出帧 ────────────────────────────────────────────────────────────────
-    //
-    // 菜单栏状态项的宿主窗口实测高约 30pt,L 档(34pt)放不下 → 菜单栏恒钳 M,
-    // 浮动 bar 按配置吃满三档。字号 ≤ M 时两面同图,单帧共用零额外开销;
-    // 只有 bar 可见且配了 L 才付双倍渲染(两个面各出一帧)。
-
-    private var marqueeOn: Bool { config.displayMode.contains("marquee") }
-
-    private func renderSurfaces(_ make: (_ dot: Int, _ menubar: Bool) -> NSImage) -> (menubar: NSImage, bar: NSImage) {
-        if config.ledDotSize <= 2 {
-            renderDotSize = config.ledDotSize
-            let img = make(config.ledDotSize, true)
-            return (img, img)
-        }
-        renderDotSize = 2
-        let menubar = make(2, true)
-        if barWindow?.isVisible == true {
-            renderDotSize = config.ledDotSize
-            return (menubar, make(config.ledDotSize, false))
-        }
-        return (menubar, menubar)   // bar 不在时 bar 份不会被消费
-    }
-
-    private func setImage(_ surfaces: (menubar: NSImage, bar: NSImage)) {
-        if let si = statusItem, marqueeOn {
-            si.button?.image = surfaces.menubar
-            syncStatusLength(to: surfaces.menubar.size.width)
-        }
-        if let bar = barWindow, bar.isVisible {
-            bar.update(surfaces.bar)
-        }
-    }
-
-    /// 固定状态项宽度:variableLength 会让 AppKit 每帧重解 button 内在尺寸
-    /// (采样实证 alignmentRectInsets 每帧必调)。长度与图同宽 → 只换图层内容。
-    private func syncStatusLength(to width: CGFloat) {
-        guard let si = statusItem else { return }
-        let w = width.rounded(.up)
-        if abs(si.length - w) > 0.5 { si.length = w }
-    }
-
-    private func setIdle() {
-        guard !idleRendered else { return }
-        idleRendered = true
-        let surfaces = renderSurfaces { dot, _ in renderIdleIcon(color: currentIdleColor(), dot: dot) }
-        statusItem?.button?.image = surfaces.menubar
-        syncStatusLength(to: surfaces.menubar.size.width)
-        barWindow?.update(surfaces.bar)
-    }
-
-    // ── Queue ──────────────────────────────────────────────────────────────────
-
-    private func enqueue(_ msg: TickerMessage) {
-        queueLock.lock()
-        if queue.count >= maxPending { queue.removeFirst() }
-        queue.append(msg)
-        queueLock.unlock()
-    }
-
-    private func prependQueue(_ msg: TickerMessage) {
-        queueLock.lock()
-        queue.insert(msg, at: 0)
-        queueLock.unlock()
-    }
-
-    private func dequeueNext() -> TickerMessage? {
-        queueLock.lock()
-        defer { queueLock.unlock() }
-        return queue.isEmpty ? nil : queue.removeFirst()
+        // cols:各显示面图层实际滚到的列(连查两次在变 = 动画在 GPU 上推进)
+        let cols = engine.surfaces().map { $0.presentationCol.map { String(format: "%.1f", $0) } ?? "null" }
+        let listName = config.watchlists.indices.contains(config.activeWatchlist) ? config.watchlists[config.activeWatchlist].name : ""
+        let list = (try? JSONEncoder().encode(listName)).flatMap { String(data: $0, encoding: .utf8) } ?? "\"\""
+        return "{\"phase\":\"\(engine.phaseName)\",\"queue\":\(engine.queueCount),\"pid\":\(getpid()),\"version\":\"\(Self.version)\",\"list\":\(list),\"menubar\":\(menubar),\"cols\":[\(cols.joined(separator: ","))]}"
     }
 
     // ── Quote-Loop ───────────────────────────────────────────────────────────────
     //
-    // 一轮滚动结束 → 拉一次行情 → 拼串重新入队。滚动周期 = 行情刷新周期,
-    // 天然同步且无闪烁;拉取失败(空回调)则保持 idle,下一 tick 再试。
+    // 一轮将尽 → 拉一次行情(共享缓存,未到间隔直接给缓存)→ 拼串入队,轮尾无缝接上。
+    // 拉取失败保留最后一帧,15s 后重试。
 
     private func fetchNextQuoteCycle() {
-        guard !cycleInFlight else { return }
+        guard !cycleInFlight, !suspended, !userPaused, config.tickerEnabled, config.quoteLoop,
+              marqueeOn || barOn else { return }
         cycleInFlight = true
         let revision = configRevision
         let entries   = config.watchlist
@@ -900,19 +708,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.async {
                 guard let self, self.configRevision == revision else { return }
                 self.cycleInFlight = false
-                guard self.config.quoteLoop, self.config.tickerEnabled, !self.userPaused,
+                guard self.config.quoteLoop, self.config.tickerEnabled, !self.userPaused, !self.suspended,
                       !quotes.isEmpty, !entries.isEmpty
                 else {
-                    // 拉取失败/循环已关:回 idle;循环仍开着则 15s 后重试
-                    if self.canvas.isEmpty { self.setIdle() }
-                    if self.config.quoteLoop, self.config.tickerEnabled,
-                       !self.userPaused, !entries.isEmpty {
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
-                            guard let self, self.config.quoteLoop, self.config.tickerEnabled,
-                                  !self.userPaused else { return }
-                            self.startTimer()
-                        }
-                    }
+                    if self.engine.phase == .idle, self.engine.current == nil, quotes.isEmpty { self.engine.showIdle() }
+                    self.scheduleRetry()
                     return
                 }
                 let built = QuoteEngine.marqueeText(entries: entries, quotes: quotes,
@@ -926,9 +726,120 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 for e in entries {
                     if let q = quotes[e.symbol] { self.lastTicks[e.symbol] = q.price }
                 }
-                self.enqueue(TickerMessage(kind: .scroll, text: built, priority: .normal,
-                                           duration: 0, onClickCommand: nil, width: nil))
-                self.startTimer()
+                var msg = TickerMessage(kind: .scroll, text: built, priority: .normal,
+                                        duration: 0, onClickCommand: nil, width: nil)
+                msg.isQuoteCycle = true
+                self.engine.enqueue(msg)
+            }
+        }
+    }
+
+    private func scheduleRetry() {
+        guard !retryPending else { return }
+        retryPending = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
+            guard let self else { return }
+            self.retryPending = false
+            if self.engine.phase == .idle { self.fetchNextQuoteCycle() }
+        }
+    }
+
+    // ── 多自选池 ───────────────────────────────────────────────────────────────
+
+    /// CLI/菜单参数 → 池序号:名称(不分大小写)、1 起的序号、next / prev
+    private func watchlistIndex(for text: String) -> Int? {
+        let lists = config.watchlists
+        let t = text.trimmingCharacters(in: .whitespaces)
+        switch t.lowercased() {
+        case "next": return (config.activeWatchlist + 1) % lists.count
+        case "prev", "previous": return (config.activeWatchlist - 1 + lists.count) % lists.count
+        default:
+            if let n = Int(t), (1...lists.count).contains(n) { return n - 1 }
+            return lists.firstIndex { $0.name.caseInsensitiveCompare(t) == .orderedSame }
+        }
+    }
+
+    @objc private func selectWatchlist(_ sender: NSMenuItem) {
+        switchWatchlist(to: sender.tag)
+    }
+
+    private func nextWatchlist() {
+        guard config.watchlists.count > 1 else { return }
+        switchWatchlist(to: (config.activeWatchlist + 1) % config.watchlists.count)
+    }
+
+    private func switchWatchlist(to index: Int) {
+        guard config.watchlists.indices.contains(index) else { return }
+        // 只改当前池,别的字段以磁盘为准(浮窗位置可能刚被拖动写过)
+        var saved = (try? readConfig(at: configURL)) ?? config!
+        saved.activeWatchlist = index
+        config.activeWatchlist = index
+        if configReadError == nil { saveConfig(saved) }
+        appLog.notice("watchlist → \(self.config.watchlists[index].name, privacy: .public)")
+        applyDisplayMode()
+        // 切换提示:先亮一下池名,行情到了接着滚(LED 字库只有 ASCII,中文名用序号)
+        guard (marqueeOn || barOn), config.watchlists.count > 1 else { return }
+        let name = config.watchlists[index].name
+        let ledSafe = name.uppercased().allSatisfy { FONT[$0] != nil }
+        let label = isTextMarquee || ledSafe ? name : "LIST \(index + 1)"
+        engine.interrupt(with: TickerMessage(kind: .standby, text: "> " + label, priority: .normal,
+                                             duration: 1.2, onClickCommand: nil, width: nil))
+    }
+
+    // ── 新版本提示 ─────────────────────────────────────────────────────────────
+
+    private func configureUpdater() {
+        if updater == nil {
+            let u = UpdateChecker(current: Self.version)
+            u.onAvailable = { [weak self] release in self?.announce(release) }
+            updater = u
+        }
+        if config.checkUpdates { updater?.start() } else { updater?.stop() }
+    }
+
+    /// 自动发现新版本:跑马灯插播一次(琥珀色),菜单顶部常驻入口
+    private func announce(_ release: UpdateChecker.Release) {
+        appLog.notice("update available: \(release.version, privacy: .public)")
+        // 先看此刻能不能播,再记"已播":行情条关着时不该把这次提示白白记掉
+        guard let updater, marqueeOn || barOn, config.tickerEnabled, !userPaused,
+              updater.shouldAnnounce(release) else { return }
+        let text = isTextMarquee
+            ? String(format: L("Whirlpool %@ is available — right-click to update"), release.version)
+            : "WHIRLPOOL \(release.version) AVAILABLE - RIGHT-CLICK TO UPDATE"
+        engine.enqueue(TickerMessage(kind: .scroll, text: "\\c[amber]\(text)\\c[]   ", priority: .normal,
+                                     duration: 0, onClickCommand: nil, width: nil))
+    }
+
+    @objc private func openUpdatePage() {
+        NSWorkspace.shared.open(updater?.available?.page ?? UpdateChecker.releasesPage)
+    }
+
+    @objc private func checkForUpdates() {
+        let u = updater ?? UpdateChecker(current: Self.version)
+        updater = u
+        u.check { result in
+            NSApp.activate(ignoringOtherApps: true)
+            let alert = NSAlert()
+            switch result {
+            case .success(let release?):
+                alert.messageText = String(format: L("Whirlpool %@ is available"), release.version)
+                alert.informativeText = String(format: L("You have %@. Download the new version from GitHub?"), Self.version)
+                alert.addButton(withTitle: L("Download"))
+                alert.addButton(withTitle: L("Later"))
+                alert.addButton(withTitle: L("Skip This Version"))
+                switch alert.runModal() {
+                case .alertFirstButtonReturn: NSWorkspace.shared.open(release.page)
+                case .alertThirdButtonReturn: u.skip(release)
+                default: break
+                }
+            case .success(nil):
+                alert.messageText = L("Whirlpool is up to date")
+                alert.informativeText = String(format: L("Version %@ is the latest release."), Self.version)
+                alert.runModal()
+            case .failure(let error):
+                alert.messageText = L("Could Not Check for Updates")
+                alert.informativeText = error.localizedDescription
+                alert.runModal()
             }
         }
     }
@@ -937,34 +848,32 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     //
     // 可组合 displayMode(逗号分隔):marquee=状态栏跑马灯,board=程序坞旁报价卡,
     // bar=屏幕下缘置顶跑马灯条(给竖屏/放不下宽 bar 的屏幕)。"both"=旧别名(marquee+board)。
-    // bar/board 模式下状态栏图标让位,控制菜单移到各自右键。
 
     private func applyDisplayMode() {
         configRevision += 1
         cycleInFlight = false
-        stopTimer()
         boardTimer?.invalidate(); boardTimer = nil
         renderTransparent = config.transparent
-        renderDotSize = min(config.ledDotSize, 2)   // 环境默认=菜单栏安全档;出帧时各面显式定档
-        textStrip = nil                              // 字体/字号可能已换,下一轮按新模式重建
-        applyTint()
-        let m = config.displayMode
-        let marqueeOn = m.contains("marquee") || m == "both"
-        let boardOn   = m.contains("board")   || m == "both"
-        let barOn     = m.contains("bar")
+        renderColoredTransparent = config.transparent && config.colorScheme != .mono
+        applyEngineTiming()
 
         ensureStatusItem()
-        if !marqueeOn {
-            let idle = renderIdleIcon(color: currentIdleColor())
-            statusItem?.button?.image = idle
-            syncStatusLength(to: idle.size.width)
+        engine.stop()
+        if !marqueeOn, let surface = menuSurface {
+            // 只开报价卡/浮动条时,菜单栏留一个 <w 小图标作抓手
+            surface.showStill(stillImage(nil, surface))
+            syncSurfaceSizes()
         }
 
         if barOn {
             if barWindow == nil {
-                renderDotSize = config.ledDotSize   // bar 初始宽度按配置档算
-                barWindow = BarWindow(config: config)
-                barWindow?.menuProvider = { [weak self] in self?.buildBoardMenu() ?? NSMenu() }
+                let bar = BarWindow(config: config)
+                bar.menuProvider = { [weak self] in self?.buildMenu() ?? NSMenu() }
+                bar.onHover = { [weak self] inside in self?.hover(inside) }
+                bar.onOptionClick = { [weak self] in self?.nextWatchlist() }
+                hook(bar.surface)
+                bar.surface.onHover = nil
+                barWindow = bar
             }
             barWindow?.config = config
             if !userPaused { barWindow?.orderFrontRegardless() }
@@ -972,27 +881,29 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             barWindow?.orderOut(nil)
         }
 
+        let wantsSeries = boardOn
+        if let real = provider as? RealProvider, real.includeSeries != wantsSeries {
+            real.includeSeries = wantsSeries
+            if wantsSeries { quoteService.invalidate() }
+        }
+
         if boardOn {
             if board == nil {
                 board = BoardWindow(config: config)
-                board?.menuProvider = { [weak self] in self?.buildBoardMenu() ?? NSMenu() }
+                board?.menuProvider = { [weak self] in self?.buildMenu() ?? NSMenu() }
+                board?.onOpenChart = { [weak self] entry in self?.openChart(for: entry) }
             }
             board?.config = config
             if !userPaused { board?.orderFrontRegardless() }
             startBoardTimer()
             refreshBoard()
         } else {
-            boardTimer?.invalidate()
-            boardTimer = nil
             board?.orderOut(nil)
         }
 
-        // 跑马灯引擎(marquee/bar 共用同一滚动循环):清旧一轮、按新配置立即重拉
-        if marqueeOn || barOn {
-            clearAllMessages()
-        } else {
-            stopTimer()
-        }
+        // 跑马灯引擎(marquee/bar 共用同一时间线):清旧一轮、按新配置立即重拉
+        engine.showIdle()
+        restartMarquee()
     }
 
     private func startBoardTimer() {
@@ -1006,7 +917,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func refreshBoard() {
-        guard !userPaused, config.tickerEnabled else { return }
+        guard !userPaused, !suspended, config.tickerEnabled else { return }
         let revision = configRevision
         let entries = config.watchlist
         let redUp   = config.redUpMarkets
@@ -1040,6 +951,4 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         return menu
     }
-
-    private func buildBoardMenu() -> NSMenu { buildMenu() }
 }

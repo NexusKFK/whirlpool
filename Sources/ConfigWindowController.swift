@@ -1,10 +1,15 @@
 import AppKit
+import ServiceManagement
 
 /// A draft-based, keyboard-accessible settings window. Cancel never writes config.
 final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataSource, NSTableViewDelegate, NSTextFieldDelegate {
     var onApplied: ((TickerConfig) -> Void)?
     private var config: TickerConfig
-    private var entries: [WatchEntry] = []
+    private var entries: [WatchEntry] = []          // 正在编辑的那一套
+    private var lists: [Watchlist] = []             // 全部自选池草稿
+    private var currentList = 0
+    private let listPicker = NSPopUpButton()
+    private let deleteList = NSButton()
     private var window: NSWindow?
     private let table = NSTableView()
     private let mode = NSPopUpButton()
@@ -22,6 +27,12 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
     private let flashes = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let redUp = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let dock = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    private let scheme = NSPopUpButton()
+    private let barBackground = NSPopUpButton()
+    private let hover = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    private let login = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    private let smart = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    private let updates = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let resetNote = NSTextField(labelWithString: "")
     private var resetPositions = false
     private var lastLanguage = ""
@@ -41,7 +52,10 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
             buildWindow()
             lastLanguage = L10n.language
         }
-        entries = config.watchlist
+        lists = config.watchlists
+        currentList = min(max(0, config.activeWatchlist), max(0, lists.count - 1))
+        entries = lists.isEmpty ? [] : lists[currentList].entries
+        reloadListPicker()
         table.reloadData()
         mode.selectItem(at: TickerConfig.displayModes.firstIndex { $0.key == config.displayMode } ?? 0)
         source.selectItem(at: config.provider == "real" ? 0 : 1)
@@ -56,6 +70,12 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
         flashes.state = config.marqueeBlink ? .on : .off
         redUp.state = config.redUpMarkets.contains("cn") && config.redUpMarkets.contains("hk") ? .on : .off
         dock.state = config.showDockIcon ? .on : .off
+        scheme.selectItem(at: ColorScheme.allCases.firstIndex(of: config.colorScheme) ?? 0)
+        barBackground.selectItem(at: config.barBackground == "none" ? 1 : 0)
+        hover.state = config.hoverPause ? .on : .off
+        smart.state = config.smartRefresh ? .on : .off
+        updates.state = config.checkUpdates ? .on : .off
+        login.state = SMAppService.mainApp.status == .enabled ? .on : .off
         resetPositions = false
         resetNote.stringValue = ""
         updateValues()
@@ -65,13 +85,17 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
     }
 
     private func buildWindow() {
-        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 660, height: 550),
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 660, height: 700),
                          styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         w.title = L("Whirlpool Settings")
-        w.minSize = NSSize(width: 660, height: 550)
+        w.minSize = NSSize(width: 660, height: 700)
         w.isReleasedWhenClosed = false
         w.delegate = self
         w.setFrameAutosaveName("WhirlpoolSettings")
+        // 旧版本记住的窗口可能比新内容矮:恢复后不足最小尺寸就撑开,免得底部选项被裁
+        if w.contentLayoutRect.height < 700 || w.contentLayoutRect.width < 660 {
+            w.setContentSize(NSSize(width: max(660, w.contentLayoutRect.width), height: 700))
+        }
         window = w
         let tabs = NSTabView()
         for (title, view) in [(L("Watchlist"), watchlistTab()), (L("Display"), displayTab()), (L("General"), generalTab())] {
@@ -107,10 +131,12 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
         // This table is reused when changing language; remove old columns first.
         for column in table.tableColumns { table.removeTableColumn(column) }
         let symbol = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("symbol"))
-        symbol.title = L("Symbol"); symbol.width = 325; symbol.minWidth = 200
+        symbol.title = L("Symbol"); symbol.width = 250; symbol.minWidth = 160
         let market = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("market"))
-        market.title = L("Market"); market.width = 205; market.minWidth = 180
-        table.addTableColumn(symbol); table.addTableColumn(market)
+        market.title = L("Market"); market.width = 180; market.minWidth = 150
+        let decimals = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("decimals"))
+        decimals.title = L("Decimals"); decimals.width = 110; decimals.minWidth = 100
+        table.addTableColumn(symbol); table.addTableColumn(market); table.addTableColumn(decimals)
         table.delegate = self; table.dataSource = self
         table.usesAlternatingRowBackgroundColors = true
         table.rowHeight = 34
@@ -119,13 +145,91 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
         table.setAccessibilityLabel(L("Watchlist"))
         let scroll = NSScrollView()
         scroll.documentView = table; scroll.hasVerticalScroller = true; scroll.borderType = .bezelBorder
+
+        listPicker.target = self; listPicker.action = #selector(listPicked)
+        listPicker.setAccessibilityLabel(L("Watchlist"))
+        listPicker.widthAnchor.constraint(greaterThanOrEqualToConstant: 180).isActive = true
+        deleteList.title = L("Delete List"); deleteList.bezelStyle = .rounded
+        deleteList.target = self; deleteList.action = #selector(removeList)
+        let listRow = NSStackView(views: [NSTextField(labelWithString: L("Current list")), listPicker,
+                                          button("New List", #selector(newList)),
+                                          button("Rename…", #selector(renameList)), deleteList])
+        listRow.orientation = .horizontal; listRow.alignment = .centerY; listRow.spacing = 8
+
         let actions = NSStackView(views: [button("Add", #selector(add)), button("Remove", #selector(remove)),
                                          button("Move Up", #selector(up)), button("Move Down", #selector(down))])
         actions.orientation = .horizontal; actions.spacing = 8
-        let content = stack([note("Symbols scroll in this order. Double-click a symbol to edit it."), scroll, actions,
-                             note("Examples: AAPL, ^GSPC, 600519, 00700, BTC-USD")])
+        let content = stack([listRow,
+                             note("The list selected here is shown after saving. Switch lists from the menu or Option-click the ticker."),
+                             scroll, actions,
+                             note("Examples: AAPL, ^GSPC, 600519, 00700, BTC-USD. Decimals: Auto uses the data source's precision (A-share ETFs 3, FX 4, low-priced crypto more).")])
         scroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 230).isActive = true
         return content
+    }
+
+    // ── 多自选池 ──
+
+    private func syncCurrentList() {
+        finishEditing()
+        if lists.indices.contains(currentList) { lists[currentList].entries = entries }
+    }
+
+    private func reloadListPicker() {
+        listPicker.removeAllItems()
+        listPicker.addItems(withTitles: lists.map(\.name))
+        listPicker.selectItem(at: currentList)
+        deleteList.isEnabled = lists.count > 1
+    }
+
+    @objc private func listPicked() {
+        syncCurrentList()
+        currentList = max(0, listPicker.indexOfSelectedItem)
+        entries = lists[currentList].entries
+        table.reloadData()
+    }
+
+    @objc private func newList() {
+        syncCurrentList()
+        var n = lists.count + 1
+        while lists.contains(where: { $0.name == "\(L("Watchlist")) \(n)" }) { n += 1 }
+        lists.append(Watchlist(name: "\(L("Watchlist")) \(n)", entries: []))
+        currentList = lists.count - 1
+        entries = []
+        reloadListPicker()
+        table.reloadData()
+        add()
+    }
+
+    @objc private func renameList() {
+        syncCurrentList()
+        guard lists.indices.contains(currentList), let window else { return }
+        let alert = NSAlert()
+        alert.messageText = L("Rename List")
+        let field = NSTextField(string: lists[currentList].name)
+        field.frame = NSRect(x: 0, y: 0, width: 240, height: 24)
+        alert.accessoryView = field
+        alert.addButton(withTitle: L("Rename")); alert.addButton(withTitle: L("Cancel"))
+        alert.window.initialFirstResponder = field
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard let self, response == .alertFirstButtonReturn else { return }
+            let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty else { return }
+            guard !self.lists.enumerated().contains(where: { $0.offset != self.currentList && $0.element.name == name }) else {
+                self.error("A list with this name already exists."); return
+            }
+            self.lists[self.currentList].name = name
+            self.reloadListPicker()
+        }
+    }
+
+    @objc private func removeList() {
+        syncCurrentList()
+        guard lists.count > 1, lists.indices.contains(currentList) else { return }
+        lists.remove(at: currentList)
+        currentList = min(currentList, lists.count - 1)
+        entries = lists[currentList].entries
+        reloadListPicker()
+        table.reloadData()
     }
 
     private func displayTab() -> NSView {
@@ -143,13 +247,19 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
         font.removeAllItems(); font.addItems(withTitles: [L("LED dots"), L("System Font"), L("Monospaced")])
         font.setAccessibilityLabel(L("Ticker font"))
         resetNote.font = .systemFont(ofSize: 11); resetNote.textColor = .secondaryLabelColor
+        scheme.removeAllItems(); scheme.addItems(withTitles: ColorScheme.allCases.map(\.label))
+        scheme.setAccessibilityLabel(L("Colors"))
+        barBackground.removeAllItems(); barBackground.addItems(withTitles: [L("Glass"), L("Transparent")])
+        barBackground.setAccessibilityLabel(L("Floating ticker background"))
+        hover.title = L("Pause scrolling while the pointer is over the ticker")
         return stack([formRow("Display mode", [mode]), formRow("Scroll speed", [speed, speedValue]),
                       formRow("Display width", [width, widthValue]), formRow("Marquee size", [size]),
                       formRow("Ticker font", [font]),
-                      note("Large is clamped to Medium inside the menu bar; the floating ticker uses the full size."),
-                      note("System fonts apply to the scrolling ticker and the floating bar; the quote board keeps its own font setting."),
-                      arrows, pixels, flashes,
-                      note("Flash color follows the previous quote; daily change keeps its own color."),
+                      note("Large is clamped to Medium inside the menu bar for LED dots. The quote board keeps its own font setting."),
+                      formRow("Colors", [scheme]),
+                      note("Adaptive keeps red/green and switches the neutral color between white and near-black to follow light or dark menu bars."),
+                      formRow("Floating ticker background", [barBackground]),
+                      arrows, pixels, flashes, hover,
                       button("Reset Floating Windows", #selector(resetWindows)), resetNote, NSView()])
     }
 
@@ -161,10 +271,15 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
         source.setAccessibilityLabel(L("Data source")); language.setAccessibilityLabel(L("Language"))
         redUp.title = L("Red means up in China / Hong Kong")
         dock.title = L("Show Dock icon")
+        login.title = L("Launch at login")
+        smart.title = L("Refresh slowly while all watched markets are closed")
+        updates.title = L("Check for updates automatically")
         return stack([formRow("Language", [language]), note("Language changes apply after saving."),
                       formRow("Data source", [source]), formRow("Refresh interval", [refresh, NSTextField(labelWithString: L("seconds"))]),
                       note("30 seconds is recommended. Short intervals may be rate-limited. All displays share one request cycle."),
-                      redUp, dock, note("The Dock icon gives a visible handle on the running app — right-click it to quit or relaunch."),
+                      smart, note("Uses exchange calendars with holidays and half days (NYSE, SSE/SZSE, HKEX); crypto, futures and FX count as always open. Refreshing resumes at the next open."),
+                      redUp, login, dock, note("The Dock icon gives a visible handle on the running app — right-click it to quit or relaunch."),
+                      updates, note("Once a day Whirlpool asks GitHub for the latest release (no identifiers sent). New versions appear in the menu and scroll by once."),
                       note("Your watchlist stays on this device. Symbols are sent only to the selected quote provider."), NSView()])
     }
 
@@ -199,7 +314,17 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
     }
 
     func numberOfRows(in tableView: NSTableView) -> Int { entries.count }
+    static let decimalChoices: [Int?] = [nil, 0, 1, 2, 3, 4, 5, 6]
+
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        if tableColumn?.identifier.rawValue == "decimals" {
+            let popup = NSPopUpButton()
+            popup.addItems(withTitles: Self.decimalChoices.map { $0.map(String.init) ?? L("Auto") })
+            popup.selectItem(at: Self.decimalChoices.firstIndex(of: entries[row].decimals) ?? 0)
+            popup.tag = row; popup.target = self; popup.action = #selector(decimalsEdited(_:))
+            popup.setAccessibilityLabel(L("Decimals"))
+            return popup
+        }
         if tableColumn?.identifier.rawValue == "symbol" {
             let field = NSTextField(string: entries[row].symbol)
             field.isBordered = false; field.drawsBackground = false
@@ -221,6 +346,9 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
     }
     @objc private func symbolEdited(_ field: NSTextField) {
         if entries.indices.contains(field.tag) { entries[field.tag].symbol = field.stringValue }
+    }
+    @objc private func decimalsEdited(_ popup: NSPopUpButton) {
+        if entries.indices.contains(popup.tag) { entries[popup.tag].decimals = Self.decimalChoices[max(0, popup.indexOfSelectedItem)] }
     }
     @objc private func marketEdited(_ popup: NSPopUpButton) {
         if entries.indices.contains(popup.tag) { entries[popup.tag].market = Self.markets[popup.indexOfSelectedItem].key }
@@ -258,15 +386,28 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
         if let window { alert.beginSheetModal(for: window) } else { alert.runModal() }
     }
     @objc private func save() {
-        finishEditing()
-        let cleaned = entries.map { WatchEntry(symbol: $0.symbol.trimmingCharacters(in: .whitespacesAndNewlines).uppercased(), market: $0.market) }
-        guard !cleaned.isEmpty else { error("Add at least one symbol."); return }
-        guard Self.validEntries(cleaned) else { error("Use unique symbols with valid market codes."); return }
+        syncCurrentList()
+        var cleanedLists: [Watchlist] = []
+        for (i, list) in lists.enumerated() {
+            // 保留小数位等条目字段,只规整代码
+            let cleaned = list.entries.map { e -> WatchEntry in
+                var e = e; e.symbol = e.symbol.trimmingCharacters(in: .whitespacesAndNewlines).uppercased(); return e
+            }.filter { !$0.symbol.isEmpty }
+            let showProblem = { (message: String) in
+                self.currentList = i; self.entries = self.lists[i].entries
+                self.reloadListPicker(); self.table.reloadData()
+                self.error(String(format: L("List “%@”: "), list.name) + L(message))
+            }
+            guard !cleaned.isEmpty else { showProblem("Add at least one symbol."); return }
+            guard Self.validEntries(cleaned) else { showProblem("Use unique symbols with valid market codes."); return }
+            cleanedLists.append(Watchlist(name: list.name, entries: cleaned))
+        }
         guard let interval = Double(refresh.stringValue), interval.isFinite, (5...3600).contains(interval) else {
             error("Enter a refresh interval from 5 to 3600 seconds."); return
         }
         var draft = config
-        draft.watchlist = cleaned
+        draft.watchlists = cleanedLists
+        draft.activeWatchlist = currentList
         draft.displayMode = TickerConfig.displayModes[mode.indexOfSelectedItem].key
         draft.provider = source.indexOfSelectedItem == 0 ? "real" : "demo"
         draft.language = ["system", "en", "zh-Hans"][language.indexOfSelectedItem]
@@ -281,9 +422,30 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
         draft.redUpMarkets.removeAll { ["cn", "hk"].contains($0) }
         if redUp.state == .on { draft.redUpMarkets += ["cn", "hk"] }
         draft.showDockIcon = dock.state == .on
+        draft.transparentColor = ColorScheme.allCases[max(0, scheme.indexOfSelectedItem)].rawValue
+        draft.barBackground = barBackground.indexOfSelectedItem == 1 ? "none" : "glass"
+        draft.hoverPause = hover.state == .on
+        draft.smartRefresh = smart.state == .on
+        draft.checkUpdates = updates.state == .on
         if resetPositions { draft.boardOrigin = nil; draft.barOrigin = nil }
         guard saveConfig(draft) else { error(configPath(), title: "Could Not Save Settings"); return }
-        config = draft; onApplied?(draft); window?.close()
+        config = draft; onApplied?(draft)
+        applyLoginItem(login.state == .on)
+        window?.close()
+    }
+
+    /// 开机自启:系统登录项(SMAppService),状态以系统为准,不写配置
+    private func applyLoginItem(_ enabled: Bool) {
+        let service = SMAppService.mainApp
+        guard enabled != (service.status == .enabled) else { return }
+        do {
+            if enabled { try service.register() } else { try service.unregister() }
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = L("Could Not Change Login Item")
+            alert.informativeText = error.localizedDescription
+            alert.runModal()
+        }
     }
     static func validEntries(_ entries: [WatchEntry]) -> Bool {
         var seen = Set<String>()

@@ -12,11 +12,14 @@ struct Quote {
     let series: [SeriesPt]?      // 当日分钟线,board 缩略图用
     let sessionStart: Double?    // 当天时段起(t 同单位)
     let sessionEnd: Double?
+    var decimals: Int? = nil     // 行情源给的价格精度(Yahoo priceHint / A 股报价串位数)
+    var marketTime: Date? = nil  // 最近一笔的交易所时间(智能刷新的实时兜底)
 }
 
 // Board 模式一行的展示数据(market 随行,配色习惯到渲染层再定)
 struct BoardRow {
     let symbol: String
+    let decimals: Int
     let price: String
     let change: String   // 带符号带 %
     let up: Bool
@@ -40,6 +43,15 @@ enum QuoteEngine {
         key == "real" ? RealProvider() : DemoProvider()
     }
 
+    /// 价格显示位数:自选里手动指定 > 行情源提示 > 市场规则 > 2 位
+    static func decimals(for entry: WatchEntry, quote: Quote?) -> Int {
+        if let d = entry.decimals { return min(8, max(0, d)) }
+        if let d = quote?.decimals { return min(8, max(0, d)) }
+        // 港股按港交所价位表:0.5 港元以下最小变动 0.001/0.005,要 3 位;其余 2 位足够
+        if entry.market == "hk", let price = quote?.price, price < 0.5 { return 3 }
+        return 2
+    }
+
     /// 拼跑马灯文本。基底色由配置给(默认白),只有涨跌幅段着色,完事 \c[] 复位。
     /// 平盘(|Δ|<0.005):不着色(随基底白),箭头位是一道杠。
     /// 价格按上一笔报价决定闪色,从最高变化位到末尾连续着色;涨跌幅保持当日方向色。
@@ -55,8 +67,10 @@ enum QuoteEngine {
             let flat  = abs(q.changePct) < 0.005
             let redUp = redUpMarkets.contains(e.market)
             let color = up ? (redUp ? "red" : "green") : (redUp ? "green" : "red")
-            var price = PriceFlash.priceText(q.price)
-            if blinkChanged, let flash = PriceFlash.between(previousTicks[e.symbol], and: q.price, redUp: redUp) {
+            let places = decimals(for: e, quote: q)
+            var price = PriceFlash.priceText(q.price, decimals: places)
+            if blinkChanged, let flash = PriceFlash.between(previousTicks[e.symbol], and: q.price, redUp: redUp,
+                                                           decimals: places) {
                 price = "\(flash.prefix)\\b[1:\(flash.color.rawValue)]\(flash.suffix)\\b[0]"
             }
             let change = flat
@@ -76,7 +90,8 @@ enum QuoteEngine {
                           changeArrows: Bool = true) -> [BoardRow] {
         entries.compactMap { e in
             guard let q = quotes[e.symbol] else { return nil }
-            let price = PriceFlash.priceText(q.price)
+            let places = decimals(for: e, quote: q)
+            let price = PriceFlash.priceText(q.price, decimals: places)
             let up   = q.changePct >= 0
             let flat = abs(q.changePct) < 0.005
             let change = flat
@@ -84,7 +99,7 @@ enum QuoteEngine {
                 : changeArrows
                     ? "\(up ? "▲" : "▼")\(String(format: "%.2f", abs(q.changePct)))%"
                     : "\(up ? "+" : "")\(String(format: "%.2f", q.changePct))%"
-            return BoardRow(symbol: e.symbol, price: price, change: change,
+            return BoardRow(symbol: e.symbol, decimals: places, price: price, change: change,
                             up: up, flat: flat, market: e.market, series: q.series)
         }
     }

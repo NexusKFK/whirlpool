@@ -20,6 +20,7 @@ enum MessageKind: String, Codable {
     case clearQueue = "clear_queue"
     case getStatus  = "get_status"
     case openSettings = "open_settings"
+    case setList = "set_list"
     case quit
 }
 
@@ -35,6 +36,7 @@ struct TickerMessage {
     let duration:       Double      // standby only
     let onClickCommand: String?
     let width:          Int?        // setWidth only
+    var isQuoteCycle = false        // 行情循环生成的一轮(数据未到时可原样重播)
 }
 
 // ── Scroll-Stream ──────────────────────────────────────────────────────────────

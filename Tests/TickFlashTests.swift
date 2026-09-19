@@ -212,5 +212,7 @@ struct TickFlashTestRunner {
         }
         print("\(cases.count) price regression checks passed.")
         try runCoreTests()
+        try runGPUMarqueeTests()
+        try runFeatureTests()
     }
 }

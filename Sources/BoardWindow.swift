@@ -7,9 +7,14 @@ import AppKit
 // 一块浮层小窗占在那里,视觉上就是坞的延伸。
 final class BoardWindow: NSPanel, NSWindowDelegate {
 
-    private let container = NSVisualEffectView()
+    private let container = BoardContainerView()
     private var programmaticMove = false
     private var lastPrices: [String: Double] = [:]   // 上一笔价格,只闪变化位及后续小位
+    private var lastUpdate: (entries: [WatchEntry], quotes: [String: Quote], redUp: [String],
+                             date: Date, arrows: Bool, status: String)?
+    private var saveWork: DispatchWorkItem?
+    /// 双击/右键某行打开图表
+    var onOpenChart: ((WatchEntry) -> Void)?
 
     var config: TickerConfig {
         didSet { reposition() }
@@ -37,6 +42,7 @@ final class BoardWindow: NSPanel, NSWindowDelegate {
         container.wantsLayer = true
         container.layer?.cornerRadius = 12
         container.layer?.masksToBounds = true
+        container.onAppearanceChange = { [weak self] in self?.redraw() }
         contentView = container
 
         reposition()
@@ -44,9 +50,33 @@ final class BoardWindow: NSPanel, NSWindowDelegate {
 
     func update(entries: [WatchEntry], quotes: [String: Quote], redUpMarkets: [String],
                 at date: Date, changeArrows: Bool = true, status: String = "Updated") {
+        lastUpdate = (entries, quotes, redUpMarkets, date, changeArrows, status)
+        // 点阵字把颜色烤进位图:必须按报价卡自己的明暗解析 labelColor 等动态色
+        container.effectiveAppearance.performAsCurrentDrawingAppearance {
+            build(entries: entries, quotes: quotes, redUpMarkets: redUpMarkets, at: date,
+                  changeArrows: changeArrows, status: status, flash: true)
+        }
+        lastPrices = lastPrices.filter { key, _ in entries.contains { $0.symbol == key } }
+        for e in entries {
+            if let q = quotes[e.symbol] { lastPrices[e.symbol] = q.price }
+        }
+    }
+
+    /// 系统明暗切换:用上一份数据原样重画(不闪变)
+    private func redraw() {
+        guard let u = lastUpdate else { return }
+        container.effectiveAppearance.performAsCurrentDrawingAppearance {
+            build(entries: u.entries, quotes: u.quotes, redUpMarkets: u.redUp, at: u.date,
+                  changeArrows: u.arrows, status: u.status, flash: false)
+        }
+    }
+
+    private func build(entries: [WatchEntry], quotes: [String: Quote], redUpMarkets: [String],
+                       at date: Date, changeArrows: Bool, status: String, flash: Bool) {
         let rowsData = QuoteEngine.boardRows(entries: entries, quotes: quotes,
                                              changeArrows: changeArrows)
         container.subviews.forEach { $0.removeFromSuperview() }
+        let style = LEDStyle(tone: Tone.of(container.effectiveAppearance))
 
         let pixel = config.boardPixelFont
         let W: CGFloat = pixel ? Self.fittedWidth(rows: rowsData) : 250
@@ -61,11 +91,15 @@ final class BoardWindow: NSPanel, NSWindowDelegate {
         let rowW = W - inset * 2
         for (i, r) in rowsData.enumerated() {
             let y = H - inset - CGFloat(i + 1) * rowH
-            let row = NSView(frame: NSRect(x: inset, y: y, width: rowW, height: rowH))
-            let priceFlash = quotes[r.symbol].flatMap {
+            let row = BoardRowView(frame: NSRect(x: inset, y: y, width: rowW, height: rowH))
+            row.entry = WatchEntry(symbol: r.symbol, market: r.market)
+            row.onOpenChart = { [weak self] e in self?.onOpenChart?(e) }
+            row.menuProvider = { [weak self] in self?.menuProvider?() }
+            row.toolTip = L("Double-click to open chart")
+            let priceFlash = flash ? quotes[r.symbol].flatMap {
                 PriceFlash.between(lastPrices[r.symbol], and: $0.price,
-                                   redUp: redUpMarkets.contains(r.market))
-            }
+                                   redUp: redUpMarkets.contains(r.market), decimals: r.decimals)
+            } : nil
 
             // 平盘白,其余按市场习惯红涨绿跌/绿涨红跌
             let color: NSColor
@@ -82,7 +116,7 @@ final class BoardWindow: NSPanel, NSWindowDelegate {
                 // 像素字体:三段点阵图,符号左、价格/涨跌右,与跑马灯同款字形
                 let base = NSColor.labelColor
                 let symIV  = Self.pixelIV(r.symbol, base)
-                let pxIV   = Self.pixelIV(r.price, base, flash: priceFlash)
+                let pxIV   = Self.pixelIV(r.price, base, flash: priceFlash, style: style)
                 let chgIV  = Self.pixelIV(r.change, color)
                 let cy = (rowH - symIV.frame.height) / 2
                 chgIV.frame.origin = NSPoint(x: labelW - chgIV.frame.width, y: cy)
@@ -92,7 +126,7 @@ final class BoardWindow: NSPanel, NSWindowDelegate {
                 row.addSubview(pxIV)
                 row.addSubview(chgIV)
             } else {
-                let label = Self.rowLabel(r, color: color, width: labelW, flash: priceFlash)
+                let label = Self.rowLabel(r, color: color, width: labelW, flash: priceFlash, style: style)
                 label.frame = NSRect(x: 0, y: 2, width: labelW, height: rowH - 4)
                 row.addSubview(label)
             }
@@ -122,11 +156,6 @@ final class BoardWindow: NSPanel, NSWindowDelegate {
         footer.frame = NSRect(x: inset, y: 4, width: rowW, height: 14)
         footer.toolTip = footer.stringValue
         container.addSubview(footer)
-
-        lastPrices = lastPrices.filter { key, _ in entries.contains { $0.symbol == key } }
-        for e in entries {
-            if let q = quotes[e.symbol] { lastPrices[e.symbol] = q.price }
-        }
 
         // 右角锚定随实际宽度重算(手动拖过的位置不动)
         if config.boardOrigin == nil { reposition() }
@@ -160,10 +189,17 @@ final class BoardWindow: NSPanel, NSWindowDelegate {
     func windowDidMove(_ notification: Notification) {
         guard !programmaticMove else { return }
         config.boardOrigin = [Double(frame.origin.x), Double(frame.origin.y)]
-        if configReadError == nil, var current = try? readConfig(at: configURL) {
-            current.boardOrigin = config.boardOrigin
-            saveConfig(current)
+        // 拖动过程中会连发;停手 0.5 秒后再落盘一次
+        saveWork?.cancel()
+        let origin = config.boardOrigin
+        let work = DispatchWorkItem {
+            if configReadError == nil, var current = try? readConfig(at: configURL) {
+                current.boardOrigin = origin
+                saveConfig(current)
+            }
         }
+        saveWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
     }
 
     // ── 行渲染 ───────────────────────────────────────────────────────────────
@@ -189,10 +225,11 @@ final class BoardWindow: NSPanel, NSWindowDelegate {
         return CGFloat(cols) * 2   // dot 1 + gap 1 = 2pt/列
     }
 
-    private static func pixelIV(_ text: String, _ color: NSColor, flash: PriceFlash? = nil) -> NSImageView {
+    private static func pixelIV(_ text: String, _ color: NSColor, flash: PriceFlash? = nil,
+                                style: LEDStyle = LEDStyle()) -> NSImageView {
         let normal = renderPixelText([(text: text, color: color)])
         let img = flash.map {
-            renderPixelText([(text: $0.prefix, color: color), (text: $0.suffix, color: nsColor($0.color))])
+            renderPixelText([(text: $0.prefix, color: color), (text: $0.suffix, color: style.nsColor($0.color))])
         } ?? normal
         let iv = NSImageView(image: img)
         iv.imageScaling = .scaleNone
@@ -206,7 +243,7 @@ final class BoardWindow: NSPanel, NSWindowDelegate {
     }
 
     private static func rowLabel(_ r: BoardRow, color: NSColor, width: CGFloat,
-                                 flash: PriceFlash?) -> NSTextField {
+                                 flash: PriceFlash?, style: LEDStyle = LEDStyle()) -> NSTextField {
         let para = NSMutableParagraphStyle()
         para.tabStops = [
             NSTextTab(type: .rightTabStopType, location: width - 64),
@@ -227,7 +264,7 @@ final class BoardWindow: NSPanel, NSWindowDelegate {
         let label = NSTextField(labelWithAttributedString: attr)
         if let flash {
             let highlighted = NSMutableAttributedString(attributedString: attr)
-            highlighted.addAttribute(.foregroundColor, value: nsColor(flash.color),
+            highlighted.addAttribute(.foregroundColor, value: style.nsColor(flash.color),
                                      range: NSRange(location: r.symbol.utf16.count + 1 + flash.prefix.utf16.count,
                                                     length: flash.suffix.utf16.count))
             label.attributedStringValue = highlighted
@@ -237,6 +274,41 @@ final class BoardWindow: NSPanel, NSWindowDelegate {
         }
         return label
     }
+}
+
+/// 报价卡底板:明暗切换时通知重画(点阵字颜色是烤进位图的)
+private final class BoardContainerView: NSVisualEffectView {
+    var onAppearanceChange: (() -> Void)?
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        DispatchQueue.main.async { [weak self] in self?.onAppearanceChange?() }
+    }
+}
+
+/// 报价卡一行:单击拖卡、双击开图表、右键菜单首项为本行图表
+private final class BoardRowView: NSView {
+    var entry: WatchEntry?
+    var onOpenChart: ((WatchEntry) -> Void)?
+    var menuProvider: (() -> NSMenu?)?
+
+    override func hitTest(_ point: NSPoint) -> NSView? { frame.contains(point) ? self : nil }
+    override var mouseDownCanMoveWindow: Bool { false }
+    override func mouseDown(with event: NSEvent) {
+        if event.clickCount == 2, let entry { onOpenChart?(entry); return }
+        window?.performDrag(with: event)
+    }
+    override func rightMouseDown(with event: NSEvent) {
+        let menu = menuProvider?() ?? NSMenu()
+        if let entry {
+            let item = NSMenuItem(title: String(format: L("Open %@ Chart"), entry.symbol),
+                                  action: #selector(openChart), keyEquivalent: "")
+            item.target = self
+            menu.insertItem(item, at: 0)
+            menu.insertItem(.separator(), at: 1)
+        }
+        NSMenu.popUpContextMenu(menu, with: event, for: self)
+    }
+    @objc private func openChart() { if let entry { onOpenChart?(entry) } }
 }
 
 // ── 分钟线缩略图:细线 + 淡填充 ────────────────────────────────────────────────

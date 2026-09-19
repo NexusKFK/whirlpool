@@ -11,6 +11,8 @@ final class RealProvider: QuoteProvider {
 
     private let client = QuoteHTTPClient()
     var cooldownUntil: Date? { client.cooldownUntil }
+    /// 只有报价卡需要当日分时线;纯跑马灯时 Yahoo 走日线小响应、腾讯不拉分钟端点
+    var includeSeries = true
 
     func quotes(for entries: [WatchEntry], completion: @escaping ([String: Quote]) -> Void) {
         let cnSide    = entries.filter { $0.market == "cn" || $0.market == "hk" }
@@ -65,6 +67,7 @@ final class RealProvider: QuoteProvider {
             }
 
             // 分钟线:每标的单独取,取不到就让该行没有缩略图
+            guard self.includeSeries else { completion(out); return }
             let present = Set(out.keys)
             let outLock = NSLock()
             let seriesGroup = DispatchGroup()
@@ -79,7 +82,8 @@ final class RealProvider: QuoteProvider {
                         if let q = out[symbol] {
                             out[symbol] = Quote(price: q.price, changePct: q.changePct,
                                                 series: series,
-                                                sessionStart: session.0, sessionEnd: session.1)
+                                                sessionStart: session.0, sessionEnd: session.1,
+                                                decimals: q.decimals, marketTime: q.marketTime)
                         }
                         outLock.unlock()
                     }
@@ -100,8 +104,22 @@ final class RealProvider: QuoteProvider {
               let px = Double(parts[3]),
               let pct = Double(parts[32]), px.isFinite, px > 0, pct.isFinite
         else { return nil }
-        return (key, Quote(price: px, changePct: pct, series: nil,
-                           sessionStart: nil, sessionEnd: nil))
+        var quote = Quote(price: px, changePct: pct, series: nil, sessionStart: nil, sessionEnd: nil)
+        // A 股报价串自带精度(股票 2 位、ETF/基金 3 位);港股一律写 3 位,不作数,交给价位表
+        if !key.hasPrefix("hk"), let dot = parts[3].firstIndex(of: ".") {
+            quote.decimals = parts[3].distance(from: dot, to: parts[3].endIndex) - 1
+        }
+        quote.marketTime = Self.tencentTime(parts[30], hongKong: key.hasPrefix("hk"))
+        return (key, quote)
+    }
+
+    /// 腾讯时间戳:A 股 "20260918150003"(北京时间),港股 "2026/09/18 16:08:32"(香港时间)
+    static func tencentTime(_ raw: String, hongKong: Bool) -> Date? {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(identifier: hongKong ? "Asia/Hong_Kong" : "Asia/Shanghai")
+        f.dateFormat = raw.contains("/") ? "yyyy/MM/dd HH:mm:ss" : "yyyyMMddHHmmss"
+        return f.date(from: raw.trimmingCharacters(in: .whitespaces))
     }
 
     func tencentCode(_ e: WatchEntry) -> String {
@@ -151,7 +169,8 @@ final class RealProvider: QuoteProvider {
         for e in entries {
             group.enter()
             let sym = e.symbol.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? e.symbol
-            guard let url = URL(string: "https://query1.finance.yahoo.com/v8/finance/chart/\(sym)?interval=1m&range=1d")
+            let query = self.includeSeries ? "interval=1m&range=1d" : "interval=1d&range=1d"
+            guard let url = URL(string: "https://query1.finance.yahoo.com/v8/finance/chart/\(sym)?\(query)")
             else { group.leave(); continue }
             var req = URLRequest(url: url)
             req.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15",
@@ -172,7 +191,7 @@ final class RealProvider: QuoteProvider {
                 var series: [SeriesPt]? = nil
                 var sStart: Double? = nil
                 var sEnd: Double? = nil
-                if let ts = result["timestamp"] as? [Double],
+                if self.includeSeries, let ts = result["timestamp"] as? [Double],
                    let indicators = result["indicators"] as? [String: Any],
                    let quoteArr = (indicators["quote"] as? [[String: Any]])?.first,
                    let raw = quoteArr["close"] as? [Any] {
@@ -190,9 +209,12 @@ final class RealProvider: QuoteProvider {
                     if pts.count > 2 { series = pts }
                 }
 
+                let hint = meta["priceHint"] as? Int
+                let time = (meta["regularMarketTime"] as? Double).map { Date(timeIntervalSince1970: $0) }
                 lock.lock()
                 out[e.symbol] = Quote(price: px, changePct: (px - prev) / prev * 100,
-                                      series: series, sessionStart: sStart, sessionEnd: sEnd)
+                                      series: series, sessionStart: sStart, sessionEnd: sEnd,
+                                      decimals: hint, marketTime: time)
                 lock.unlock()
             }
         }
