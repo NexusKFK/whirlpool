@@ -130,6 +130,28 @@ struct TickFlashTests {
         }
     }
 
+    func testTextStreamMarkersAndStripGeometry() {
+        let saved = (renderTransparent, renderColoredTransparent)
+        defer { (renderTransparent, renderColoredTransparent) = saved }
+        renderTransparent = false
+        renderColoredTransparent = false
+        let text = "SPY \\c[green]675.10\\c[] \\b[1:red]0.42\\b[0]%\\p[2]END"
+        let stream = buildTextScrollStream(text: text, defaultColor: .white, onClickCommand: nil)
+        expectTrue(stream.runs.contains { $0.text == "SPY " && $0.color == .white && $0.blink == nil })
+        expectTrue(stream.runs.contains { $0.text == "675.10" && $0.color == .green })
+        let blink = stream.runs.filter { $0.blink == .red }.map { $0.text }.joined()
+        expectEqual(blink, "0.42")
+        expectEqual(stream.pauses.count, 1)
+        let strip = TextStrip(stream: stream, font: .monospacedDigitSystemFont(ofSize: 14, weight: .regular),
+                              defaultColor: .white)
+        expectTrue(strip.totalCols > 0)
+        expectTrue(strip.pauses.count == 1 && strip.pauses[0].at > 0)   // 暂停换算到虚拟列
+        expectFalse(strip.blinkCols.isEmpty)
+        // \g 自定义字形是 LED 专属,文本模式整段跳过
+        let glyph = buildTextScrollStream(text: "\\g[heart]A", defaultColor: .white, onClickCommand: nil)
+        expectEqual(glyph.runs.map { $0.text }.joined(), "A")
+    }
+
     func testShortStreamAndOversizedFlashStayBounded() {
         var short = ScrollFlashes(columns: [10: .red, 11: .red])
         let colors = short.colors(offset: 0, visibleColumns: 90, roundLength: 30, now: 0)
@@ -182,6 +204,7 @@ struct TickFlashTestRunner {
             ("independent pulse clocks", tests.testEachPriceHasItsOwnClock),
             ("rendered suffix pixels and color restoration", tests.testRenderedPulseColorsTheSuffixAndRestoresOriginalPixels),
             ("short streams and oversized groups", tests.testShortStreamAndOversizedFlashStayBounded),
+            ("text stream markers and strip geometry", tests.testTextStreamMarkersAndStripGeometry),
         ]
         for (name, run) in cases {
             try run()

@@ -11,6 +11,7 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
     private let source = NSPopUpButton()
     private let language = NSPopUpButton()
     private let size = NSPopUpButton()
+    private let font = NSPopUpButton()
     private let refresh = NSTextField()
     private let speed = NSSlider(value: 30, minValue: 10, maxValue: 50, target: nil, action: nil)
     private let width = NSSlider(value: 20, minValue: 8, maxValue: 60, target: nil, action: nil)
@@ -48,6 +49,7 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
         speed.doubleValue = 1 / config.scrollSpeed
         width.integerValue = config.defaultWidth
         size.selectItem(at: max(0, min(2, config.ledDotSize - 1)))
+        font.selectItem(at: ["led", "system", "mono"].firstIndex(of: config.marqueeFont) ?? 0)
         arrows.state = config.changeArrows ? .on : .off
         pixels.state = config.boardPixelFont ? .on : .off
         flashes.state = config.marqueeBlink ? .on : .off
@@ -136,10 +138,14 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
         flashes.title = L("Flash changed price suffixes")
         size.removeAllItems(); size.addItems(withTitles: [L("Small"), L("Medium"), L("Large")])
         size.setAccessibilityLabel(L("Marquee size"))
+        font.removeAllItems(); font.addItems(withTitles: [L("LED dots"), L("System Font"), L("Monospaced")])
+        font.setAccessibilityLabel(L("Ticker font"))
         resetNote.font = .systemFont(ofSize: 11); resetNote.textColor = .secondaryLabelColor
         return stack([formRow("Display mode", [mode]), formRow("Scroll speed", [speed, speedValue]),
                       formRow("Display width", [width, widthValue]), formRow("Marquee size", [size]),
+                      formRow("Ticker font", [font]),
                       note("Large is clamped to Medium inside the menu bar; the floating ticker uses the full size."),
+                      note("System fonts apply to the scrolling ticker and the floating bar; the quote board keeps its own font setting."),
                       arrows, pixels, flashes,
                       note("Flash color follows the previous quote; daily change keeps its own color."),
                       button("Reset Floating Windows", #selector(resetWindows)), resetNote, NSView()])
@@ -264,6 +270,7 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
         draft.scrollSpeed = 1 / speed.doubleValue
         draft.defaultWidth = width.integerValue
         draft.ledDotSize = size.indexOfSelectedItem + 1
+        draft.marqueeFont = ["led", "system", "mono"][max(0, min(2, font.indexOfSelectedItem))]
         draft.changeArrows = arrows.state == .on
         draft.boardPixelFont = pixels.state == .on
         draft.marqueeBlink = flashes.state == .on

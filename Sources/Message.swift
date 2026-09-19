@@ -122,14 +122,15 @@ func buildScrollStream(text: String, defaultColor: LEDColor,
     return ScrollStream(columns: columns, pauses: pauses, blinkCols: blinkCols)
 }
 
-private enum ParsedCode {
+enum ParsedCode {
     case color(LEDColor?)   // nil = zurück zur Grundfarbe der Nachricht
     case pause(PauseKind)
     case glyph(String)
     case blink(Bool, LEDColor?)   // \b[1]/\b[1:green]/\b[0]: 进入(带闪现色)/退出换数闪烁组
 }
 
-private func parseCode(_ text: String, from start: String.Index) -> (ParsedCode, String.Index)? {
+// internal:LED 与文本两个渲染流共用同一套标记解析
+func parseCode(_ text: String, from start: String.Index) -> (ParsedCode, String.Index)? {
     var i = text.index(after: start)
     guard i < text.endIndex else { return nil }
     let type = text[i]

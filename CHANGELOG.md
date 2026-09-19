@@ -1,8 +1,16 @@
 # Changelog
 
+## 1.7.0
+
+- System-font ticker: the scrolling ticker and the floating bar can now switch from LED dots to the system font or a monospaced font (three sizes apply to both). Colors, pauses, seamless wrap, and changed-digit flashes carry over; in the monochrome "auto" appearance the ticker becomes a template and follows light/dark like native menu bar text.
+- Display width is anchored to physical size: switching font sizes no longer changes how wide the strip is; the settings label shows the approximate width in points.
+
+中文：跑马灯与浮动行情条新增系统字体/等宽字体选项（字号三档通用），颜色、暂停、无缝环绕与换数闪变全量保留，单色外观下跟随系统明暗着色；显示宽度改为按物理宽度锚定，切换字号不再改变行情条的实际宽度，设置页标签同时显示近似像素宽度。
+
 ## 1.6.1
 
 - LED dot size setting (Small / Medium / Large) for the menu bar ticker and the floating ticker bar; scroll speed now follows physical speed, so changing the size does not change how fast quotes scroll.
+- Display width follows physical size across tiers (detailed in 1.7.0).
 - The menu bar clamps Large to Medium (the status item window cannot fit it); the floating bar uses the full size in all three tiers.
 - Repaired the price regression suite: tests referenced the pre-rename `TickFlash` API and could not compile.
 

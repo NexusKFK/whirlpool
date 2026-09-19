@@ -49,7 +49,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// 引擎侧(画布覆盖/预取时机)按最宽可视面取值,保证任何一屏都滚得出内容
     private var maxViewportCols: Int {
-        max(displayCols(dot: min(config.ledDotSize, 2)), displayCols(dot: config.ledDotSize))
+        if isTextMarquee { return textViewportCols }
+        return max(displayCols(dot: min(config.ledDotSize, 2)), displayCols(dot: config.ledDotSize))
+    }
+
+    // ── 系统字体跑马灯(flat-text)──
+    // 文本按 3pt 一虚拟列计量(与 M 档 LED 点距一致),滚速/暂停/闪变引擎全复用;
+    // 文本无点阵放大问题,L 档(17pt 字号)菜单栏放得下,无需双面钳档。
+    private var textStrip: TextStrip?
+    private var isTextMarquee: Bool { config.marqueeFont != "led" }
+    private var textViewportCols: Int { max(4, config.defaultWidth * 6) }
+
+    private var marqueeNSFont: NSFont {
+        let size: CGFloat = config.ledDotSize == 1 ? 12 : (config.ledDotSize == 3 ? 17 : 14)
+        return config.marqueeFont == "mono"
+            ? .monospacedSystemFont(ofSize: size, weight: .regular)
+            : .monospacedDigitSystemFont(ofSize: size, weight: .regular)
     }
 
     // Aktuelle Scroll-Animation
@@ -176,7 +191,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard animTimer == nil, config.tickerEnabled, !userPaused else { return }
         // 滚速语义=屏幕上的物理速度:点阵愈大每列位移愈大,按点距归一,
         // 换字号不改变视觉快慢(M 档与 1.6.x 完全一致;菜单栏侧 L 恒钳 M)。
-        let interval = config.scrollSpeed * Double(min(config.ledDotSize, 2) + 1) / 3.0
+        // 文本模式固定 3pt/虚拟列,各字号同速。
+        let pitch = isTextMarquee ? 3 : min(config.ledDotSize, 2) + 1
+        let interval = config.scrollSpeed * Double(pitch) / 3.0
         let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
             self?.tick()
         }
@@ -274,7 +291,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func showAbout() {
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.6.1"
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.7.0"
         NSApp.activate(ignoringOtherApps: true)
         NSApp.orderFrontStandardAboutPanel(options: [
             .applicationName: "Whirlpool", .applicationVersion: version,
@@ -355,15 +372,32 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         case .standby:
             if let msg = currentMsg {
-                setImage(renderSurfaces { dot in
-                    renderStandbyFrame(text: msg.text, displayWidth: displayCols(dot: dot),
-                                       defaultColor: baseColor(),
-                                       customChars: config.customChars, dot: dot)
-                })
+                if isTextMarquee {
+                    setImage(renderSurfaces { _ in
+                        renderTextStandbyFrame(text: msg.text, viewportCols: maxViewportCols,
+                                               font: marqueeNSFont, defaultColor: baseColor())
+                    })
+                } else {
+                    setImage(renderSurfaces { dot in
+                        renderStandbyFrame(text: msg.text, displayWidth: displayCols(dot: dot),
+                                           defaultColor: baseColor(),
+                                           customChars: config.customChars, dot: dot)
+                    })
+                }
             }
 
         default:
             guard let msg = currentMsg, msg.kind == .scroll, !canvas.isEmpty else { break }
+            if let strip = textStrip {
+                // 同文本同字体几何不变,只重着色;滚动位置与开放暂停保持
+                let stream = buildTextScrollStream(text: msg.text, defaultColor: baseColor(),
+                                                   onClickCommand: msg.onClickCommand)
+                let rebuilt = TextStrip(stream: stream, font: marqueeNSFont, defaultColor: baseColor())
+                guard rebuilt.totalCols == strip.totalCols else { break }
+                textStrip = rebuilt
+                showScrollFrame()
+                return
+            }
             let stream = buildScrollStream(text: msg.text, defaultColor: baseColor(),
                                            onClickCommand: msg.onClickCommand,
                                            customChars: config.customChars)
@@ -628,6 +662,32 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         switch msg.kind {
         case .scroll:
+            if isTextMarquee {
+                let stream = buildTextScrollStream(text: msg.text, defaultColor: defColor,
+                                                   onClickCommand: msg.onClickCommand)
+                guard !stream.runs.isEmpty else {
+                    phase = .idle
+                    return
+                }
+                let strip = TextStrip(stream: stream, font: marqueeNSFont, defaultColor: defColor)
+                textStrip = strip
+                priceFlashes = ScrollFlashes(columns: strip.blinkCols)
+                canvas = Array(repeating: ColoredColumn(value: 0, color: defColor),
+                               count: strip.totalCols)   // 引擎占位:文本帧只读 totalCols/offset
+                roundLen = strip.totalCols
+                scrollOffset = 0
+                prefetchArmed = config.quoteLoop   // 新一轮重新武装预取
+
+                var pauses = strip.pauses.map { PauseMarker(at: $0.at, kind: $0.kind) }
+                if config.defaultPause > 0, !pauses.contains(where: { $0.at == 0 }) {
+                    pauses.insert(PauseMarker(at: 0, kind: .timed(seconds: config.defaultPause)), at: 0)
+                }
+                pendingPauses = pauses.sorted { $0.at < $1.at }
+                phase         = .scrolling
+                showScrollFrame()
+                return
+            }
+            textStrip = nil
             let stream = buildScrollStream(text: msg.text, defaultColor: defColor,
                                            onClickCommand: msg.onClickCommand,
                                            customChars: config.customChars)
@@ -651,10 +711,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             showScrollFrame()
 
         case .standby:
-            setImage(renderSurfaces { dot in
-                renderStandbyFrame(text: msg.text, displayWidth: displayCols(dot: dot),
-                                   defaultColor: defColor, customChars: config.customChars, dot: dot)
-            })
+            if isTextMarquee {
+                setImage(renderSurfaces { _ in
+                    renderTextStandbyFrame(text: msg.text, viewportCols: maxViewportCols,
+                                           font: marqueeNSFont, defaultColor: defColor)
+                })
+            } else {
+                setImage(renderSurfaces { dot in
+                    renderStandbyFrame(text: msg.text, displayWidth: displayCols(dot: dot),
+                                       defaultColor: defColor, customChars: config.customChars, dot: dot)
+                })
+            }
             phase = .standby(until: Date().addingTimeInterval(msg.duration))
 
         case .setWidth, .clearQueue, .getStatus, .quit, .openSettings:
@@ -685,6 +752,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func showScrollFrame(blank: Bool = false) {
         // 每段进入可读区域后独立闪一次;使用单调时钟,滚动不停、数字不消失。
         // 各面按自己的档位换算可视列数(物理宽度锚定),闪变时钟按面各自计时。
+        if let strip = textStrip {
+            setImage(renderSurfaces { _ in
+                let flash = blank ? [:] : priceFlashes.colors(
+                    offset: scrollOffset, visibleColumns: maxViewportCols,
+                    roundLength: roundLen, now: ProcessInfo.processInfo.systemUptime)
+                return renderTextFrame(strip: strip, offset: scrollOffset,
+                                       viewportCols: maxViewportCols, blank: blank, flash: flash)
+            })
+            return
+        }
         setImage(renderSurfaces { dot in
             let vw = displayCols(dot: dot)
             let flash = blank ? [:] : priceFlashes.colors(
@@ -828,6 +905,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         boardTimer?.invalidate(); boardTimer = nil
         renderTransparent = config.transparent
         renderDotSize = min(config.ledDotSize, 2)   // 环境默认=菜单栏安全档;出帧时各面显式定档
+        textStrip = nil                              // 字体/字号可能已换,下一轮按新模式重建
         applyTint()
         let m = config.displayMode
         let marqueeOn = m.contains("marquee") || m == "both"
