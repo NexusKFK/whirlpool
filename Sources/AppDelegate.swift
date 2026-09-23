@@ -391,14 +391,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // ── Menü ───────────────────────────────────────────────────────────────────
 
     @objc private func statusItemClicked() {
+        handleStatusItemClick(NSApp.currentEvent)
+    }
+
+    func handleStatusItemClick(_ event: NSEvent?) {
         guard let statusItem else { return }
         if engine.isWaitingForClick {
             engine.clickSticky()
-        } else if NSApp.currentEvent?.type == .rightMouseUp {
-            statusItem.menu = buildMenu()
-            statusItem.button?.performClick(nil)
-            statusItem.menu = nil
-        } else if NSApp.currentEvent?.modifierFlags.contains(.option) == true {
+        } else if let event, event.type == .rightMouseUp, let button = statusItem.button {
+            // An attached NSStatusItem menu inherits the entire ticker's minimum
+            // width. A context menu sizes to its contents at the clicked position.
+            NSMenu.popUpContextMenu(buildMenu(), with: event, for: button)
+        } else if event?.modifierFlags.contains(.option) == true {
             nextWatchlist()   // ⌥+单击:切到下一套自选池
         } else {
             // 左键单击 = 收起/展开(收起时缩成 <w 小图标);右键才是菜单
