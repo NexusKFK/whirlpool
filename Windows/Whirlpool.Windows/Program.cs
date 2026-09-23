@@ -66,7 +66,11 @@ internal sealed class TickerApplication : ApplicationContext
         Language = settings.Language;
         tray = new NotifyIcon { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? SystemIcons.Application, Text = "Whirlpool", Visible = true };
         ticker = new TickerForm(); board = new BoardForm();
-        ticker.PositionSaved += p => { settings.TickerOrigin = [p.X, p.Y]; SaveSettings(); };
+        ticker.LayoutSaved += (point, placement, fraction) =>
+        {
+            settings.TickerOrigin = [point.X, point.Y]; settings.TickerPlacement = placement;
+            settings.TickerWidthFraction = fraction; SaveSettings();
+        };
         ticker.NextWatchlistRequested += () => SwitchWatchlist((settings.ActiveWatchlist + 1) % settings.Watchlists.Count);
         board.PositionSaved += p => { settings.BoardOrigin = [p.X, p.Y]; SaveSettings(); };
         board.UserClosed += () => { settings.ShowBoard = false; if (!settings.ShowTicker) settings.ShowTicker = true; Apply(); SaveSettings(); };
@@ -78,6 +82,7 @@ internal sealed class TickerApplication : ApplicationContext
         SystemEvents.PowerModeChanged += OnPowerModeChanged;
         SystemEvents.SessionSwitch += OnSessionSwitch;
         SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
+        SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
         Apply(); poll.Start(); _ = RefreshAsync();
         if (settings.CheckUpdates) updateTimer.Start();
     }
@@ -317,6 +322,8 @@ internal sealed class TickerApplication : ApplicationContext
         if (e.Category is UserPreferenceCategory.General or UserPreferenceCategory.Color or UserPreferenceCategory.VisualStyle) OnUi(ApplyTheme);
     }
 
+    private void OnDisplaySettingsChanged(object? sender, EventArgs e) => OnUi(Apply);
+
     private void SetSuspended(bool value)
     {
         if (suspended == value) return;
@@ -331,6 +338,7 @@ internal sealed class TickerApplication : ApplicationContext
         SystemEvents.PowerModeChanged -= OnPowerModeChanged;
         SystemEvents.SessionSwitch -= OnSessionSwitch;
         SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
+        SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
         poll.Stop(); poll.Dispose(); updateTimer.Stop(); updateTimer.Dispose(); cancellation.Cancel();
         tray.Visible = false; tray.Dispose(); ticker.Dispose(); board.Dispose(); settingsForm?.Dispose();
         feed.Dispose(); updateHttp.Dispose();
@@ -347,13 +355,24 @@ internal static class WindowPlacement
     public static string Label(Screen screen, int index) =>
         $"{index + 1}. {screen.Bounds.Width}×{screen.Bounds.Height}" + (screen.Primary ? " · " + T("Main display") : "");
 
+    public static Screen? ForOrigin(int[]? origin, Size size, string key)
+    {
+        if (origin is not { Length: 2 }) return Target(key);
+        var point = new Point(origin[0], origin[1]);
+        var containing = Screen.AllScreens.FirstOrDefault(s => s.Bounds.Contains(point));
+        if (containing is not null) return containing;
+        var rect = new Rectangle(point, size);
+        return Screen.AllScreens
+            .Select(s => (Screen: s, Overlap: Rectangle.Intersect(s.WorkingArea, rect)))
+            .Where(p => p.Overlap.Width >= Math.Min(80, size.Width) && p.Overlap.Height >= Math.Min(20, size.Height))
+            .OrderByDescending(p => (long)p.Overlap.Width * p.Overlap.Height).Select(p => p.Screen).FirstOrDefault() ?? Target(key);
+    }
+
     public static void Apply(Form form, int[]? origin, bool board, string screenKey = "auto")
     {
-        var work = Target(screenKey)?.WorkingArea ?? new Rectangle(0, 0, 1280, 720);
+        var work = ForOrigin(origin, form.Size, screenKey)?.WorkingArea ?? new Rectangle(0, 0, 1280, 720);
         var point = origin is { Length: 2 } ? new Point(origin[0], origin[1])
             : new Point(board ? work.Right - form.Width - 20 : work.Left + (work.Width - form.Width) / 2, work.Bottom - form.Height - (board ? 80 : 18));
-        var rect = new Rectangle(point, form.Size);
-        if (!Screen.AllScreens.Any(s => Rectangle.Intersect(s.WorkingArea, rect) is { Width: > 80, Height: > 20 })) point = new(work.Left + 20, work.Top + 40);
-        form.StartPosition = FormStartPosition.Manual; form.Location = point;
+        form.StartPosition = FormStartPosition.Manual; form.Location = WindowBounds.Clamp(point, form.Size, work);
     }
 }

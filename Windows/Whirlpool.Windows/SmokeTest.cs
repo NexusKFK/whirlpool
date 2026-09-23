@@ -19,6 +19,25 @@ internal static class SmokeTest
             using var board = new BoardForm();
             settings.CreateControl(); ticker.CreateControl(); board.CreateControl();
             ticker.Configure(config); board.Configure(config);
+            var area = WindowPlacement.Target(config.DisplayScreen)!.WorkingArea;
+            foreach (string anchor in TickerLayout.Placements.Where(p => p != "free"))
+            {
+                var placed = config.Clone(); placed.TickerPlacement = anchor; placed.TickerWidthFraction = .5;
+                ticker.Configure(placed);
+                int margin = Math.Max(12, (int)Math.Round(12 * ticker.DeviceDpi / 96.0));
+                if (ticker.Location != TickerLayout.Origin(anchor, null, ticker.Size, area, margin)
+                    || ticker.Width != TickerLayout.Width(.5, 0, area.Width, margin))
+                    throw new Exception("Ticker geometry does not match the graphical layout editor: " + anchor);
+            }
+            ticker.Configure(config);
+            var tabs = settings.Controls.OfType<TabControl>().Single();
+            foreach (TabPage page in tabs.TabPages)
+            {
+                tabs.SelectedTab = page;
+                settings.PerformLayout();
+                using var layoutImage = new Bitmap(settings.Width, settings.Height);
+                settings.DrawToBitmap(layoutImage, settings.ClientRectangle);
+            }
             ticker.ApplyTheme(tone); board.ApplyTheme(tone);
             ticker.SetQuotes(config, quotes); board.SetQuotes(config, quotes);
             quotes["AAPL"] = new(81.30, -0.59, DateTimeOffset.UtcNow);

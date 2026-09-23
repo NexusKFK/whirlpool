@@ -24,7 +24,6 @@ internal sealed class TickerForm : Form
     }
 
     private readonly System.Windows.Forms.Timer animation = new() { Interval = 16 };
-    private readonly System.Windows.Forms.Timer moved = new() { Interval = 300 };
     private readonly Stopwatch clock = Stopwatch.StartNew();
     private readonly List<Column> columns = [];
     private readonly List<Pulse> pulses = [];
@@ -33,7 +32,8 @@ internal sealed class TickerForm : Form
     private Settings settings = new();
     private IReadOnlyDictionary<string, Quote> pending = new Dictionary<string, Quote>();
     private double offset, lastTick, bannerUntil;
-    private bool placing, hovering;
+    private bool placing, hovering, interactive, resizing;
+    private Rectangle interactionStart;
     private string? signature;
     private Tone tone = Tone.Dark;
     private Bitmap? strip, banner;
@@ -42,7 +42,7 @@ internal sealed class TickerForm : Form
     private int Dot => 2 * scale;
     private int Inset => 8 * scale;
 
-    public event Action<Point>? PositionSaved;
+    public event Action<Point, string, double?>? LayoutSaved;
     public event Action? NextWatchlistRequested;
 
     public TickerForm()
@@ -60,18 +60,17 @@ internal sealed class TickerForm : Form
             Invalidate();
         };
         VisibleChanged += (_, _) => { lastTick = clock.Elapsed.TotalSeconds; if (Visible) animation.Start(); else animation.Stop(); };
-        Move += (_, _) => { if (!placing) { moved.Stop(); moved.Start(); } };
-        moved.Tick += (_, _) => { moved.Stop(); PositionSaved?.Invoke(Location); };
         MouseEnter += (_, _) => hovering = true;
         MouseLeave += (_, _) => hovering = false;
         MouseDown += (_, e) =>
         {
             if (e.Button != MouseButtons.Left) return;
             if ((ModifierKeys & Keys.Control) != 0) { NextWatchlistRequested?.Invoke(); return; }   // Ctrl+click: next watchlist
-            if (settings.LockPosition) return;                                                       // locked: no dragging
+            if (settings.LockPosition || settings.ClickThrough) return;
             ReleaseCapture(); SendMessage(Handle, 0xA1, 2, 0);                                       // drag the borderless window
         };
         HandleCreated += (_, _) => { WinTheme.RoundCorners(this); ApplyClickThrough(); };
+        DpiChanged += (_, _) => { if (!placing && !interactive) BeginInvoke(() => Configure(settings)); };
     }
 
     private const int GWL_EXSTYLE = -20, WS_EX_LAYERED = 0x80000, WS_EX_TRANSPARENT = 0x20;
@@ -96,7 +95,7 @@ internal sealed class TickerForm : Form
 
     public void Configure(Settings value)
     {
-        bool changedLayout = value.WidthCharacters != settings.WidthCharacters;
+        bool changedLayout = value.WidthCharacters != settings.WidthCharacters || value.TickerWidthFraction != settings.TickerWidthFraction;
         if (value.Provider != settings.Provider || !value.Watchlist.SequenceEqual(settings.Watchlist))
         {
             // Never build a new watchlist using quotes or tick history from the old source/list.
@@ -107,8 +106,11 @@ internal sealed class TickerForm : Form
         scale = Math.Max(1, (int)Math.Round(DeviceDpi / 96.0));
         placing = true;
         Height = 8 * Pitch + 14 * scale;
-        Width = Math.Min(settings.WidthCharacters * 18 * scale + 2 * Inset, (WindowPlacement.Target(settings.DisplayScreen)?.WorkingArea.Width ?? 1220) - 20);
-        WindowPlacement.Apply(this, settings.TickerOrigin, false, settings.DisplayScreen); placing = false;
+        var area = LayoutWorkArea();
+        Width = TickerLayout.Width(settings.TickerWidthFraction, settings.WidthCharacters * 18 * scale + 2 * Inset, area.Width, LayoutMargin);
+        StartPosition = FormStartPosition.Manual;
+        Location = TickerLayout.Origin(settings.TickerPlacement, SavedOrigin, Size, area, LayoutMargin);
+        placing = false;
         ApplyClickThrough();
         if (changedLayout) offset = 0;
         signature = null; ApplyPending(); RenderStrip();
@@ -126,6 +128,76 @@ internal sealed class TickerForm : Form
         settings = value.Clone(); pending = quotes;
         if (columns.Count == 0) ApplyPending();
     }
+
+    private int LayoutMargin => Math.Max(12, (int)Math.Round(12 * DeviceDpi / 96.0));
+    private Point? SavedOrigin => settings.TickerOrigin is { Length: 2 } p ? new Point(p[0], p[1]) : null;
+    private Rectangle LayoutWorkArea() => (settings.TickerPlacement == "free"
+        ? WindowPlacement.ForOrigin(settings.TickerOrigin, Size, settings.DisplayScreen)
+        : WindowPlacement.Target(settings.DisplayScreen))?.WorkingArea ?? new Rectangle(0, 0, 1280, 720);
+
+    protected override void WndProc(ref Message message)
+    {
+        const int WM_NCHITTEST = 0x84, WM_ENTERSIZEMOVE = 0x231, WM_EXITSIZEMOVE = 0x232, WM_SIZING = 0x214;
+        if (message.Msg == WM_NCHITTEST && !settings.LockPosition && !settings.ClickThrough)
+        {
+            base.WndProc(ref message);
+            if (message.Result == 1)
+            {
+                long packed = message.LParam.ToInt64();
+                var point = PointToClient(new Point((short)(packed & 0xffff), (short)((packed >> 16) & 0xffff)));
+                if (point.X <= 7 * DeviceDpi / 96) message.Result = 10; // HTLEFT
+                else if (point.X >= ClientSize.Width - 7 * DeviceDpi / 96) message.Result = 11; // HTRIGHT
+            }
+            return;
+        }
+        if (message.Msg == WM_ENTERSIZEMOVE)
+        {
+            interactive = true; resizing = false; interactionStart = Bounds;
+        }
+        else if (message.Msg == WM_SIZING && interactive)
+        {
+            resizing = true;
+            var rect = Marshal.PtrToStructure<NativeRect>(message.LParam);
+            var work = LayoutWorkArea();
+            int width = rect.Right - rect.Left;
+            if (settings.TickerPlacement.EndsWith("-center") || settings.TickerPlacement == "free")
+            {
+                int center = settings.TickerPlacement == "free" ? interactionStart.Left + interactionStart.Width / 2 : work.Left + work.Width / 2;
+                width = 2 * Math.Abs(message.WParam.ToInt32() == 1 ? center - rect.Left : rect.Right - center);
+            }
+            int available = Math.Max(1, work.Width - LayoutMargin * 2);
+            width = Math.Clamp(width, Math.Min(available, Math.Max(120, (int)Math.Round(available * .2))), available);
+            var size = new Size(width, interactionStart.Height);
+            Point origin;
+            if (settings.TickerPlacement == "free")
+            {
+                origin = TickerLayout.ResizeFreeOrigin(interactionStart.Location, interactionStart.Width, size, work, LayoutMargin);
+            }
+            else origin = TickerLayout.Origin(settings.TickerPlacement, null, size, work, LayoutMargin);
+            rect = new() { Left = origin.X, Top = origin.Y, Right = origin.X + width, Bottom = origin.Y + size.Height };
+            Marshal.StructureToPtr(rect, message.LParam, false); message.Result = 1; Invalidate(); return;
+        }
+        else if (message.Msg == WM_EXITSIZEMOVE && interactive)
+        {
+            interactive = false;
+            if (Bounds != interactionStart)
+            {
+                if (resizing)
+                {
+                    var work = LayoutWorkArea();
+                    settings.TickerWidthFraction = Math.Clamp(Width / (double)Math.Max(1, work.Width - 2 * LayoutMargin), .2, 1);
+                }
+                else settings.TickerPlacement = "free";
+                settings.TickerOrigin = [Left, Top];
+                Configure(settings);
+                LayoutSaved?.Invoke(Location, settings.TickerPlacement, settings.TickerWidthFraction);
+            }
+        }
+        base.WndProc(ref message);
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeRect { public int Left, Top, Right, Bottom; }
 
     /// <summary>Briefly shows a static label (the watchlist name after switching).</summary>
     public void ShowBanner(string text, double seconds = 1.2)
@@ -270,7 +342,7 @@ internal sealed class TickerForm : Form
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing) { animation.Dispose(); moved.Dispose(); strip?.Dispose(); banner?.Dispose(); ClearPulses(); }
+        if (disposing) { animation.Dispose(); strip?.Dispose(); banner?.Dispose(); ClearPulses(); }
         base.Dispose(disposing);
     }
 
