@@ -19,7 +19,7 @@ public sealed class QuoteFeed : IDisposable
     private (int Interval, bool Smart)? cadence;
     public string Status { get; private set; } = "Waiting for quotes";
     public DateTimeOffset? LastUpdated { get; private set; }
-    public static string Version { get; set; } = "2.0.0";
+    public static string Version { get; set; } = "2.0.1";
 
     public QuoteFeed(HttpMessageHandler? handler = null, Func<DateTimeOffset>? clock = null)
     {

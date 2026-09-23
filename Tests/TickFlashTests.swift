@@ -216,5 +216,6 @@ struct TickFlashTestRunner {
         try runFeatureTests()
         try runWindowStateTests()
         try runSettingsUITests()
+        try runStatusItemTests()
     }
 }

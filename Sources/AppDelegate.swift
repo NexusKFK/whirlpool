@@ -201,6 +201,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard let button = item.button else { statusItem = item; return }
         button.title = ""
         button.image = nil
+        button.identifier = NSUserInterfaceItemIdentifier("whirlpool-status-button")
         button.action = #selector(statusItemClicked)
         button.target = self
         button.sendAction(on: [.leftMouseUp, .rightMouseUp])
@@ -346,7 +347,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// 状态项长度与浮动条尺寸跟随内容;固定长度免得 AppKit 反复重解内在尺寸
     private func syncSurfaceSizes() {
         if let si = statusItem, let surface = menuSurface {
-            let w = marqueeOn ? menuOuterWidth : max(8, surface.contentWidth.rounded(.up))
+            // Idle artwork is a small restore button. Keeping the expanded width here
+            // leaves the badge at the far left of an otherwise empty status item.
+            // A held quote frame can also have an idle engine while fresh data loads.
+            let showsTicker = marqueeOn && (surface.art != nil || engine.phase != .idle)
+            let w = showsTicker ? menuOuterWidth : max(8, surface.contentWidth.rounded(.up))
             if abs(si.length - w) > 0.5 { si.length = w }
         }
         barWindow?.fitContent()
@@ -502,6 +507,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func applyDockIcon() {
         // 常驻行情工具默认不占程序坞;要看得见进程/随手重启的用户可打开图标
         NSApp.setActivationPolicy(config.showDockIcon ? .regular : .accessory)
+        // Replacing an app at the same path can leave Dock's previous icon cached.
+        // Load the signed bundle resource directly instead of inheriting that cache.
+        if let name = Bundle.main.object(forInfoDictionaryKey: "CFBundleIconFile") as? String {
+            let resource = (name as NSString).deletingPathExtension
+            let ext = (name as NSString).pathExtension
+            if let url = Bundle.main.url(forResource: resource, withExtension: ext.isEmpty ? "icns" : ext),
+               let icon = NSImage(contentsOf: url) {
+                NSApp.applicationIconImage = icon
+                NSApp.dockTile.display()
+            }
+        }
     }
 
     @objc private func showAbout() {

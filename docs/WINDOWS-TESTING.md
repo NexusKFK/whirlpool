@@ -1,6 +1,6 @@
 # Windows preview acceptance / Windows 预览验收
 
-Version: **2.0.0 preview**. Cross-compilation and core checks can run on macOS. Native Windows execution and visual QA require a Windows machine. Do not mark the items below as passed merely because compilation succeeded.
+Version: **2.0.1 preview**. Cross-compilation and core checks can run on macOS. Native Windows execution and visual QA require a Windows machine. Do not mark the items below as passed merely because compilation succeeded.
 
 建议先在 Windows 10/11 x64 用少量自选股验收。发布包无安装步骤，解压后运行 `Whirlpool.exe`；尚未使用商业代码签名。
 
