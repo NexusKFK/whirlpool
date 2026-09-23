@@ -13,6 +13,7 @@ func runSettingsUITests() throws {
         let controller = ConfigWindowController(config: config); controller.show()
         let window = NSApp.windows.first { ($0.delegate as AnyObject?) === controller }!
         window.contentView?.layoutSubtreeIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
         return (controller, window)
     }
     func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
@@ -21,10 +22,105 @@ func runSettingsUITests() throws {
         return result
     }
     func click(_ id: String, _ window: NSWindow) { control(id, window, as: NSButton.self).performClick(nil) }
+    func clickCard(_ button: NSButton, in window: NSWindow) {
+        button.scrollToVisible(button.bounds)
+        window.contentView?.layoutSubtreeIfNeeded()
+        let root = window.contentView!
+        // Check both view and native cell hit regions, including blank card corners.
+        for unit in [NSPoint(x: 0.5, y: 0.5), NSPoint(x: 0.06, y: 0.1), NSPoint(x: 0.94, y: 0.1),
+                     NSPoint(x: 0.06, y: 0.9), NSPoint(x: 0.94, y: 0.9)] {
+            let point = button.convert(NSPoint(x: button.bounds.width * unit.x, y: button.bounds.height * unit.y), to: nil)
+            precondition(root.hitTest(root.convert(point, from: nil)) === button, "the whole card must receive clicks")
+            let event = NSEvent.mouseEvent(with: .leftMouseDown, location: point, modifierFlags: [],
+                                          timestamp: ProcessInfo.processInfo.systemUptime,
+                                          windowNumber: window.windowNumber, context: nil,
+                                          eventNumber: 0, clickCount: 1, pressure: 1)!
+            precondition(button.cell!.hitTest(for: event, in: button.bounds, of: button).contains(.trackableArea),
+                         "the native cell must track clicks across the card")
+        }
+        button.performClick(nil)
+    }
     func setWidth(_ id: String, _ value: Double, _ window: NSWindow) {
         let slider = control(id, window, as: NSSlider.self)
         slider.doubleValue = value; _ = slider.sendAction(slider.action, to: slider.target)
     }
+    var menuOnly = fixture; menuOnly.displayMode = "marquee"
+    let (choices, choiceWindow) = open(menuOnly)
+    func topInset(of id: String) -> CGFloat {
+        let root = choiceWindow.contentView!
+        let view = control(id, choiceWindow, as: NSView.self)
+        return root.bounds.maxY - view.convert(view.bounds, to: root).maxY
+    }
+    choiceWindow.setContentSize(NSSize(width: 880, height: 740))
+    choiceWindow.contentView?.layoutSubtreeIfNeeded()
+    let compactInsets = ["surface-marquee", "layout-screen", "layout-preview"].map { topInset(of: $0) }
+    choiceWindow.setContentSize(NSSize(width: 880, height: 900))
+    choiceWindow.contentView?.layoutSubtreeIfNeeded()
+    let tallInsets = ["surface-marquee", "layout-screen", "layout-preview"].map { topInset(of: $0) }
+    precondition(zip(compactInsets, tallInsets).allSatisfy { abs($0 - $1) < 1 },
+                 "extra window height must stay below the form, not stretch rows or gaps")
+    choiceWindow.setContentSize(NSSize(width: 880, height: 740))
+    choiceWindow.contentView?.layoutSubtreeIfNeeded()
+    let floating = control("surface-bar", choiceWindow, as: NSButton.self)
+    clickCard(floating, in: choiceWindow)
+    precondition(floating.state == .on, "a mouse click must enable the floating ticker card")
+    precondition(control("layout-preview", choiceWindow, as: LayoutPreviewView.self).barOn,
+                 "the display preview must follow the selected card")
+    clickCard(floating, in: choiceWindow)
+    precondition(floating.state == .off, "a second mouse click must disable the floating ticker card")
+    clickCard(control("surface-marquee", choiceWindow, as: NSButton.self), in: choiceWindow)
+    precondition(control("surface-marquee", choiceWindow, as: NSButton.self).state == .on,
+                 "the final display stays selected instead of silently switching regions")
+    withExtendedLifetime(choices) { choiceWindow.close() }
+
+    var saved: TickerConfig?
+    let surfaceKeys = ["marquee", "bar", "board"]
+    for mask in 1...7 {
+        let (controller, window) = open(fixture)
+        let expected = surfaceKeys.enumerated().filter { mask & (1 << $0.offset) != 0 }.map(\.element)
+        for key in surfaceKeys where !expected.contains(key) {
+            clickCard(control("surface-" + key, window, as: NSButton.self), in: window)
+        }
+        let preview = control("layout-preview", window, as: LayoutPreviewView.self)
+        precondition([preview.menuOn, preview.barOn, preview.boardOn] == surfaceKeys.map(expected.contains))
+        precondition(control("floating-controls", window, as: NSView.self).isHidden == !expected.contains("bar"))
+        precondition(control("menu-controls", window, as: NSView.self).isHidden == !expected.contains("marquee"))
+        controller.onApplied = { saved = $0 }
+        click("settings-save", window)
+        precondition(saved?.displayMode == expected.joined(separator: ","), "every nonempty display combination must save")
+        controller.show()
+        for key in surfaceKeys {
+            precondition((control("surface-" + key, window, as: NSButton.self).state == .on) == expected.contains(key),
+                         "reopened settings must retain the saved cards")
+        }
+        withExtendedLifetime(controller) { window.close() }
+    }
+
+    let (styled, styleWindow) = open(fixture)
+    click("settings-page-appearance", styleWindow)
+    for ids in [["choice-font-led", "choice-font-system", "choice-font-mono"],
+                ["choice-text-0", "choice-text-1", "choice-text-2"],
+                ColorScheme.allCases.map { "choice-color-" + $0.rawValue },
+                ["choice-background-glass", "choice-background-none"]] {
+        for id in ids {
+            let button = control(id, styleWindow, as: NSButton.self)
+            clickCard(button, in: styleWindow)
+            precondition(button.state == .on && ids.filter { control($0, styleWindow, as: NSButton.self).state == .on }.count == 1,
+                         "font, size, color and background cards keep exactly one selection")
+            clickCard(button, in: styleWindow)
+            precondition(button.state == .on, "clicking a selected option must not clear the selection")
+        }
+    }
+    click("settings-page-layout", styleWindow)
+    for key in ["top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right"] {
+        clickCard(control("placement-" + key, styleWindow, as: NSButton.self), in: styleWindow)
+        precondition(control("layout-preview", styleWindow, as: LayoutPreviewView.self).placement == key)
+    }
+    styled.onApplied = { saved = $0 }; click("settings-save", styleWindow)
+    precondition(saved?.marqueeFont == "mono" && saved?.ledDotSize == 3 && saved?.colorScheme == .green && saved?.barBackground == "none",
+                 "selected appearance cards must save their values")
+    try writeConfig(fixture, to: configURL)
+    print("PASS: full-card hit regions, all 7 display combinations, persistent choices, preview visibility and saved appearance")
     let (cancelled, cancelWindow) = open(fixture)
     var applied = false; cancelled.onApplied = { _ in applied = true }
     click("placement-top-right", cancelWindow); setWidth("floating-width", 85, cancelWindow)
@@ -35,7 +131,6 @@ func runSettingsUITests() throws {
     let (preserved, preserveWindow) = open(fixture)
     var live = fixture; live.barPlacement = "free"; live.barOrigin = [250, 180]; live.barWidthFraction = 0.72
     preserved.currentConfig = { live }; preserved.syncLayout(from: live)
-    var saved: TickerConfig?
     preserved.onApplied = { saved = $0 }
     setWidth("menu-width", 280, preserveWindow)
     click("settings-save", preserveWindow)

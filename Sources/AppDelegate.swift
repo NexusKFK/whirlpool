@@ -34,7 +34,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// Each surface owns a physical width. Font changes only round the LED viewport to its column pitch.
     private var menuOuterWidth: CGFloat {
         let legacy = Double(config.defaultWidth * 18) + (isTextMarquee ? 0 : 8)
-        return max(120, min(CGFloat(config.menuWidthPoints ?? legacy), menuBarScreenWidth * 0.40))
+        return menuTickerWidth(requested: CGFloat(config.menuWidthPoints ?? legacy), screenWidth: menuBarScreenWidth)
     }
 
     private func menuBarCols(dot: Int) -> Int {
