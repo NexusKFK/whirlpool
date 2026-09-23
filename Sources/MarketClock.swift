@@ -162,6 +162,13 @@ enum MarketClock {
             .contains { t.minute >= $0.start && t.minute < $0.end }
     }
 
+    /// Use the same live-trade override for display and refresh scheduling.
+    static func isActive(_ entry: WatchEntry, at date: Date, lastTrade: Date? = nil) -> Bool {
+        if isOpen(entry, at: date) { return true }
+        guard let lastTrade else { return false }
+        return (0..<300).contains(date.timeIntervalSince(lastTrade))
+    }
+
     /// 下一次任一时段开始的时刻(最长往后看 20 天,够跨过国庆长假)
     static func nextOpen(_ entry: WatchEntry, after date: Date) -> Date? {
         guard let ex = exchange(for: entry) else { return date }
@@ -181,11 +188,9 @@ enum MarketClock {
     /// 智能刷新间隔:任一市场开市(或刚有成交)→ 原间隔;全休市 → 等到最近开盘(上限 30 分钟)
     static func refreshInterval(_ entries: [WatchEntry], base: TimeInterval, now: Date,
                                 lastTrade: [String: Date] = [:]) -> TimeInterval {
-        guard !entries.isEmpty, !entries.contains(where: { isOpen($0, at: now) }) else { return base }
-        // 实时兜底:日历说休市,但行情时间戳 5 分钟内还在走 → 日历可能漏了特殊交易日,按开市算
-        if entries.contains(where: { e in lastTrade[e.symbol].map { now.timeIntervalSince($0) < 300 } ?? false }) {
-            return base
-        }
+        guard !entries.isEmpty, !entries.contains(where: {
+            isActive($0, at: now, lastTrade: lastTrade[$0.symbol])
+        }) else { return base }
         let opens = entries.compactMap { nextOpen($0, after: now) }
         let untilOpen = opens.map { $0.timeIntervalSince(now) }.min() ?? 1800
         return min(1800, max(base, untilOpen + 5))

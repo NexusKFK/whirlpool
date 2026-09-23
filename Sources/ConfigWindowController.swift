@@ -59,7 +59,6 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
     private let speedValue = NSTextField(labelWithString: "")
     private let widthValue = NSTextField(labelWithString: "")
     private let arrows = NSButton(checkboxWithTitle: "", target: nil, action: nil)
-    private let pixels = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let flashes = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let redUp = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let dock = NSButton(checkboxWithTitle: "", target: nil, action: nil)
@@ -131,7 +130,6 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
         size.selectItem(at: max(0, min(2, config.ledDotSize - 1)))
         font.selectItem(at: ["led", "system", "mono"].firstIndex(of: config.marqueeFont) ?? 0)
         arrows.state = config.changeArrows ? .on : .off
-        pixels.state = config.boardPixelFont ? .on : .off
         flashes.state = config.marqueeBlink ? .on : .off
         redUp.state = config.redUpMarkets.contains("cn") && config.redUpMarkets.contains("hk") ? .on : .off
         dock.state = config.showDockIcon ? .on : .off
@@ -459,12 +457,11 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
 
     private func appearanceTab() -> NSView {
         arrows.title = L("Use ▲ / ▼ for price changes")
-        pixels.title = L("Use pixel font on the quote board")
         flashes.title = L("Flash changed price suffixes")
         size.configure([L("Small"), L("Medium"), L("Large")])
-        size.setAccessibilityLabel(L("Marquee size"))
+        size.setAccessibilityLabel(L("Text size"))
         font.configure([L("LED dots"), L("System Font"), L("Monospaced")], keys: ["led", "system", "mono"], artwork: .font)
-        font.setAccessibilityLabel(L("Ticker font"))
+        font.setAccessibilityLabel(L("Display font"))
         scheme.configure(ColorScheme.allCases.map(\.label), keys: ColorScheme.allCases.map(\.rawValue), artwork: .color)
         scheme.setAccessibilityLabel(L("Colors"))
         barBackground.configure([L("Glass"), L("Transparent")], keys: ["glass", "none"], artwork: .background)
@@ -476,12 +473,12 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
         speed.widthAnchor.constraint(equalToConstant: 180).isActive = true
         hover.title = L("Pause scrolling while the pointer is over the ticker")
         clickThrough.title = L("Let clicks pass through the floating ticker")
-        let dotSize = column([formRow("Marquee size", [size]),
-                              note("Large is clamped to Medium inside the menu bar for LED dots. The quote board keeps its own font setting.")], spacing: 8)
+        let dotSize = column([formRow("Text size", [size]),
+                              note("Font, size and colors apply to all displays. Large LED dots use Medium inside the menu bar.")], spacing: 8)
         return stack([pageTitle("Appearance", "See the style before you choose it."),
-                      panel([heading("Ticker font"), font, dotSize]), panel([heading("Colors"), scheme]),
+                      panel([heading("Display font"), font, dotSize]), panel([heading("Colors"), scheme]),
                       panel([heading("Floating ticker background"), barBackground]),
-                      panel([formRow("Scroll speed", [speed, speedValue]), arrows, pixels, flashes, hover, clickThrough,
+                      panel([formRow("Scroll speed", [speed, speedValue]), arrows, flashes, hover, clickThrough,
                              note("Turn off click-through from the menu bar context menu.")])])
     }
 
@@ -799,7 +796,6 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
         draft.ledDotSize = size.indexOfSelectedItem + 1
         draft.marqueeFont = ["led", "system", "mono"][max(0, min(2, font.indexOfSelectedItem))]
         draft.changeArrows = arrows.state == .on
-        draft.boardPixelFont = pixels.state == .on
         draft.marqueeBlink = flashes.state == .on
         draft.redUpMarkets.removeAll { ["cn", "hk"].contains($0) }
         if redUp.state == .on { draft.redUpMarkets += ["cn", "hk"] }

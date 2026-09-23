@@ -207,5 +207,18 @@
   "Screen width": "屏幕占比",
   "Full width": "铺满",
   "Drag the ticker to place it. Drag either end to change its width.": "拖动行情条调整位置，拖动两端调整宽度。",
-  "Anchors stay attached to the available desktop. Centered tickers expand equally on both sides.": "对齐位置会持续贴合可用桌面；居中的行情条向两侧等量伸缩。"
+  "Anchors stay attached to the available desktop. Centered tickers expand equally on both sides.": "对齐位置会持续贴合可用桌面；居中的行情条向两侧等量伸缩。",
+  "Display font": "显示字体",
+  "Font, size and colors apply to all displays. Large LED dots use Medium inside the menu bar.": "字体、字号和配色统一应用到所有显示区域；菜单栏内 LED 点阵的「大」号按「中」号显示。",
+  "Markets closed": "休市",
+  "Last quote": "最近行情",
+  "Last available quotes": "保留最近行情",
+  "Checked at": "检查时间",
+  "Prices and daily changes are retained while markets are closed.": "休市期间保留最近价格和当日涨跌幅。",
+  "Text size": "字号",
+  "Select one or more displays.": "可同时选择多个显示区域。",
+  "Organize the symbols you follow.": "管理关注的股票与自选池。",
+  "Let clicks pass through the floating ticker": "浮动行情条点击穿透",
+  "Turn off click-through from the menu bar context menu.": "可在菜单栏图标的右键菜单里关闭点击穿透。",
+  "%d pt · %d pt on this screen": "%d pt · 当前屏幕显示 %d pt"
 }

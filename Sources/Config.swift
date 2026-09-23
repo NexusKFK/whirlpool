@@ -62,7 +62,7 @@ struct TickerConfig: Codable {
     var barPlacement:      String            = "bottom-center"
     var barWidthFraction:  Double?           = 0.60      // 整个胶囊占可用屏宽的比例;nil 保留 1.x 的宽度
     var menuWidthPoints:   Double?           = nil       // 菜单栏独立宽度;nil 沿用 defaultWidth
-    var boardPixelFont:    Bool              = true      // 报价卡用 LED 像素字体(关=系统字体)
+    var boardPixelFont:    Bool              = true      // Legacy round-trip only; all displays now use marqueeFont.
     var marqueeBlink:      Bool              = true      // 跑马灯换数时闪变化的数字
     var barBackground:     String            = "glass"   // 浮动条背板:glass=毛玻璃胶囊(亮/暗自适应) none=透明
     var hoverPause:        Bool              = true      // 鼠标悬停时暂停滚动,方便读数

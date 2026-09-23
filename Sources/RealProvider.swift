@@ -204,10 +204,11 @@ final class RealProvider: QuoteProvider {
                        let regular = period["regular"] as? [String: Any],
                        let st = regular["start"] as? Double, let en = regular["end"] as? Double {
                         sStart = st; sEnd = en
-                        let day = pts.filter { $0.t >= st }
-                        if day.count > 2 { pts = day }
+                        let day = pts.filter { $0.t >= st && $0.t <= en }
+                        if day.count > 1 { pts = day }
+                        else { sStart = nil; sEnd = nil }
                     }
-                    if pts.count > 2 { series = pts }
+                    if pts.count > 1 { series = pts }
                 }
 
                 let hint = meta["priceHint"] as? Int
