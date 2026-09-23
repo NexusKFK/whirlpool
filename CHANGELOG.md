@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.0.1 (unreleased)
+
+- macOS collapse now shrinks the menu-bar item to the `<w` restore button instead of leaving it at the left end of an empty full-width ticker. Expanding restores the configured width; quote-loading and standby states retain their intended geometry.
+- macOS explicitly loads the bundled app icon for Dock/About, and packaged icon resources use a content-based filename so upgrades invalidate cached older artwork without resetting other apps' icons.
+- Added a native status-button regression that repeatedly collapses and expands the real AppDelegate/engine UI and checks appearance refreshes while collapsed. Its socket and settings are isolated from the installed app.
+
+中文：修复收起后菜单栏仍占整条宽度、`<w` 留在空白左端的问题；展开恢复用户设置的宽度。应用启动时直接加载包内新图标，并为图标资源使用随内容变化的文件名，避免升级后 Dock 沿用旧图标。
+
 ## 2.0.0 (unreleased)
 
 - macOS builds now go to `.build/apps.noindex/Whirlpool.app` instead of a tracked app in the repository root, preventing development copies from appearing as another installed Whirlpool. Install and launch the single copy in `/Applications/Whirlpool.app`.

@@ -10,7 +10,11 @@ app="$stage/Whirlpool.app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$bin_path/whirlpool" "$app/Contents/MacOS/whirlpool"
 cp Info.plist "$app/Contents/Info.plist"
-cp icons/whirlpool.icns "$app/Contents/Resources/whirlpool.icns"
+# A changed icon gets a new resource URL, invalidating LaunchServices/Dock caches.
+icon_hash=$(shasum -a 256 icons/whirlpool.icns | cut -c1-12)
+icon_name="whirlpool-$icon_hash"
+cp icons/whirlpool.icns "$app/Contents/Resources/$icon_name.icns"
+plutil -replace CFBundleIconFile -string "$icon_name" "$app/Contents/Info.plist"
 for doc in README.md README.zh-CN.md LICENSE ATTRIBUTION.md; do
     if [ -f "$doc" ]; then cp "$doc" "$app/Contents/Resources/"; fi
 done
