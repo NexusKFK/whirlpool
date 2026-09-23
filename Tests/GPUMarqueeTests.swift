@@ -206,6 +206,34 @@ func runGPUMarqueeTests() throws {
     check(engine.current?.text == second.text && engine.phase == .scrolling,
           "an empty queued message must not stall all subsequent messages")
     engine.stop()
+    // A hover can begin before data arrives, and must survive an interrupt / standby banner.
+    engine.hold()
+    engine.enqueue(second)
+    RunLoop.main.run(until: Date().addingTimeInterval(0.03))
+    check(engine.currentCol == 0, "hover before data arrives holds the next round")
+    engine.interrupt(with: first)
+    RunLoop.main.run(until: Date().addingTimeInterval(0.03))
+    check(engine.currentCol == 0, "urgent messages preserve hover pause")
+    engine.interrupt(with: TickerMessage(kind: .standby, text: "WAIT", priority: .normal,
+                                       duration: 0.02, onClickCommand: nil, width: nil))
+    engine.enqueue(second)
+    RunLoop.main.run(until: Date().addingTimeInterval(0.06))
+    check(engine.phase == .scrolling && engine.currentCol == 0, "hover survives a standby banner")
+    engine.resume()
+    RunLoop.main.run(until: Date().addingTimeInterval(0.03))
+    check(engine.currentCol > 0, "leaving the ticker resumes the held message")
+    engine.stop()
+    engine.defaultPause = 0.3
+    engine.enqueue(second)
+    check(engine.phase == .paused, "round begins with a timed pause")
+    engine.hold()
+    RunLoop.main.run(until: Date().addingTimeInterval(0.35))
+    engine.resume()
+    RunLoop.main.run(until: Date().addingTimeInterval(0.03))
+    check(engine.phase == .paused, "hover does not discard the remaining timed pause")
+    RunLoop.main.run(until: Date().addingTimeInterval(0.35))
+    check(engine.phase == .scrolling && engine.currentCol > 0, "timed pause completes after hover ends")
+    engine.stop()
     print("PASS: timeline engine advances rounds, honors pauses, prefetches and replays when starved")
 }
 

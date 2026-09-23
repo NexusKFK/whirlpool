@@ -12,13 +12,14 @@ public sealed class QuoteFeed : IDisposable
     private DateTimeOffset Now => clock();
     private readonly SemaphoreSlim gate = new(1);
     private readonly Dictionary<string, Quote> cache = [];
+    private readonly Dictionary<string, (int Count, DateTimeOffset Until)> retries = [];
     private DateTimeOffset nextFetch = DateTimeOffset.MinValue, cooldownUntil = DateTimeOffset.MinValue, lastAttempt = DateTimeOffset.MinValue;
     private int failures, rateLimits;
     private string key = "";
     private (int Interval, bool Smart)? cadence;
     public string Status { get; private set; } = "Waiting for quotes";
     public DateTimeOffset? LastUpdated { get; private set; }
-    public static string Version { get; set; } = "1.9.3";
+    public static string Version { get; set; } = "2.0.0";
 
     public QuoteFeed(HttpMessageHandler? handler = null, Func<DateTimeOffset>? clock = null)
     {
@@ -46,7 +47,7 @@ public sealed class QuoteFeed : IDisposable
             if (requestKey != key)
             {
                 key = requestKey; cache.Clear(); nextFetch = DateTimeOffset.MinValue; LastUpdated = null;
-                failures = 0; Status = "Waiting for quotes";
+                failures = 0; retries.Clear(); Status = "Waiting for quotes";
             }
             var now = Now;
             var requestedCadence = (settings.RefreshSeconds, settings.SmartRefresh);
@@ -56,9 +57,9 @@ public sealed class QuoteFeed : IDisposable
             // The UI consumes its force flag once, so simply returning here loses that request.
             if (force && failures == 0) nextFetch = Min(nextFetch, Max(now, lastAttempt.AddSeconds(5)));
             if (now < nextFetch || now < lastAttempt.AddSeconds(5)) return new Dictionary<string, Quote>(cache);
-            lastAttempt = now;
             if (settings.Provider == "demo")
             {
+                lastAttempt = now;
                 foreach (var e in entries)
                 {
                     var previous = cache.GetValueOrDefault(e.Symbol)?.Price ?? 100;
@@ -67,17 +68,24 @@ public sealed class QuoteFeed : IDisposable
                 LastUpdated = now; Status = "Demo · simulated prices"; nextFetch = now.AddSeconds(settings.RefreshSeconds);
                 return new Dictionary<string, Quote>(cache);
             }
+            var requested = entries.Where(e => !retries.TryGetValue(e.Symbol, out var retry) || retry.Until <= now).ToList();
+            if (requested.Count == 0)
+            {
+                nextFetch = retries.Count > 0 ? retries.Values.Min(r => r.Until) : now.AddSeconds(Math.Max(5, settings.RefreshSeconds));
+                return new Dictionary<string, Quote>(cache);
+            }
+            lastAttempt = now;
             Status = cache.Count == 0 ? "Loading quotes…" : Status;
             var fresh = new Dictionary<string, Quote>();
             // China / Hong Kong: one batched Tencent request.
-            var tencent = entries.Where(e => e.Market is "cn" or "hk").ToList();
+            var tencent = requested.Where(e => e.Market is "cn" or "hk").ToList();
             if (tencent.Count > 0)
             {
                 try { foreach (var pair in await TencentAsync(tencent, token)) fresh[pair.Key] = pair.Value; }
                 catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
                 catch (Exception error) when (error is HttpRequestException or TaskCanceledException or FormatException) { /* Retain previous quotes. */ }
             }
-            foreach (var entry in entries.Where(e => e.Market is not ("cn" or "hk")))
+            foreach (var entry in requested.Where(e => e.Market is not ("cn" or "hk")))
             {
                 token.ThrowIfCancellationRequested();
                 if (Now < cooldownUntil) break;
@@ -90,12 +98,21 @@ public sealed class QuoteFeed : IDisposable
                 catch (Exception error) when (error is HttpRequestException or JsonException or TaskCanceledException or InvalidOperationException or FormatException or KeyNotFoundException) { /* Retain previous quotes. */ }
                 await Task.Delay(350, token);
             }
+            foreach (var entry in requested)
+            {
+                if (fresh.ContainsKey(entry.Symbol)) retries.Remove(entry.Symbol);
+                else
+                {
+                    var count = Math.Min(6, retries.GetValueOrDefault(entry.Symbol).Count + 1);
+                    retries[entry.Symbol] = (count, Now.AddSeconds(RetryDelay(count)));
+                }
+            }
             foreach (var pair in fresh) cache[pair.Key] = pair.Value;
             if (fresh.Count > 0) LastUpdated = Now;
             if (Now < cooldownUntil) { Status = "Rate limited · retrying later"; nextFetch = cooldownUntil; }
-            else if (fresh.Count < entries.Count)
+            else if (fresh.Count == 0)
             {
-                failures++; Status = fresh.Count == 0 ? "Offline · showing last prices" : "Some quotes unavailable · showing last prices";
+                failures = Math.Min(6, failures + 1); Status = "Offline · showing last prices";
                 nextFetch = Now.AddSeconds(Math.Max(settings.RefreshSeconds, RetryDelay(failures)));
             }
             else
@@ -106,6 +123,11 @@ public sealed class QuoteFeed : IDisposable
                 var next = settings.SmartRefresh ? MarketClock.RefreshSeconds(entries, settings.RefreshSeconds, Now, lastTrade) : settings.RefreshSeconds;
                 Status = next > settings.RefreshSeconds ? "Markets closed · refreshing slowly" : "Updated";
                 nextFetch = Now.AddSeconds(next);
+                if (retries.Count > 0)
+                {
+                    Status = "Some quotes unavailable · showing last prices";
+                    nextFetch = Min(nextFetch, retries.Values.Min(r => r.Until));
+                }
             }
             return new Dictionary<string, Quote>(cache);
         }
@@ -138,15 +160,24 @@ public sealed class QuoteFeed : IDisposable
     public static Quote? ParseYahoo(byte[] data, DateTimeOffset now)
     {
         using var json = JsonDocument.Parse(data);
-        var result = json.RootElement.GetProperty("chart").GetProperty("result");
+        if (json.RootElement.ValueKind != JsonValueKind.Object
+            || !json.RootElement.TryGetProperty("chart", out var chart) || chart.ValueKind != JsonValueKind.Object
+            || !chart.TryGetProperty("result", out var result)) return null;
         if (result.ValueKind != JsonValueKind.Array || result.GetArrayLength() == 0) return null;
-        var meta = result[0].GetProperty("meta");
-        if (!meta.TryGetProperty("regularMarketPrice", out var rawPrice) || !meta.TryGetProperty("chartPreviousClose", out var rawClose)) return null;
-        var price = rawPrice.GetDouble(); var close = rawClose.GetDouble();
-        if (close <= 0) return null;
-        int? hint = meta.TryGetProperty("priceHint", out var h) && h.TryGetInt32(out var places) ? places : null;
-        DateTimeOffset? time = meta.TryGetProperty("regularMarketTime", out var t) && t.TryGetInt64(out var epoch) ? DateTimeOffset.FromUnixTimeSeconds(epoch) : null;
-        return new(price, (price / close - 1) * 100, now, null, hint, time);
+        if (result[0].ValueKind != JsonValueKind.Object || !result[0].TryGetProperty("meta", out var meta)
+            || meta.ValueKind != JsonValueKind.Object) return null;
+        if (!meta.TryGetProperty("regularMarketPrice", out var rawPrice) || rawPrice.ValueKind != JsonValueKind.Number
+            || !rawPrice.TryGetDouble(out var price) || !double.IsFinite(price) || price <= 0
+            || !meta.TryGetProperty("chartPreviousClose", out var rawClose) || rawClose.ValueKind != JsonValueKind.Number
+            || !rawClose.TryGetDouble(out var close) || !double.IsFinite(close) || close <= 0) return null;
+        var change = (price / close - 1) * 100;
+        if (!double.IsFinite(change)) return null;
+        int? hint = meta.TryGetProperty("priceHint", out var h) && h.ValueKind == JsonValueKind.Number
+            && h.TryGetInt32(out var places) && places is >= 0 and <= 8 ? places : null;
+        DateTimeOffset? time = meta.TryGetProperty("regularMarketTime", out var t) && t.ValueKind == JsonValueKind.Number
+            && t.TryGetInt64(out var epoch) && epoch is >= -62135596800 and <= 253402300799
+            ? DateTimeOffset.FromUnixTimeSeconds(epoch) : null;
+        return new(price, change, now, null, hint, time);
     }
 
     private async Task<Dictionary<string, Quote>> TencentAsync(List<WatchEntry> entries, CancellationToken token)

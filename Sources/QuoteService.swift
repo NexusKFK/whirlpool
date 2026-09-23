@@ -13,6 +13,7 @@ final class QuoteService {
     private var nextFetch = Date.distantPast
     private var lastAttempt = Date.distantPast
     private var failures = 0
+    private var retries: [String: (count: Int, until: Date)] = [:]
     private(set) var lastUpdated: Date?
     private(set) var status = "Waiting for quotes"
     var interval: TimeInterval {
@@ -32,7 +33,7 @@ final class QuoteService {
         let newKey = entries.map { "\($0.market):\($0.symbol)" }.sorted().joined(separator: "|")
         if newKey != key {
             generation += 1; key = newKey; cached = [:]; lastUpdated = nil; nextFetch = .distantPast
-            failures = 0; status = "Waiting for quotes"; invalidatedDuringFlight = false
+            failures = 0; retries = [:]; status = "Waiting for quotes"; invalidatedDuringFlight = false
             let oldWaiters = waiters; waiters = []; inFlight = false
             oldWaiters.forEach { $0([:]) }
         }
@@ -42,31 +43,49 @@ final class QuoteService {
         if let until = provider.cooldownUntil, until > now() {
             status = "Rate limited · retrying later"; nextFetch = until; completion(cached); onUpdate?(); return
         }
+        let requested = entries.filter { retries[$0.symbol].map { $0.until <= now() } ?? true }
+        guard !requested.isEmpty else {
+            nextFetch = retries.values.map { $0.until }.min() ?? now().addingTimeInterval(max(5, interval))
+            completion(cached); return
+        }
+        let symbols = Set(requested.map { $0.symbol })
         inFlight = true; lastAttempt = now(); waiters.append(completion)
         let requestGeneration = generation
         status = cached.isEmpty ? "Loading quotes…" : status
-        provider.quotes(for: entries) { [weak self] fresh in
+        provider.quotes(for: requested) { [weak self] fresh in
             DispatchQueue.main.async {
                 guard let self, self.generation == requestGeneration else { return }
                 self.inFlight = false
-                let valid = fresh.filter { $0.value.price.isFinite && $0.value.price > 0 && $0.value.changePct.isFinite }
+                let valid = fresh.filter { symbols.contains($0.key) && $0.value.price.isFinite && $0.value.price > 0 && $0.value.changePct.isFinite }
+                for symbol in symbols {
+                    if valid[symbol] != nil { self.retries.removeValue(forKey: symbol) }
+                    else {
+                        let count = min(6, (self.retries[symbol]?.count ?? 0) + 1)
+                        self.retries[symbol] = (count, self.now().addingTimeInterval(Self.retryDelay(count)))
+                    }
+                }
                 self.cached.merge(valid) { _, new in new }
                 if !valid.isEmpty { self.lastUpdated = self.now() }
                 if let until = self.provider.cooldownUntil, until > self.now() {
                     self.status = "Rate limited · retrying later"; self.nextFetch = until
-                } else if valid.count < entries.count {
-                    self.failures += 1
-                    self.status = valid.isEmpty ? "Offline · showing last prices" : "Some quotes unavailable · showing last prices"
+                } else if valid.isEmpty {
+                    self.failures = min(6, self.failures + 1)
+                    self.status = "Offline · showing last prices"
                     self.nextFetch = self.now().addingTimeInterval(max(self.interval, Self.retryDelay(self.failures)))
                 } else {
                     self.failures = 0
-                    let next = self.cadence?(entries, self.interval, self.now(),
-                                             self.cached.compactMapValues { $0.marketTime }) ?? self.interval
+                    let next = self.provider.name == "demo" ? self.interval :
+                        (self.cadence?(entries, self.interval, self.now(),
+                                      self.cached.compactMapValues { $0.marketTime }) ?? self.interval)
                     self.status = self.provider.name == "demo" ? "Demo · simulated prices"
                         : (next > self.interval ? "Markets closed · refreshing slowly" : "Updated")
                     self.nextFetch = self.now().addingTimeInterval(max(5, next))
                     if self.invalidatedDuringFlight {
                         self.nextFetch = max(self.now(), self.lastAttempt.addingTimeInterval(5))
+                    }
+                    if let retry = self.retries.values.map({ $0.until }).min() {
+                        self.status = "Some quotes unavailable · showing last prices"
+                        self.nextFetch = max(self.now().addingTimeInterval(5), min(self.nextFetch, retry))
                     }
                 }
                 self.invalidatedDuringFlight = false

@@ -15,6 +15,11 @@ public sealed class Settings
     public int RefreshSeconds { get; set; } = 30;
     public int ColumnsPerSecond { get; set; } = 30;
     public int WidthCharacters { get; set; } = 45;
+    /// <summary>Fraction of the selected display's available width. Null retains pre-2.0 character sizing.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public double? TickerWidthFraction { get; set; } = .60;
+    /// <summary>Six screen anchors, or "free" after a direct drag.</summary>
+    public string TickerPlacement { get; set; } = "bottom-center";
     /// <summary>Upper bound for WidthCharacters; the ticker is additionally limited to its screen width.</summary>
     public const int MaxWidth = 120;
     public bool ShowTicker { get; set; } = true;
@@ -79,6 +84,8 @@ public sealed class Settings
         RefreshSeconds = Math.Clamp(RefreshSeconds, 5, 3600);
         ColumnsPerSecond = Math.Clamp(ColumnsPerSecond, 10, 50);
         WidthCharacters = Math.Clamp(WidthCharacters, 8, MaxWidth);
+        TickerWidthFraction = TickerWidthFraction is double fraction && double.IsFinite(fraction) ? Math.Clamp(fraction, .2, 1) : null;
+        TickerPlacement = TickerLayout.Placements.Contains(TickerPlacement) ? TickerPlacement : "bottom-center";
         Language = new[] { "system", "en", "zh-Hans" }.Contains(Language) ? Language : "system";
         Theme = new[] { "system", "light", "dark" }.Contains(Theme) ? Theme : "system";
         DisplayScreen = string.IsNullOrWhiteSpace(DisplayScreen) ? "auto" : DisplayScreen.Trim();
@@ -135,6 +142,10 @@ public sealed class Settings
         using (var document = JsonDocument.Parse(text))
         {
             var hasLists = document.RootElement.EnumerateObject().Any(p => p.Name.Equals("watchlists", StringComparison.OrdinalIgnoreCase));
+            var hasWidth = document.RootElement.EnumerateObject().Any(p => p.Name.Equals("tickerWidthFraction", StringComparison.OrdinalIgnoreCase));
+            var hasPlacement = document.RootElement.EnumerateObject().Any(p => p.Name.Equals("tickerPlacement", StringComparison.OrdinalIgnoreCase));
+            if (!hasWidth) config.TickerWidthFraction = null;
+            if (!hasPlacement && config.TickerOrigin is { Length: 2 }) config.TickerPlacement = "free";
             if (!hasLists && config.LegacyWatchlist is { Count: > 0 } legacy)
             {
                 config.Watchlists = [new Watchlist { Name = I18n.TFor(config.Language, "Watchlist"), Entries = legacy }];

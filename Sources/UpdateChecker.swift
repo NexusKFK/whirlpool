@@ -44,7 +44,9 @@ final class UpdateChecker {
     /// 取字符串里第一个 x.y[.z](兼容 "v1.6.0-main"、"Whirlpool v1.6.0")
     static func parseVersion(_ text: String) -> [Int]? {
         guard let range = text.range(of: #"\d+(\.\d+)+"#, options: .regularExpression) else { return nil }
-        return text[range].split(separator: ".").compactMap { Int($0) }
+        let parts = text[range].split(separator: ".")
+        let numbers = parts.compactMap { Int($0) }
+        return numbers.count == parts.count ? numbers : nil
     }
 
     static func isNewer(_ candidate: String, than current: String) -> Bool {

@@ -1,4 +1,5 @@
 using System.Net;
+using System.Drawing;
 using System.Text;
 using Whirlpool.Core;
 
@@ -38,10 +39,42 @@ var hk = QuoteFeed.ParseTencentLine("v_hk00700=\"" + string.Join('~', fields) + 
 Check(hk is { } h && h.Quote.Decimals is null && h.Quote.MarketTime == At("2026-09-18 16:08", "Asia/Hong_Kong").AddSeconds(32), "Tencent Hong Kong");
 var yahoo = QuoteFeed.ParseYahoo(Encoding.UTF8.GetBytes("{\"chart\":{\"result\":[{\"meta\":{\"regularMarketPrice\":1.1489,\"chartPreviousClose\":1.15,\"priceHint\":4,\"regularMarketTime\":1789761600}}]}}"), default);
 Check(yahoo?.Decimals == 4 && yahoo.MarketTime == DateTimeOffset.FromUnixTimeSeconds(1789761600), "Yahoo precision hint and time");
+foreach (var metadata in new[] { "\"priceHint\":null,\"regularMarketTime\":null", "\"priceHint\":99,\"regularMarketTime\":9223372036854775807", "\"priceHint\":\"bad\",\"regularMarketTime\":\"bad\"" })
+{
+    var optional = QuoteFeed.ParseYahoo(Encoding.UTF8.GetBytes("{\"chart\":{\"result\":[{\"meta\":{\"regularMarketPrice\":81.3,\"chartPreviousClose\":82," + metadata + "}}]}}"), default);
+    Check(optional is { Price: 81.3, Decimals: null, MarketTime: null }, "invalid optional Yahoo metadata retains a valid quote");
+}
+foreach (var invalid in new[] { "{}", "{\"chart\":null}", "{\"chart\":{\"result\":[null]}}", "{\"chart\":{\"result\":[{\"meta\":{\"regularMarketPrice\":null,\"chartPreviousClose\":82}}]}}", "{\"chart\":{\"result\":[{\"meta\":{\"regularMarketPrice\":1e999,\"chartPreviousClose\":82}}]}}" })
+    Check(QuoteFeed.ParseYahoo(Encoding.UTF8.GetBytes(invalid), default) is null, "invalid Yahoo prices are ignored");
 
 // ── Settings: validation, migration, multiple watchlists ──
 var defaults = new Settings();
 Check(defaults.ShowTicker && !defaults.ShowBoard && defaults.DisplayScreen == "auto", "defaults: ticker only, automatic screen");
+Check(defaults.TickerWidthFraction == .6 && defaults.TickerPlacement == "bottom-center", "2.0 starts with a centered ticker covering 60% of the available screen");
+var work = new Rectangle(-1920, 36, 1920, 1044);
+int halfWidth = TickerLayout.Width(.5, 999, work.Width), fullWidth = TickerLayout.Width(1, 999, work.Width);
+Check(halfWidth == 948 && fullWidth == 1896, "width fractions reserve equal desktop margins");
+var smallCenter = TickerLayout.Origin("bottom-center", new Point(0, 0), new(halfWidth, 40), work);
+var largeCenter = TickerLayout.Origin("bottom-center", new Point(0, 0), new(fullWidth, 40), work);
+Check(smallCenter.X * 2 + halfWidth == largeCenter.X * 2 + fullWidth && smallCenter.Y == 1028, "a bottom-centered ticker grows equally on either side and avoids the taskbar");
+Check(TickerLayout.Origin("top-left", null, new(600, 40), work) == new Point(-1908, 48)
+    && TickerLayout.Origin("top-right", null, new(600, 40), work) == new Point(-612, 48)
+    && TickerLayout.Origin("bottom-right", null, new(600, 40), work) == new Point(-612, 1028), "anchors work on monitors with negative coordinates");
+Check(TickerLayout.Origin("free", new Point(-8000, 4000), new(600, 40), work) == new Point(-1908, 1028), "free positions stay reachable after a display disconnects");
+Check(TickerLayout.Width(null, 826, 1920) == 826 && TickerLayout.Width(1, 826, 160) == 136, "legacy pixel width is retained and tiny screens remain usable");
+Check(TickerLayout.ResizeFreeOrigin(new(-1500, 250), 600, new(1000, 40), work) == new Point(-1700, 250), "free ticker width changes retain their center");
+var layoutDraft = new Settings();
+var liveLayout = new Settings { TickerPlacement = "free", TickerOrigin = [-1200, 280], TickerWidthFraction = .42, BoardOrigin = [-900, 180] };
+TickerLayout.MergeLiveLayout(layoutDraft, liveLayout, false, false, false);
+Check(layoutDraft.TickerPlacement == "free" && layoutDraft.TickerOrigin!.SequenceEqual([-1200, 280]) && layoutDraft.TickerWidthFraction == .42,
+    "saving unrelated settings preserves a live drag and edge resize");
+layoutDraft.TickerPlacement = "top-right"; layoutDraft.TickerWidthFraction = .75;
+TickerLayout.MergeLiveLayout(layoutDraft, liveLayout, true, true, false);
+Check(layoutDraft.TickerPlacement == "top-right" && layoutDraft.TickerWidthFraction == .75, "explicit draft layout choices win over live placement");
+Check(UpdateChecker.ParseVersion("v1.999999999999999999999999999999.2") is null, "oversized release version does not crash the update check");
+Check(UpdateChecker.ParseRelease("{\"tag_name\":42,\"name\":null}") is null && UpdateChecker.ParseRelease("[]") is null, "malformed release metadata is ignored");
+Check(WindowBounds.Clamp(new(-100, 790), new(600, 40), new(-1200, 0, 1200, 800)) == new Point(-608, 752), "resized floating windows stay inside a display with negative coordinates");
+Check(WindowBounds.Clamp(new(-5000, -5000), new(1600, 900), new(-1200, 0, 1200, 800)) == new Point(-1192, 8), "oversized floating windows retain a reachable corner");
 var wide = new Settings { WidthCharacters = 500 }; wide.Normalize();
 Check(wide.WidthCharacters == Settings.MaxWidth && Settings.MaxWidth == 120, "width limit raised to 120 characters");
 Check(!Settings.ValidEntries([new("700", "hk"), new("00700", "hk")]), "canonical duplicate validation");
@@ -54,6 +87,14 @@ try
 {
     var settings = new Settings { RefreshSeconds = 15, Language = "zh-Hans" }; settings.Save(path);
     Check(Settings.Load(path).RefreshSeconds == 15 && Settings.Load(path).Language == "zh-Hans", "configuration round-trip");
+    Check(Settings.Load(path).TickerWidthFraction == .6 && Settings.Load(path).TickerPlacement == "bottom-center", "2.0 layout configuration round-trip");
+    File.WriteAllText(path, "{\"widthCharacters\":37,\"tickerOrigin\":[-1100,280]}");
+    var oldLayout = Settings.Load(path);
+    Check(oldLayout.TickerWidthFraction is null && oldLayout.WidthCharacters == 37 && oldLayout.TickerPlacement == "free", "old widths and saved positions migrate without moving the ticker");
+    oldLayout.Clone().Save(path);
+    Check(Settings.Load(path).TickerWidthFraction is null && Settings.Load(path).TickerOrigin!.SequenceEqual([-1100, 280]), "legacy sizing survives cloning and saving");
+    File.WriteAllText(path, "{\"tickerWidthFraction\":9,\"tickerPlacement\":\"invalid\"}");
+    Check(Settings.Load(path).TickerWidthFraction == 1 && Settings.Load(path).TickerPlacement == "bottom-center", "invalid layout settings are normalized");
     File.WriteAllText(path, "{\"refreshSeconds\":0}");
     Check(Settings.Load(path).RefreshSeconds == 5 && Settings.Load(path).Watchlist.Count > 0, "old settings defaults and clamping");
     File.WriteAllText(path, "{\"watchlists\":[null,{\"name\":\"Keep\",\"entries\":[{\"symbol\":\"TLT\",\"market\":\"us\"}]}],\"activeWatchlist\":1}");
@@ -144,12 +185,38 @@ using var batch = new QuoteFeed(mixed, () => time);
 var china = new Settings(); china.Watchlist = [new("600519", "cn"), new("700", "hk")];
 var both = await batch.RefreshAsync(china);
 Check(mixed.Calls == 1 && both.Count == 2 && both["600519"].Decimals == 2 && both["700"].Price == 419, "Tencent batched into one request");
+var partialClock = time;
+var partialHandler = new FakeHandler();
+var badRequests = 0; var recover = false;
+partialHandler.RequestResponse = request =>
+{
+    if (request.RequestUri!.AbsolutePath.EndsWith("/BAD"))
+    {
+        badRequests++;
+        if (!recover) return new(HttpStatusCode.NotFound);
+    }
+    return calm.Response();
+};
+using (var partialFeed = new QuoteFeed(partialHandler, () => partialClock))
+{
+    var partialSettings = new Settings { RefreshSeconds = 5, SmartRefresh = false };
+    partialSettings.Watchlist = [new("TLT", "us"), new("BAD", "us")];
+    await partialFeed.RefreshAsync(partialSettings);
+    partialClock = partialClock.AddSeconds(5);
+    await partialFeed.RefreshAsync(partialSettings);
+    Check(partialHandler.Calls == 3 && badRequests == 1, "a missing symbol backs off without slowing healthy symbols");
+    Check(partialFeed.Status == "Some quotes unavailable · showing last prices", "stale status persists while a failed symbol waits");
+    partialClock = partialClock.AddSeconds(25); recover = true;
+    var recovered = await partialFeed.RefreshAsync(partialSettings);
+    Check(badRequests == 2 && recovered.Count == 2 && partialFeed.Status == "Updated", "failed symbol recovers on its own retry deadline");
+}
 Console.WriteLine("All Windows core regression checks passed.");
 
 sealed class FakeHandler : HttpMessageHandler
 {
     public Func<HttpResponseMessage> Response = () => new(HttpStatusCode.OK);
+    public Func<HttpRequestMessage, HttpResponseMessage>? RequestResponse;
     public int Calls;
     public string? LastUrl;
-    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) { Calls++; LastUrl = request.RequestUri?.ToString(); return Task.FromResult(Response()); }
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) { Calls++; LastUrl = request.RequestUri?.ToString(); return Task.FromResult(RequestResponse?.Invoke(request) ?? Response()); }
 }

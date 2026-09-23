@@ -5,6 +5,13 @@ private final class SettingsDocumentView: NSView {
     override var isFlipped: Bool { true }
 }
 
+private final class SettingsBackgroundView: NSView {
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor.windowBackgroundColor.setFill()
+        dirtyRect.fill()
+    }
+}
+
 /// A draft-based, keyboard-accessible settings window. Cancel never writes config.
 final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataSource, NSTableViewDelegate, NSTextFieldDelegate {
     var onApplied: ((TickerConfig) -> Void)?
@@ -17,14 +24,29 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
     private let deleteList = NSButton()
     private var window: NSWindow?
     private let table = NSTableView()
-    private let mode = NSPopUpButton()
+    private let pages = NSTabView()
+    private var navigation: [NSButton] = []
+    private var surfaces: [SettingsChoiceButton] = []
+    private var anchors: [SettingsChoiceButton] = []
+    private let preview = LayoutPreviewView(frame: .zero)
+    private let placementName = NSTextField(labelWithString: "")
+    private let freePlacement = NSButton()
+    private var floatingControls: NSView?
+    private var menuControls: NSView?
+    private var placementEdited = false
+    private var floatingWidthEdited = false
+    private var menuWidthEdited = false
+    private var draftPlacement = "bottom-center"
+    private var draftOrigin: [Double]?
     private let source = NSPopUpButton()
     private let language = NSPopUpButton()
-    private let size = NSPopUpButton()
-    private let font = NSPopUpButton()
+    private let size = SettingsChoiceGroup()
+    private let font = SettingsChoiceGroup()
     private let refresh = NSTextField()
     private let speed = NSSlider(value: 30, minValue: 10, maxValue: 50, target: nil, action: nil)
-    private let width = NSSlider(value: 20, minValue: 8, maxValue: Double(TickerConfig.maxWidth), target: nil, action: nil)
+    private let width = NSSlider(value: 60, minValue: 20, maxValue: 100, target: nil, action: nil)
+    private let menuWidth = NSSlider(value: 360, minValue: 144, maxValue: 600, target: nil, action: nil)
+    private let menuWidthValue = NSTextField(labelWithString: "")
     private let speedValue = NSTextField(labelWithString: "")
     private let widthValue = NSTextField(labelWithString: "")
     private let arrows = NSButton(checkboxWithTitle: "", target: nil, action: nil)
@@ -32,8 +54,8 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
     private let flashes = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let redUp = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let dock = NSButton(checkboxWithTitle: "", target: nil, action: nil)
-    private let scheme = NSPopUpButton()
-    private let barBackground = NSPopUpButton()
+    private let scheme = SettingsChoiceGroup()
+    private let barBackground = SettingsChoiceGroup()
     private let screenPicker = NSPopUpButton()
     private let lock = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let clickThrough = NSButton(checkboxWithTitle: "", target: nil, action: nil)
@@ -52,7 +74,25 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
     }
 
     init(config: TickerConfig) { self.config = config; super.init() }
-    func reload(config: TickerConfig) { self.config = config }
+    func reload(config: TickerConfig) {
+        if window?.isVisible == true { syncLayout(from: config) }
+        else { self.config = config }
+    }
+
+    /// Keep an untouched layout draft aligned with real-window drags, without discarding edits.
+    func syncLayout(from latest: TickerConfig) {
+        if !placementEdited {
+            config.barOrigin = latest.barOrigin; config.barPlacement = latest.barPlacement
+            draftOrigin = latest.barOrigin; draftPlacement = latest.barPlacement
+        }
+        if !floatingWidthEdited {
+            config.barWidthFraction = latest.barWidthFraction
+            config.defaultWidth = latest.defaultWidth
+            width.minValue = min(20, displayedFraction(latest) * 100)
+            width.doubleValue = displayedFraction(latest) * 100
+        }
+        if window?.isVisible == true { updateValues() }
+    }
 
     func show() {
         if window?.isVisible == true { window?.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true); return }
@@ -66,12 +106,19 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
         entries = lists.isEmpty ? [] : lists[currentList].entries
         reloadListPicker()
         table.reloadData()
-        mode.selectItem(at: TickerConfig.displayModes.firstIndex { $0.key == config.displayMode } ?? 0)
+        for button in surfaces { button.state = config.displayMode.split(separator: ",").contains(Substring(button.key)) ? .on : .off; button.needsDisplay = true }
         source.selectItem(at: config.provider == "real" ? 0 : 1)
         language.selectItem(at: ["system", "en", "zh-Hans"].firstIndex(of: config.language) ?? 0)
         refresh.stringValue = String(Int(config.boardRefresh))
         speed.doubleValue = 1 / config.scrollSpeed
-        width.integerValue = config.defaultWidth
+        draftPlacement = config.barPlacement; draftOrigin = config.barOrigin
+        placementEdited = false; floatingWidthEdited = false; menuWidthEdited = false
+        reloadScreens()
+        width.minValue = min(20, displayedFraction(config) * 100)
+        width.doubleValue = displayedFraction(config) * 100
+        let menuPoints = config.menuWidthPoints ?? Double(config.defaultWidth * 18 + 8)
+        menuWidth.minValue = min(144, menuPoints); menuWidth.maxValue = max(600, menuPoints)
+        menuWidth.doubleValue = menuPoints
         size.selectItem(at: max(0, min(2, config.ledDotSize - 1)))
         font.selectItem(at: ["led", "system", "mono"].firstIndex(of: config.marqueeFont) ?? 0)
         arrows.state = config.changeArrows ? .on : .off
@@ -81,7 +128,6 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
         dock.state = config.showDockIcon ? .on : .off
         scheme.selectItem(at: ColorScheme.allCases.firstIndex(of: config.colorScheme) ?? 0)
         barBackground.selectItem(at: config.barBackground == "none" ? 1 : 0)
-        reloadScreens()
         lock.state = config.lockPosition ? .on : .off
         clickThrough.state = config.barClickThrough ? .on : .off
         hover.state = config.hoverPause ? .on : .off
@@ -97,49 +143,79 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
     }
 
     private func buildWindow() {
-        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 660, height: 700),
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 920, height: 760),
                          styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         w.title = L("Whirlpool Settings")
-        w.contentMinSize = NSSize(width: 660, height: 540)
+        w.contentMinSize = NSSize(width: 780, height: 540)
         w.isReleasedWhenClosed = false
         w.delegate = self
-        w.setFrameAutosaveName("WhirlpoolSettings")
+        if ProcessInfo.processInfo.environment["WHIRLPOOL_CONFIG"] == nil { w.setFrameAutosaveName("WhirlpoolSettingsV2") }
         // Keep the footer reachable on laptops and scaled displays; long tabs scroll instead.
         if let area = (NSScreen.main ?? NSScreen.screens.first)?.visibleFrame {
-            let size = NSSize(width: min(max(660, w.frame.width), area.width),
+            let size = NSSize(width: min(max(780, w.frame.width), area.width),
                               height: min(w.frame.height, area.height))
             w.setFrame(NSRect(origin: w.frame.origin, size: size), display: false)
         }
         window = w
-        let tabs = NSTabView()
-        for (title, view) in [(L("Watchlist"), watchlistTab()), (L("Display"), scrollable(displayTab())), (L("General"), scrollable(generalTab()))] {
-            let tab = NSTabViewItem(identifier: title)
-            tab.label = title
-            tab.view = view
-            tabs.addTabViewItem(tab)
+        for item in pages.tabViewItems { pages.removeTabViewItem(item) }
+        pages.tabViewType = .noTabsNoBorder
+        navigation = []
+        let sidebar = NSVisualEffectView()
+        sidebar.material = .sidebar; sidebar.blendingMode = .withinWindow; sidebar.state = .active
+        let sideStack = NSStackView(); sideStack.orientation = .vertical; sideStack.alignment = .leading; sideStack.spacing = 8
+        let brand = NSTextField(labelWithString: "Whirlpool")
+        brand.font = .systemFont(ofSize: 16, weight: .semibold)
+        sideStack.addArrangedSubview(brand)
+        let sections: [(String, String, String, NSView)] = [
+            ("watchlist", "Watchlist", "list.bullet", scrollable(watchlistTab())),
+            ("layout", "Layout", "rectangle.3.group", scrollable(displayTab())),
+            ("appearance", "Appearance", "paintpalette", scrollable(appearanceTab())),
+            ("general", "General", "gearshape", scrollable(generalTab()))]
+        for (key, title, symbol, content) in sections {
+            let item = NSTabViewItem(identifier: key); item.view = content; pages.addTabViewItem(item)
+            let nav = NSButton(title: L(title), target: self, action: #selector(pagePicked(_:)))
+            nav.identifier = NSUserInterfaceItemIdentifier("settings-page-" + key)
+            nav.tag = navigation.count; nav.bezelStyle = .recessed; nav.setButtonType(.pushOnPushOff)
+            nav.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil); nav.imagePosition = .imageLeading
+            nav.alignment = .left; nav.font = .systemFont(ofSize: 13, weight: .medium)
+            nav.widthAnchor.constraint(equalToConstant: 124).isActive = true
+            nav.heightAnchor.constraint(equalToConstant: 34).isActive = true
+            sideStack.addArrangedSubview(nav); navigation.append(nav)
         }
+        sidebar.addSubview(sideStack); sideStack.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([sideStack.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor, constant: 16), sideStack.topAnchor.constraint(equalTo: sidebar.topAnchor, constant: 26)])
+        selectPage(1)
         let cancel = button("Cancel", #selector(cancel))
         cancel.keyEquivalent = "\u{1b}"
         let save = button("Save", #selector(save))
         save.keyEquivalent = "\r"
         w.defaultButtonCell = save.cell as? NSButtonCell
-        let footer = NSStackView(views: [NSView(), cancel, save])
+        save.identifier = NSUserInterfaceItemIdentifier("settings-save")
+        cancel.identifier = NSUserInterfaceItemIdentifier("settings-cancel")
+        let footer = NSStackView(views: [note("Changes apply after saving."), NSView(), cancel, save])
         footer.orientation = .horizontal
         footer.spacing = 10
-        let root = NSView()
-        for view in [tabs, footer] { view.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(view) }
+        let root = SettingsBackgroundView()
+        for view in [sidebar, pages, footer] { view.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(view) }
         w.contentView = root
         NSLayoutConstraint.activate([
-            tabs.topAnchor.constraint(equalTo: root.topAnchor, constant: 18),
-            tabs.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 18),
-            tabs.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -18),
-            tabs.bottomAnchor.constraint(equalTo: footer.topAnchor, constant: -16),
-            footer.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 18),
+            sidebar.leadingAnchor.constraint(equalTo: root.leadingAnchor), sidebar.topAnchor.constraint(equalTo: root.topAnchor), sidebar.bottomAnchor.constraint(equalTo: root.bottomAnchor), sidebar.widthAnchor.constraint(equalToConstant: 156),
+            pages.topAnchor.constraint(equalTo: root.topAnchor, constant: 4),
+            pages.leadingAnchor.constraint(equalTo: sidebar.trailingAnchor, constant: 4),
+            pages.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -4),
+            pages.bottomAnchor.constraint(equalTo: footer.topAnchor, constant: -12),
+            footer.leadingAnchor.constraint(equalTo: sidebar.trailingAnchor, constant: 24),
             footer.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -18),
             footer.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -16),
             footer.heightAnchor.constraint(equalToConstant: 32)
         ])
     }
+
+    private func selectPage(_ index: Int) {
+        pages.selectTabViewItem(at: index)
+        for (i, button) in navigation.enumerated() { button.state = i == index ? .on : .off }
+    }
+    @objc private func pagePicked(_ sender: NSButton) { selectPage(sender.tag) }
 
     private func scrollable(_ content: NSView) -> NSScrollView {
         let scroll = NSScrollView()
@@ -188,7 +264,7 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
 
         listPicker.target = self; listPicker.action = #selector(listPicked)
         listPicker.setAccessibilityLabel(L("Watchlist"))
-        listPicker.widthAnchor.constraint(greaterThanOrEqualToConstant: 180).isActive = true
+        listPicker.widthAnchor.constraint(greaterThanOrEqualToConstant: 120).isActive = true
         deleteList.title = L("Delete List"); deleteList.bezelStyle = .rounded
         deleteList.target = self; deleteList.action = #selector(removeList)
         let listRow = NSStackView(views: [NSTextField(labelWithString: L("Current list")), listPicker,
@@ -199,7 +275,7 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
         let actions = NSStackView(views: [button("Add", #selector(add)), button("Remove", #selector(remove)),
                                          button("Move Up", #selector(up)), button("Move Down", #selector(down))])
         actions.orientation = .horizontal; actions.spacing = 8
-        let content = stack([listRow,
+        let content = stack([heading("Watchlist"), listRow,
                              note("The list selected here is shown after saving. Switch lists from the menu or Option-click the ticker."),
                              scroll, actions,
                              note("Examples: AAPL, ^GSPC, 600519, 00700, BTC-USD. Decimals: Auto uses the data source's precision (A-share ETFs 3, FX 4, low-priced crypto more).")])
@@ -273,39 +349,113 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
     }
 
     private func displayTab() -> NSView {
-        mode.removeAllItems(); mode.addItems(withTitles: TickerConfig.displayModes.map(\.label))
-        mode.setAccessibilityLabel(L("Display mode"))
-        speed.target = self; speed.action = #selector(sliderChanged); speed.isContinuous = true
-        width.target = self; width.action = #selector(sliderChanged); width.isContinuous = true
-        speed.setAccessibilityLabel(L("Scroll speed")); width.setAccessibilityLabel(L("Display width"))
-        for control in [speed, width] { control.widthAnchor.constraint(equalToConstant: 210).isActive = true }
+        let cards = NSStackView(); cards.orientation = .horizontal; cards.distribution = .fillEqually; cards.spacing = 10
+        surfaces = [("marquee", "Menu Bar Ticker"), ("bar", "Floating Ticker"), ("board", "Quote Board")].map { key, title in
+            let choice = SettingsChoiceButton(L(title), key: key, artwork: .surface)
+            choice.identifier = NSUserInterfaceItemIdentifier("surface-" + key)
+            choice.onChoose = { [weak self, weak choice] in
+                guard let self, let choice else { return }
+                if choice.state == .on && self.surfaces.filter({ $0.state == .on }).count == 1 { NSSound.beep(); return }
+                choice.state = choice.state == .on ? .off : .on; choice.needsDisplay = true
+                self.updateValues()
+            }
+            choice.heightAnchor.constraint(equalToConstant: 78).isActive = true
+            cards.addArrangedSubview(choice); return choice
+        }
+        screenPicker.setAccessibilityLabel(L("Screen"))
+        screenPicker.target = self; screenPicker.action = #selector(screenChanged)
+        screenPicker.identifier = NSUserInterfaceItemIdentifier("layout-screen")
+        preview.identifier = NSUserInterfaceItemIdentifier("layout-preview")
+        preview.setAccessibilityLabel(L("Desktop preview. Drag the ticker or its edges to adjust the layout."))
+        preview.heightAnchor.constraint(equalToConstant: 192).isActive = true
+        preview.onEdit = { [weak self] placement, fraction, position in
+            guard let self else { return }
+            if abs(self.width.doubleValue / 100 - fraction) > 0.0001 { self.floatingWidthEdited = true }
+            self.width.doubleValue = fraction * 100
+            self.draftPlacement = placement; self.placementEdited = true
+            self.draftOrigin = self.origin(for: position)
+            self.updateValues()
+        }
+        width.target = self; width.action = #selector(floatingWidthChanged); width.isContinuous = true
+        width.identifier = NSUserInterfaceItemIdentifier("floating-width")
+        width.setAccessibilityLabel(L("Share of available screen width"))
+        menuWidth.target = self; menuWidth.action = #selector(menuWidthChanged); menuWidth.isContinuous = true
+        menuWidth.identifier = NSUserInterfaceItemIdentifier("menu-width")
+        menuWidth.setAccessibilityLabel(L("Menu bar width"))
+        anchors = []
+        let anchorRows = NSStackView(); anchorRows.orientation = .vertical; anchorRows.spacing = 6; anchorRows.alignment = .leading
+        for edge in ["top", "bottom"] {
+            let row = NSStackView(); row.orientation = .horizontal; row.distribution = .fillEqually; row.spacing = 6
+            for alignment in ["left", "center", "right"] {
+                let key = edge + "-" + alignment
+                let b = SettingsChoiceButton(Self.placementLabel(key), key: key, artwork: .anchor)
+                b.identifier = NSUserInterfaceItemIdentifier("placement-" + key)
+                b.toolTip = Self.placementLabel(key)
+                b.onChoose = { [weak self] in self?.choosePlacement(key) }
+                b.widthAnchor.constraint(equalToConstant: 46).isActive = true
+                b.heightAnchor.constraint(equalToConstant: 32).isActive = true
+                row.addArrangedSubview(b); anchors.append(b)
+            }
+            anchorRows.addArrangedSubview(row)
+        }
+        freePlacement.title = L("Free position"); freePlacement.bezelStyle = .rounded
+        freePlacement.image = NSImage(systemSymbolName: "arrow.up.and.down.and.arrow.left.and.right", accessibilityDescription: nil)
+        freePlacement.imagePosition = .imageLeading; freePlacement.target = self; freePlacement.action = #selector(freePicked)
+        freePlacement.identifier = NSUserInterfaceItemIdentifier("placement-free")
+        anchorRows.addArrangedSubview(freePlacement)
+        placementName.font = .systemFont(ofSize: 11); placementName.textColor = .secondaryLabelColor
+        let anchorColumn = column([heading("Position"), anchorRows, placementName], spacing: 8)
+        anchorColumn.widthAnchor.constraint(equalToConstant: 150).isActive = true
+        let widthPresets = NSStackView(); widthPresets.orientation = .horizontal; widthPresets.distribution = .fillEqually; widthPresets.spacing = 6
+        for (label, value) in [("¼", 25), ("½", 50), ("⅔", 67), (L("Fill"), 100)] {
+            let b = NSButton(title: label, target: self, action: #selector(widthPreset(_:))); b.bezelStyle = .rounded; b.tag = value
+            b.setAccessibilityLabel(String(format: L("%d percent of screen"), value)); widthPresets.addArrangedSubview(b)
+        }
+        let widthHeader = NSStackView(views: [heading("Share of available screen width"), NSView(), widthValue]); widthHeader.orientation = .horizontal
+        let widthColumn = column([widthHeader, width, widthPresets, note("Centered grows both ways. Left and right keep their edge.")], spacing: 8)
+        let geometry = NSStackView(views: [anchorColumn, widthColumn]); geometry.orientation = .horizontal; geometry.alignment = .top; geometry.spacing = 22; geometry.distribution = .fill
+        widthColumn.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        floatingControls = geometry
+        let menuPresetRow = NSStackView(); menuPresetRow.orientation = .horizontal; menuPresetRow.spacing = 8
+        for (title, points) in [("Compact", 180), ("Standard", 280), ("Wide", 400)] {
+            let b = NSButton(title: L(title), target: self, action: #selector(menuPreset(_:))); b.tag = points; b.bezelStyle = .rounded; menuPresetRow.addArrangedSubview(b)
+        }
+        let menuHeader = NSStackView(views: [heading("Menu bar width"), NSView(), menuWidthValue]); menuHeader.orientation = .horizontal
+        let menuGroup = column([menuHeader, menuWidth, menuPresetRow, note("Independent from the floating ticker. macOS may hide wide items when the menu bar is full.")], spacing: 7)
+        menuControls = menuGroup
+        lock.title = L("Lock floating windows in place")
+        lock.target = self; lock.action = #selector(sliderChanged)
+        resetNote.font = .systemFont(ofSize: 11); resetNote.textColor = .secondaryLabelColor
+        return stack([pageTitle("Layout", "Choose where quotes appear, then shape each display."), heading("Display areas"), cards,
+                      formRow("Screen", [screenPicker]), preview,
+                      note("Preview only. Drag the strip or its edges; positions stay clear of the Dock."), geometry, separator(), menuGroup,
+                      lock, button("Reset Floating Windows", #selector(resetWindows)), resetNote])
+    }
+
+    private func appearanceTab() -> NSView {
         arrows.title = L("Use ▲ / ▼ for price changes")
         pixels.title = L("Use pixel font on the quote board")
         flashes.title = L("Flash changed price suffixes")
-        size.removeAllItems(); size.addItems(withTitles: [L("Small"), L("Medium"), L("Large")])
+        size.configure([L("Small"), L("Medium"), L("Large")])
         size.setAccessibilityLabel(L("Marquee size"))
-        font.removeAllItems(); font.addItems(withTitles: [L("LED dots"), L("System Font"), L("Monospaced")])
+        font.configure([L("LED dots"), L("System Font"), L("Monospaced")], keys: ["led", "system", "mono"], artwork: .font)
         font.setAccessibilityLabel(L("Ticker font"))
-        resetNote.font = .systemFont(ofSize: 11); resetNote.textColor = .secondaryLabelColor
-        scheme.removeAllItems(); scheme.addItems(withTitles: ColorScheme.allCases.map(\.label))
+        scheme.configure(ColorScheme.allCases.map(\.label), keys: ColorScheme.allCases.map(\.rawValue), artwork: .color)
         scheme.setAccessibilityLabel(L("Colors"))
-        barBackground.removeAllItems(); barBackground.addItems(withTitles: [L("Glass"), L("Transparent")])
+        barBackground.configure([L("Glass"), L("Transparent")], keys: ["glass", "none"], artwork: .background)
+        barBackground.onChange = { [weak self] in self?.updateValues() }
         barBackground.setAccessibilityLabel(L("Floating ticker background"))
+        font.onChange = { [weak self] in self?.updateValues() }; size.onChange = { [weak self] in self?.updateValues() }
+        speed.target = self; speed.action = #selector(sliderChanged); speed.isContinuous = true
+        speed.setAccessibilityLabel(L("Scroll speed"))
+        speed.widthAnchor.constraint(equalToConstant: 220).isActive = true
         hover.title = L("Pause scrolling while the pointer is over the ticker")
-        lock.title = L("Lock floating windows in place")
         clickThrough.title = L("Let clicks pass through the floating ticker (turn off from the menu bar icon)")
-        screenPicker.setAccessibilityLabel(L("Screen"))
-        return stack([formRow("Display mode", [mode]), formRow("Screen", [screenPicker]),
-                      note("The floating ticker and board appear on this screen. macOS mirrors the menu bar ticker to every screen's menu bar; its width is sized for this screen."),
-                      formRow("Scroll speed", [speed, speedValue]),
-                      formRow("Display width", [width, widthValue]), formRow("Marquee size", [size]),
-                      formRow("Ticker font", [font]),
+        return stack([pageTitle("Appearance", "See the style before you choose it."), heading("Ticker font"), font,
+                      formRow("Marquee size", [size]),
                       note("Large is clamped to Medium inside the menu bar for LED dots. The quote board keeps its own font setting."),
-                      formRow("Colors", [scheme]),
-                      note("Adaptive keeps red/green and switches the neutral color between white and near-black to follow light or dark menu bars."),
-                      formRow("Floating ticker background", [barBackground]),
-                      arrows, pixels, flashes, hover, lock, clickThrough,
-                      button("Reset Floating Windows", #selector(resetWindows)), resetNote, NSView()])
+                      heading("Colors"), scheme, heading("Floating ticker background"), barBackground,
+                      formRow("Scroll speed", [speed, speedValue]), separator(), arrows, pixels, flashes, hover, clickThrough])
     }
 
     private func generalTab() -> NSView {
@@ -319,7 +469,7 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
         login.title = L("Launch at login")
         smart.title = L("Refresh slowly while all watched markets are closed")
         updates.title = L("Check for updates automatically")
-        return stack([formRow("Language", [language]), note("Language changes apply after saving."),
+        return stack([pageTitle("General", "Data, language and startup."), formRow("Language", [language]), note("Language changes apply after saving."),
                       formRow("Data source", [source]), formRow("Refresh interval", [refresh, NSTextField(labelWithString: L("seconds"))]),
                       note("30 seconds is recommended. Short intervals may be rate-limited. All displays share one request cycle."),
                       smart, note("Uses exchange calendars with holidays and half days (NYSE, SSE/SZSE, HKEX); crypto, futures and FX count as always open. Refreshing resumes at the next open."),
@@ -330,14 +480,27 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
 
     private func stack(_ views: [NSView]) -> NSStackView {
         let result = NSStackView(views: views)
-        result.orientation = .vertical; result.alignment = .leading; result.spacing = 14
+        result.orientation = .vertical; result.alignment = .leading; result.spacing = 13
         result.edgeInsets = NSEdgeInsets(top: 20, left: 20, bottom: 20, right: 20)
         for view in views {
             view.translatesAutoresizingMaskIntoConstraints = false
-            if view is NSScrollView { view.widthAnchor.constraint(equalTo: result.widthAnchor, constant: -40).isActive = true }
+            view.widthAnchor.constraint(equalTo: result.widthAnchor, constant: -40).isActive = true
         }
         return result
     }
+    private func column(_ views: [NSView], spacing: CGFloat) -> NSStackView {
+        let result = NSStackView(views: views); result.orientation = .vertical; result.alignment = .leading; result.spacing = spacing
+        for view in views { view.widthAnchor.constraint(equalTo: result.widthAnchor).isActive = true }
+        return result
+    }
+    private func heading(_ title: String) -> NSTextField {
+        let label = NSTextField(labelWithString: L(title)); label.font = .systemFont(ofSize: 12, weight: .semibold); return label
+    }
+    private func pageTitle(_ title: String, _ subtitle: String) -> NSView {
+        let label = NSTextField(labelWithString: L(title)); label.font = .systemFont(ofSize: 23, weight: .semibold)
+        return column([label, note(subtitle)], spacing: 5)
+    }
+    private func separator() -> NSBox { let line = NSBox(); line.boxType = .separator; return line }
     private func formRow(_ title: String, _ controls: [NSView]) -> NSStackView {
         let label = NSTextField(labelWithString: L(title))
         label.widthAnchor.constraint(equalToConstant: 132).isActive = true
@@ -438,10 +601,81 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
     @objc private func up() { move(-1) }
     @objc private func down() { move(1) }
     @objc private func sliderChanged() { updateValues() }
+    @objc private func floatingWidthChanged() {
+        let previousWidth = (previewArea.width - 24) * preview.fraction
+        width.doubleValue = max(20, width.doubleValue)
+        floatingWidthEdited = true
+        if draftPlacement == "free", let origin = draftOrigin, origin.count == 2 {
+            let desired = NSRect(x: origin[0] + (previousWidth - previewWindowSize.width) / 2, y: origin[1], width: previewWindowSize.width, height: previewWindowSize.height)
+            let clamped = constrainedFrame(desired, inside: previewArea, margin: 12)
+            draftOrigin = [clamped.minX, clamped.minY]; placementEdited = true
+        }
+        updateValues()
+    }
+    @objc private func menuWidthChanged() { menuWidthEdited = true; updateValues() }
+    @objc private func widthPreset(_ sender: NSButton) { width.doubleValue = Double(sender.tag); floatingWidthChanged() }
+    @objc private func menuPreset(_ sender: NSButton) { menuWidth.doubleValue = Double(sender.tag); menuWidthEdited = true; updateValues() }
+    private var selectedScreenKey: String { screenKeys.indices.contains(screenPicker.indexOfSelectedItem) ? screenKeys[screenPicker.indexOfSelectedItem] : config.displayScreen }
+    private var previewScreen: NSScreen? {
+        if draftPlacement == "free", let origin = draftOrigin, origin.count == 2,
+           let screen = NSScreen.screens.first(where: { $0.frame.contains(NSPoint(x: origin[0], y: origin[1])) }) { return screen }
+        return placementScreen(selectedScreenKey)
+    }
+    private var previewArea: NSRect { previewScreen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900) }
+    private func displayedFraction(_ config: TickerConfig) -> Double {
+        if let fraction = config.barWidthFraction { return fraction }
+        let legacy = CGFloat(config.defaultWidth * 18 + (config.marqueeFont == "led" ? 8 : 0) + (config.barBackground == "glass" ? 20 : 0))
+        return min(1, max(0.01, legacy / max(1, previewArea.width - 24)))
+    }
+    private var previewWindowSize: NSSize {
+        let h: CGFloat = font.indexOfSelectedItem == 0 ? CGFloat(8 * (size.indexOfSelectedItem + 2) + 10) : 32
+        let fraction = width.doubleValue / 100
+        return NSSize(width: ((previewArea.width - 24) * fraction).rounded(), height: h)
+    }
+    private func origin(for normalized: NSPoint) -> [Double] {
+        let area = previewArea.insetBy(dx: 12, dy: 12), size = previewWindowSize
+        return [Double(area.minX + max(0, area.width - size.width) * normalized.x), Double(area.minY + max(0, area.height - size.height) * normalized.y)]
+    }
+    private func choosePlacement(_ key: String) { draftPlacement = key; draftOrigin = nil; placementEdited = true; updateValues() }
+    @objc private func freePicked() {
+        if draftPlacement != "free" {
+            let frame = anchoredTickerFrame(size: previewWindowSize, placement: draftPlacement, inside: previewArea)
+            draftOrigin = [frame.minX, frame.minY]
+        }
+        draftPlacement = "free"; placementEdited = true; updateValues()
+    }
+    @objc private func screenChanged() {
+        draftOrigin = nil
+        if draftPlacement == "free" { draftPlacement = "bottom-center" }
+        placementEdited = true; updateValues()
+    }
+    static func placementLabel(_ key: String) -> String {
+        L(["top-left": "Top left", "top-center": "Top center", "top-right": "Top right", "bottom-left": "Bottom left", "bottom-center": "Bottom center", "bottom-right": "Bottom right", "free": "Free position"][key] ?? "Bottom center")
+    }
     private func updateValues() {
         speedValue.stringValue = "\(Int(speed.doubleValue)) \(L("columns / sec"))"
-        // 宽度按物理尺寸锚定(M 档 1 字符≈18pt):换字号不改变条的实际宽度
-        widthValue.stringValue = "\(width.integerValue) \(L("characters")) · ≈\(width.integerValue * 18 + 8) pt"
+        widthValue.stringValue = "\(Int(width.doubleValue.rounded()))% · \(Int(previewWindowSize.width)) pt"
+        menuWidthValue.stringValue = "\(menuWidth.integerValue) pt"
+        widthValue.font = .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
+        menuWidthValue.font = .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
+        placementName.stringValue = Self.placementLabel(draftPlacement)
+        preview.placement = draftPlacement; preview.fraction = width.doubleValue / 100
+        preview.menuFraction = min(0.4, menuWidth.doubleValue / max(1, previewArea.width))
+        preview.menuOn = surfaces.first { $0.key == "marquee" }?.state == .on
+        preview.barOn = surfaces.first { $0.key == "bar" }?.state == .on
+        preview.boardOn = surfaces.first { $0.key == "board" }?.state == .on
+        preview.glass = barBackground.indexOfSelectedItem == 0
+        // Lock applies to real windows; the draft preview remains editable deliberately.
+        preview.locked = false
+        if let origin = draftOrigin, origin.count == 2 {
+            let area = previewArea.insetBy(dx: 12, dy: 12), size = previewWindowSize
+            preview.freePosition = NSPoint(x: min(1, max(0, (origin[0] - area.minX) / max(1, area.width - size.width))),
+                                           y: min(1, max(0, (origin[1] - area.minY) / max(1, area.height - size.height))))
+        } else { preview.freePosition = NSPoint(x: 0.5, y: 0) }
+        for button in anchors { button.state = button.key == draftPlacement ? .on : .off; button.needsDisplay = true }
+        freePlacement.state = draftPlacement == "free" ? .on : .off
+        floatingControls?.isHidden = !preview.barOn
+        menuControls?.isHidden = !preview.menuOn
     }
     /// 显示器列表:自动 + 当前连接的屏;已选但未连接的屏保留为一项,免得悄悄改掉用户选择
     private func reloadScreens() {
@@ -460,7 +694,10 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
         screenPicker.selectItem(at: screenKeys.firstIndex(of: config.displayScreen) ?? 0)
     }
 
-    @objc private func resetWindows() { resetPositions = true; resetNote.stringValue = L("Window positions will reset after you save.") }
+    @objc private func resetWindows() {
+        resetPositions = true; choosePlacement("bottom-center")
+        resetNote.stringValue = L("Window positions will reset after you save.")
+    }
     @objc private func cancel() { window?.close() }
     private func error(_ message: String, title: String = "Invalid Settings") {
         let alert = NSAlert(); alert.messageText = L(title); alert.informativeText = L(message)
@@ -477,6 +714,7 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
             let showProblem = { (message: String) in
                 self.currentList = i; self.entries = self.lists[i].entries
                 self.reloadListPicker(); self.table.reloadData()
+                self.selectPage(0)
                 self.error(String(format: L("List “%@”: "), list.name) + L(message))
             }
             guard !cleaned.isEmpty else { showProblem("Add at least one symbol."); return }
@@ -484,21 +722,26 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
             cleanedLists.append(Watchlist(name: list.name, entries: cleaned))
         }
         guard let interval = Double(refresh.stringValue), interval.isFinite, (5...3600).contains(interval) else {
+            selectPage(3)
             error("Enter a refresh interval from 5 to 3600 seconds."); return
         }
         var draft = config
         // A settings draft can stay open while floating windows are being dragged.
         if let latest = currentConfig?() {
             draft.barOrigin = latest.barOrigin; draft.boardOrigin = latest.boardOrigin
+            draft.barPlacement = latest.barPlacement; draft.barWidthFraction = latest.barWidthFraction
+            draft.menuWidthPoints = latest.menuWidthPoints
         }
         draft.watchlists = cleanedLists
         draft.activeWatchlist = currentList
-        draft.displayMode = TickerConfig.displayModes[mode.indexOfSelectedItem].key
+        draft.displayMode = ["marquee", "bar", "board"].filter { key in surfaces.first { $0.key == key }?.state == .on }.joined(separator: ",")
         draft.provider = source.indexOfSelectedItem == 0 ? "real" : "demo"
         draft.language = ["system", "en", "zh-Hans"][language.indexOfSelectedItem]
         draft.boardRefresh = interval
         draft.scrollSpeed = 1 / speed.doubleValue
-        draft.defaultWidth = width.integerValue
+        if floatingWidthEdited { draft.barWidthFraction = width.doubleValue / 100 }
+        if menuWidthEdited { draft.menuWidthPoints = menuWidth.doubleValue }
+        if placementEdited { draft.barPlacement = draftPlacement; draft.barOrigin = draftOrigin }
         draft.ledDotSize = size.indexOfSelectedItem + 1
         draft.marqueeFont = ["led", "system", "mono"][max(0, min(2, font.indexOfSelectedItem))]
         draft.changeArrows = arrows.state == .on
@@ -518,9 +761,11 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
         if screenKey != config.displayScreen {
             // 换了显示器:浮窗丢掉旧位置,落到新屏的默认位置
             draft.displayScreen = screenKey
-            draft.barOrigin = nil; draft.boardOrigin = nil
+            if !placementEdited { draft.barOrigin = nil }
+            draft.boardOrigin = nil
         }
-        if resetPositions { draft.boardOrigin = nil; draft.barOrigin = nil }
+        if resetPositions { draft.boardOrigin = nil }
+        draft.normalize()
         guard saveConfig(draft) else { error(configPath(), title: "Could Not Save Settings"); return }
         config = draft; onApplied?(draft)
         applyLoginItem(login.state == .on)

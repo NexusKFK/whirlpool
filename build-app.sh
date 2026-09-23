@@ -29,17 +29,21 @@ else
     codesign --verify --deep --strict "$app"
 fi
 
-rm -rf Whirlpool.app
-mv "$app" Whirlpool.app
-echo 'Built Whirlpool.app'
+# Keep development bundles out of app discovery and the source checkout.
+output_dir=".build/apps.noindex"
+mkdir -p "$output_dir"
+output_app="$output_dir/Whirlpool.app"
+rm -rf "$output_app"
+mv "$app" "$output_app"
+echo "Built $output_app"
 
 # ── Notarization (optional; requires Apple Developer Program) ────────────────
 # One-time: xcrun notarytool store-credentials KEYCHAIN_PROFILE \
 #     --apple-id you@example.com --team-id TEAMID
 if [ -n "${KEYCHAIN_PROFILE:-}" ] && [ -n "${DEVELOPER_ID_APPLICATION:-}" ]; then
-    zip -qry Whirlpool-notary.zip Whirlpool.app
-    xcrun notarytool submit Whirlpool-notary.zip --keychain-profile "$KEYCHAIN_PROFILE" --wait
-    xcrun stapler staple Whirlpool.app
-    rm -f Whirlpool-notary.zip
+    ditto -c -k --sequesterRsrc --keepParent "$output_app" .build/Whirlpool-notary.zip
+    xcrun notarytool submit .build/Whirlpool-notary.zip --keychain-profile "$KEYCHAIN_PROFILE" --wait
+    xcrun stapler staple "$output_app"
+    rm -f .build/Whirlpool-notary.zip
     echo 'Notarized Whirlpool.app'
 fi

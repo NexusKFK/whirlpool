@@ -3,9 +3,10 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 version=$(plutil -extract CFBundleShortVersionString raw Info.plist)
 mkdir -p dist
-if [ -d Whirlpool.app ]; then
-    codesign --verify --deep --strict Whirlpool.app
-    ditto -c -k --sequesterRsrc --keepParent Whirlpool.app "dist/Whirlpool-v$version-macOS.zip"
+mac_app=".build/apps.noindex/Whirlpool.app"
+if [ -d "$mac_app" ]; then
+    codesign --verify --deep --strict "$mac_app"
+    ditto -c -k --sequesterRsrc --keepParent "$mac_app" "dist/Whirlpool-v$version-macOS.zip"
 fi
 if [ -f dist/windows-x64/Whirlpool.exe ]; then
     cp README.md README.zh-CN.md LICENSE ATTRIBUTION.md docs/WINDOWS-TESTING.md dist/windows-x64/

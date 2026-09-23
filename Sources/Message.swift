@@ -151,9 +151,9 @@ func parseCode(_ text: String, from start: String.Index) -> (ParsedCode, String.
     case "p":
         if content.hasPrefix("sticky") {
             let blinks = content.hasPrefix("sticky:") ? Int(content.dropFirst(7)) ?? 0 : 0
-            return (.pause(.sticky(onClickCommand: nil, blinks: blinks)), i)
+            return (.pause(.sticky(onClickCommand: nil, blinks: min(100, max(0, blinks)))), i)
         }
-        if let s = Double(content) { return (.pause(.timed(seconds: s)), i) }
+        if let s = Double(content), s.isFinite, s >= 0 { return (.pause(.timed(seconds: min(86400, s))), i) }
     case "g": return (.glyph(content.lowercased()), i)
     case "b":
         if content.hasPrefix("1:") {
@@ -189,7 +189,7 @@ func decodeSocketMessage(_ raw: String) -> TickerMessage? {
         kind:           kind,
         text:           m.text ?? "",
         priority:       priority,
-        duration:       m.duration ?? 5,
+        duration:       min(86400, max(0, m.duration ?? 5)),
         onClickCommand: m.on_click,
         width:          m.width
     )

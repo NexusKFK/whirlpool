@@ -59,6 +59,9 @@ struct TickerConfig: Codable {
     var boardOrigin:       [Double]?         = nil       // 手动拖动后记忆 [x, y]
     var boardRefresh:      Double            = 30        // 秒
     var barOrigin:         [Double]?         = nil       // 底部条手动拖动后记忆
+    var barPlacement:      String            = "bottom-center"
+    var barWidthFraction:  Double?           = 0.60      // 整个胶囊占可用屏宽的比例;nil 保留 1.x 的宽度
+    var menuWidthPoints:   Double?           = nil       // 菜单栏独立宽度;nil 沿用 defaultWidth
     var boardPixelFont:    Bool              = true      // 报价卡用 LED 像素字体(关=系统字体)
     var marqueeBlink:      Bool              = true      // 跑马灯换数时闪变化的数字
     var barBackground:     String            = "glass"   // 浮动条背板:glass=毛玻璃胶囊(亮/暗自适应) none=透明
@@ -75,6 +78,7 @@ struct TickerConfig: Codable {
     private enum CodingKeys: String, CodingKey {
         case tickerEnabled, defaultColor, defaultWidth, ledDotSize, marqueeFont, showDockIcon, scrollSpeed, defaultPause, customChars, transparent, transparentColor, marqueeSeparator, changeArrows, quoteLoop, watchlist, pausePerSymbol, redUpMarkets, provider, displayMode, boardCorner, boardOrigin, boardRefresh, barOrigin, boardPixelFont, marqueeBlink, barBackground, hoverPause, smartRefresh, language
         case watchlists, activeWatchlist, checkUpdates, displayScreen, lockPosition, barClickThrough
+        case barPlacement, barWidthFraction, menuWidthPoints
     }
 
     init(from decoder: Decoder) throws {
@@ -125,6 +129,11 @@ struct TickerConfig: Codable {
         language = try values.decodeIfPresent(type(of: language), forKey: .language) ?? language
         boardOrigin = try values.decodeIfPresent([Double].self, forKey: .boardOrigin)
         barOrigin = try values.decodeIfPresent([Double].self, forKey: .barOrigin)
+        barWidthFraction = try values.decodeIfPresent(Double.self, forKey: .barWidthFraction)
+        menuWidthPoints = try values.decodeIfPresent(Double.self, forKey: .menuWidthPoints)
+        let hasSavedOrigin = barOrigin?.count == 2 && barOrigin?.allSatisfy({ $0.isFinite }) == true
+        barPlacement = try values.decodeIfPresent(String.self, forKey: .barPlacement)
+            ?? (hasSavedOrigin ? "free" : "bottom-center")
         normalize()
     }
 
@@ -156,6 +165,9 @@ struct TickerConfig: Codable {
         try c.encodeIfPresent(boardOrigin, forKey: .boardOrigin)
         try c.encode(boardRefresh, forKey: .boardRefresh)
         try c.encodeIfPresent(barOrigin, forKey: .barOrigin)
+        try c.encode(barPlacement, forKey: .barPlacement)
+        try c.encodeIfPresent(barWidthFraction, forKey: .barWidthFraction)
+        try c.encodeIfPresent(menuWidthPoints, forKey: .menuWidthPoints)
         try c.encode(boardPixelFont, forKey: .boardPixelFont)
         try c.encode(marqueeBlink, forKey: .marqueeBlink)
         try c.encode(barBackground, forKey: .barBackground)
@@ -170,6 +182,9 @@ struct TickerConfig: Codable {
 
     mutating func normalize() {
         defaultWidth = min(Self.maxWidth, max(8, defaultWidth))
+        if let width = barWidthFraction { barWidthFraction = width.isFinite ? min(1, max(0.20, width)) : nil }
+        if let width = menuWidthPoints { menuWidthPoints = width.isFinite ? min(1200, max(120, width)) : nil }
+        if !Self.barPlacements.contains(barPlacement) { barPlacement = "bottom-center" }
         ledDotSize = min(3, max(1, ledDotSize))
         if !["led", "system", "mono"].contains(marqueeFont) { marqueeFont = "led" }
         scrollSpeed = scrollSpeed.isFinite ? min(0.1, max(0.02, scrollSpeed)) : 0.0333
@@ -183,6 +198,8 @@ struct TickerConfig: Codable {
         displayScreen = displayScreen.trimmingCharacters(in: .whitespaces)
         if displayScreen.isEmpty { displayScreen = "auto" }
         if displayMode == "both" { displayMode = "marquee,board" }
+        let surfaces = Set(displayMode.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) })
+        displayMode = ["marquee", "bar", "board"].filter { surfaces.contains($0) }.joined(separator: ",")
         if !Self.displayModes.contains(where: { $0.key == displayMode }) { displayMode = "marquee" }
         for li in watchlists.indices {
             var list = watchlists[li]
@@ -217,11 +234,14 @@ struct TickerConfig: Codable {
 
     /// 显示宽度上限(M 档字符,1 字符≈18pt)。实际宽度另受屏宽约束:菜单栏 40%、浮动条整屏。
     static let maxWidth = 120
+    static let barPlacements = ["top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right", "free"]
 
     static var displayModes: [(key: String, label: String)] {
         [("marquee", L("Menu Bar Ticker")), ("board", L("Quote Board")),
          ("bar", L("Floating Ticker")), ("marquee,board", L("Menu Bar + Board")),
-         ("marquee,bar", L("Menu Bar + Floating Ticker"))]
+         ("marquee,bar", L("Menu Bar + Floating Ticker")),
+         ("bar,board", L("Floating Ticker + Board")),
+         ("marquee,bar,board", L("All Displays"))]
     }
 }
 

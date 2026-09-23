@@ -62,6 +62,8 @@ final class MarqueeEngine {
     private var firedFlashes = Set<String>()
     private var prefetched = false
     private var held = false
+    private var pauseDeadline: CFTimeInterval?
+    private var remainingPause: TimeInterval = 0
     private var stickyCommand: String?
     private var stickyWaiting = false
     private let clock = EventClock()
@@ -139,7 +141,7 @@ final class MarqueeEngine {
         clock.cancelAll()
         current = msg
         motionStart = nil
-        held = false
+        pauseDeadline = nil; remainingPause = 0
         stickyWaiting = false
         switch msg.kind {
         case .standby:
@@ -179,7 +181,6 @@ final class MarqueeEngine {
                 view.load(built.makeArt(view), viewportWidth: viewportWidth(view), atCol: startAt)
             }
             onContentSizeChange?()
-            beginActivity()
             phase = .scrolling
             run()
         default:
@@ -190,6 +191,7 @@ final class MarqueeEngine {
     /// 从 position 起滚到下一个暂停标记或轮尾
     private func run() {
         guard let round, !held else { return }
+        beginActivity()
         phase = .scrolling
         while pauseIndex < pauses.count, Double(pauses[pauseIndex].at) < position { pauseIndex += 1 }
         let target = pauseIndex < pauses.count ? Double(pauses[pauseIndex].at) : Double(round.totalCols)
@@ -228,12 +230,23 @@ final class MarqueeEngine {
         pauseIndex += 1
         switch marker.kind {
         case .timed(let seconds):
-            phase = .paused
-            clock.after(seconds) { [weak self] in self?.run() }
+            pause(for: seconds)
         case .sticky(let cmd, let blinks):
             phase = .sticky
             stickyCommand = cmd
             blink(step: 0, total: blinks * 2)
+        }
+    }
+
+    private func pause(for seconds: TimeInterval) {
+        phase = .paused
+        remainingPause = seconds
+        guard !held else { return }
+        pauseDeadline = CACurrentMediaTime() + seconds
+        clock.after(seconds) { [weak self] in
+            guard let self else { return }
+            self.pauseDeadline = nil; self.remainingPause = 0
+            self.run()
         }
     }
 
@@ -258,7 +271,7 @@ final class MarqueeEngine {
             try? proc.run()
         }
         stickyWaiting = false
-        beginActivity()
+        phase = .scrolling
         run()
     }
 
@@ -329,8 +342,12 @@ final class MarqueeEngine {
     }
 
     func hold() {
-        guard !held, phase == .scrolling || phase == .paused else { return }
+        guard !held else { return }
         held = true
+        guard phase == .scrolling || phase == .paused else { return }
+        if let deadline = pauseDeadline {
+            remainingPause = max(0, deadline - CACurrentMediaTime()); pauseDeadline = nil
+        }
         clock.cancelAll()
         if motionStart != nil { position = currentCol; motionStart = nil }
         for view in surfaces() { view.hold(atCol: position) }
@@ -342,7 +359,8 @@ final class MarqueeEngine {
         held = false
         guard phase == .scrolling || phase == .paused else { return }
         beginActivity()
-        run()
+        if phase == .paused && remainingPause > 0 { pause(for: remainingPause) }
+        else { run() }
     }
 
     /// 明暗 / 倍率 / 配色变了:当前轮原位重出纹理,滚动位置与事件不变

@@ -1,5 +1,27 @@
 # Changelog
 
+## 2.0.0 (unreleased)
+
+- macOS builds now go to `.build/apps.noindex/Whirlpool.app` instead of a tracked app in the repository root, preventing development copies from appearing as another installed Whirlpool. Install and launch the single copy in `/Applications/Whirlpool.app`.
+- Native visual settings replace the large display-mode form. macOS has a Watchlist / Layout / Appearance / General sidebar; Windows has Layout / Appearance / Watchlist / General tabs. Display cards enable any supported nonempty combination, with visual placement controls and appearance choices.
+- Floating tickers have six top/bottom left/center/right anchors plus free dragging. Anchors use the available desktop area, avoiding the Dock/menu bar or Windows taskbar and preserving edge margins. Dragging a ticker switches to free placement; selecting an anchor restores its attachment to the chosen screen edge.
+- Floating width is independent of font and menu-bar width: choose 20–100% of available screen width, use quarter/half/two-thirds/fill presets, or resize from either end of the actual ticker. Centered/free tickers resize about their center; side anchors retain their aligned edge. macOS menu-bar width has its own point-based control and retains the screen-width cap.
+- Interactive desktop previews edit a draft. Save applies it; Cancel discards settings edits. Saving unrelated settings preserves live window moves and resizes, while an explicit draft position takes precedence. Existing watchlists, legacy widths, and compatible saved window positions migrate without requiring a configuration reset.
+- Added regression coverage for layout geometry, independent widths, migration, and settings draft behavior, plus a macOS settings snapshot harness for Chinese/English and light/dark appearance. Windows remains a cross-compiled preview; native UI, DPI, and multi-monitor acceptance require a Windows machine.
+
+中文：2.0 将设置改为原生图形界面：macOS 使用「自选股 / 布局 / 外观 / 通用」侧栏，Windows 使用四个对应标签页。显示卡片可独立组合；浮动行情条支持顶部、底部各三个锚点与自由拖动，避开系统栏并保留边距。宽度改为可用屏宽的 20–100%，提供比例预设与两端拖动缩放；菜单栏宽度单独设置。桌面预览只改草稿，保存后应用，取消不改配置；升级保留旧自选股和兼容的宽度、位置。Windows 仍需实机验收。
+
+### Reliability fixes carried forward from unreleased 1.9.4
+
+- Unavailable symbols retry independently on macOS and Windows. One invalid or delisted symbol no longer slows healthy quotes to a 15-minute interval; stale quotes and the partial-failure status remain until recovery. Provider-wide rate limits and full-outage backoff still apply.
+- macOS hover pause survives waiting for data, urgent messages and watchlist banners. Leaving the ticker resumes the remaining timed pause instead of skipping it. Demo quotes keep updating when real markets are closed.
+- Floating tickers stay inside their display after resizing. macOS recalculates width when a bar moves to another display, even at the same pixel density, and automatic placement consistently uses the primary display. Windows sizes against the bar's actual display and repositions windows when the monitor layout changes.
+- Windows accepts valid prices even when optional Yahoo precision/time fields are null or malformed, and ignores invalid prices safely. Update checks on both platforms reject overflowing version numbers; Windows also tolerates malformed release metadata.
+- macOS message pause durations and sticky blink counts are bounded, preventing invalid timers and integer overflow from malformed control sequences.
+- Added regression checks for partial failures/recovery, malformed responses, hover transitions, timed pauses and window bounds. macOS and Windows core checks pass; native Windows UI acceptance still requires Windows hardware.
+
+中文：行情失败按股票分别退避，失效代码不再拖慢正常股票；仍遵守服务器限流与断网退避。修复 macOS 等待行情、插播和切池提示期间丢失悬停暂停，以及离开悬停后跳过定时停顿的问题；演示行情不再受真实市场休市影响。完善浮窗变宽、跨屏及 Windows 显示器拔插后的可见位置与尺寸，默认显示器选择保持稳定。加强异常行情字段、版本号和消息时长/闪烁次数的处理，并补充对应回归测试。
+
 ## 1.9.3 (unreleased)
 
 - Refresh settings take effect without waiting out an earlier market-closed interval; minimum request spacing and error/rate-limit backoff remain enforced. Windows queues a manual refresh pressed during the five-second guard instead of losing it.

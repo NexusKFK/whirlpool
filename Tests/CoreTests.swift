@@ -4,14 +4,30 @@ private final class TestProvider: QuoteProvider {
     var name = "real"
     var cooldownUntil: Date?
     var calls = 0
+    var requested: [[WatchEntry]] = []
     var responses: [([String: Quote]) -> Void] = []
-    func quotes(for entries: [WatchEntry], completion: @escaping ([String: Quote]) -> Void) { calls += 1; responses.append(completion) }
+    func quotes(for entries: [WatchEntry], completion: @escaping ([String: Quote]) -> Void) { calls += 1; requested.append(entries); responses.append(completion) }
 }
 
 func runCoreTests() throws {
     let oldJSON = Data("{\"watchlist\":[{\"symbol\":\"QQQ\",\"market\":\"us\"}],\"defaultWidth\":55,\"provider\":\"real\"}".utf8)
     let migrated = try JSONDecoder().decode(TickerConfig.self, from: oldJSON)
     precondition(migrated.watchlist.first?.symbol == "QQQ" && migrated.defaultWidth == 55 && migrated.language == "system")
+    precondition(migrated.barWidthFraction == nil && migrated.menuWidthPoints == nil && migrated.barPlacement == "bottom-center",
+                 "1.x settings retain their width until the user changes it")
+    precondition(TickerConfig().barWidthFraction == 0.60, "new installations default to a 60-percent floating ticker")
+    let oldPosition = try JSONDecoder().decode(TickerConfig.self, from: Data("{\"barOrigin\":[10,20]}".utf8))
+    precondition(oldPosition.barPlacement == "free", "manual 1.x positions stay free after upgrading")
+    let invalidPosition = try JSONDecoder().decode(TickerConfig.self, from: Data("{\"barOrigin\":[10],\"barWidthFraction\":9,\"menuWidthPoints\":1}".utf8))
+    precondition(invalidPosition.barPlacement == "bottom-center" && invalidPosition.barWidthFraction == 1 && invalidPosition.menuWidthPoints == 120)
+    for mode in ["marquee", "bar", "board", "marquee,bar", "marquee,board", "bar,board", "marquee,bar,board"] {
+        var surfaces = TickerConfig(); surfaces.displayMode = mode; surfaces.normalize()
+        precondition(surfaces.displayMode == mode, "all nonempty display combinations remain available")
+    }
+    var reordered = TickerConfig(); reordered.displayMode = "board,bar,marquee"; reordered.normalize()
+    precondition(reordered.displayMode == "marquee,bar,board", "display combinations normalize consistently")
+    let layoutRoundTrip = try JSONDecoder().decode(TickerConfig.self, from: JSONEncoder().encode(TickerConfig()))
+    precondition(layoutRoundTrip.barWidthFraction == 0.60 && layoutRoundTrip.barPlacement == "bottom-center")
     let clamped = try JSONDecoder().decode(TickerConfig.self, from: Data("{\"scrollSpeed\":0,\"boardRefresh\":-1,\"defaultWidth\":1000,\"boardOrigin\":[1],\"language\":\"unknown\",\"ledDotSize\":9}".utf8))
     precondition(clamped.scrollSpeed == 0.02 && clamped.boardRefresh == 5 && clamped.defaultWidth == TickerConfig.maxWidth && clamped.boardOrigin == nil && clamped.language == "system" && clamped.ledDotSize == 3)
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -45,6 +61,17 @@ func runCoreTests() throws {
     precondition(QuoteHTTPClient.retryAfter("Thu, 01 Jan 1970 00:02:00 GMT", now: epoch) == 120)
     precondition(QuoteService.retryDelay(1) == 30 && QuoteService.retryDelay(2) == 60 && QuoteService.retryDelay(20) == 900)
     print("PASS: localization and Retry-After / exponential backoff")
+    precondition(UpdateChecker.parseVersion("v1.999999999999999999999999999999.2") == nil,
+                 "an overflowing version component must not be silently removed")
+    for text in ["\\p[nan]", "\\p[inf]", "\\p[-1]"] {
+        precondition(parseCode(text, from: text.startIndex) == nil, "invalid pause durations must not reach the timer")
+    }
+    let sticky = "\\p[sticky:\(Int.max)]"
+    if case .pause(.sticky(_, let count))? = parseCode(sticky, from: sticky.startIndex)?.0 {
+        precondition(count == 100, "blink counts are bounded before doubling")
+    } else { preconditionFailure("sticky marker must parse") }
+    precondition(decodeSocketMessage("{\"type\":\"standby\",\"duration\":1e100}")?.duration == 86400)
+    print("PASS: malformed version and message timing values are bounded or rejected")
 
     var now = Date(timeIntervalSince1970: 1000)
     let provider = TestProvider()
@@ -110,4 +137,39 @@ func runCoreTests() throws {
     seriesProvider.responses.removeFirst()(["AAPL": quote])
     RunLoop.main.run(until: Date().addingTimeInterval(0.02))
     print("PASS: opening the quote board during a summary fetch preserves its request for series")
+
+    let partialProvider = TestProvider()
+    let partial = QuoteService(provider: partialProvider, interval: 5, now: { now })
+    let pair = entries + [WatchEntry(symbol: "BAD", market: "us")]
+    partial.quotes(for: pair) { _ in }
+    partialProvider.responses.removeFirst()(["AAPL": quote, "BAD": quote])
+    RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+    now = now.addingTimeInterval(5)
+    partial.quotes(for: pair) { _ in }
+    partialProvider.responses.removeFirst()(["AAPL": quote])
+    RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+    now = now.addingTimeInterval(5)
+    partial.quotes(for: pair) { result in precondition(result["BAD"]?.price == quote.price) }
+    precondition(partialProvider.calls == 3, "one unavailable symbol must not slow healthy symbols")
+    precondition(partialProvider.requested.last?.map(\.symbol) == ["AAPL"], "failed symbols honor their own backoff")
+    partialProvider.responses.removeFirst()(["AAPL": quote])
+    RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+    precondition(partial.status == "Some quotes unavailable · showing last prices")
+    now = now.addingTimeInterval(25)
+    partial.quotes(for: pair) { _ in }
+    precondition(partialProvider.requested.last?.count == 2)
+    partialProvider.responses.removeFirst()(["AAPL": quote, "BAD": quote])
+    RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+    precondition(partial.status == "Updated", "recovered symbols clear the stale status")
+    print("PASS: partial failures retry independently while healthy prices keep refreshing")
+
+    let demoProvider = TestProvider(); demoProvider.name = "demo"
+    let demo = QuoteService(provider: demoProvider, interval: 5, now: { now })
+    demo.cadence = { _, _, _, _ in 1800 }
+    demo.quotes(for: entries) { _ in }; demoProvider.responses.removeFirst()(["AAPL": quote])
+    RunLoop.main.run(until: Date().addingTimeInterval(0.02)); now = now.addingTimeInterval(5)
+    demo.quotes(for: entries) { _ in }
+    precondition(demoProvider.calls == 2, "demo prices must keep moving when real markets are closed")
+    demoProvider.responses.removeFirst()(["AAPL": quote])
+    RunLoop.main.run(until: Date().addingTimeInterval(0.02))
 }

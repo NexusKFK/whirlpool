@@ -31,18 +31,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var hoverWatch: Timer?
     private var updater: UpdateChecker?
 
-    // ── 显示宽度=物理宽度,按 M 档字符数锚定(1 字符≈18pt)──
-    // 字号切换时按各面点距换算字符数,换字号不再改变条在屏上的实际宽度。
-    private func displayCols(dot: Int) -> Int {
-        max(4, Int((Double(config.defaultWidth) * 3.0 / Double(LEDLayout(dot: dot).colW)).rounded()))
+    /// Each surface owns a physical width. Font changes only round the LED viewport to its column pitch.
+    private var menuOuterWidth: CGFloat {
+        let legacy = Double(config.defaultWidth * 18) + (isTextMarquee ? 0 : 8)
+        return max(120, min(CGFloat(config.menuWidthPoints ?? legacy), menuBarScreenWidth * 0.40))
     }
 
-    /// 菜单栏面宽度上限:屏宽的 40%。整条行情流是浮动 bar 的主场,
-    /// 状态项过宽时 macOS 会在应用菜单较长时把它整个藏掉(看上去像"退出了")。
     private func menuBarCols(dot: Int) -> Int {
-        let screenW = menuBarScreenWidth
-        let cap = Int((screenW * 0.40 - 8) / Double(6 * LEDLayout(dot: dot).colW))
-        return max(8, min(displayCols(dot: dot), cap))
+        max(1, viewportColumns(for: menuSurface, pitch: LEDLayout(dot: dot).colW) / 6)
     }
 
     /// 菜单栏宽度上限按哪块屏算:指定的屏,否则主显示器——固定不变。
@@ -52,30 +48,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         (chosenScreen(config.displayScreen) ?? NSScreen.screens.first)?.frame.width ?? 1440
     }
 
-    // ── 系统字体跑马灯:3pt 一虚拟列,两面同宽 ──
+    // ── 系统字体跑马灯:3pt 一虚拟列 ──
     private var isTextMarquee: Bool { config.marqueeFont != "led" }
-    /// 文本视口按显示面各自封顶:菜单栏吃 40% 屏宽上限(过宽会被 macOS 藏掉);
-    /// 浮动条只受它所在屏的宽度限制(以前与菜单栏共用 40% 上限,只开浮动条时也被卡在 ~810pt)
-    private func textViewportCols(for view: MarqueeView?) -> Int {
-        let wanted = config.defaultWidth * 6
-        let cap: Int
+    private func viewportColumns(for view: MarqueeView?, pitch: Int) -> Int {
+        let contentWidth: CGFloat
         if view == nil || view === menuSurface {
-            cap = max(48, Int((menuBarScreenWidth * 0.40 - 8) / 3.0))
+            contentWidth = menuOuterWidth
         } else {
-            cap = max(48, Int((barScreenWidth - 60) / 3.0))
+            contentWidth = barWindow?.desiredContentWidth ?? 360
         }
-        return max(24, min(wanted, cap))
-    }
-
-    /// 浮动条所在屏的宽度(已放好就按实际所在屏,否则按设置里选的屏)
-    private var barScreenWidth: CGFloat {
-        (barWindow?.screen ?? placementScreen(config.displayScreen))?.frame.width ?? 1440
+        return max(1, Int((contentWidth - (isTextMarquee ? 0 : 8)) / CGFloat(pitch)))
     }
 
     /// 浮动条 LED 列数:按宽度设置,但不超出所在屏(留出胶囊边距)
     private func barCols(dot: Int) -> Int {
-        let cap = Int((barScreenWidth - 60) / Double(6 * LEDLayout(dot: dot).colW))
-        return max(8, min(displayCols(dot: dot), cap))
+        max(1, viewportColumns(for: barWindow?.surface, pitch: LEDLayout(dot: dot).colW) / 6)
     }
 
     private var marqueeNSFont: NSFont {
@@ -288,9 +275,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         engine.viewportCols = { [weak self] view in
             guard let self else { return 60 }
-            if self.isTextMarquee { return self.textViewportCols(for: view) }
-            let d = self.dot(for: view)
-            return visCols(displayWidth: view === self.menuSurface ? self.menuBarCols(dot: d) : self.barCols(dot: d))
+            let pitch = self.isTextMarquee ? 3 : LEDLayout(dot: self.dot(for: view)).colW
+            return self.viewportColumns(for: view, pitch: pitch)
         }
         engine.viewportWidth = { [weak self] view in
             guard let self else { return 180 }
@@ -360,7 +346,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// 状态项长度与浮动条尺寸跟随内容;固定长度免得 AppKit 反复重解内在尺寸
     private func syncSurfaceSizes() {
         if let si = statusItem, let surface = menuSurface {
-            let w = max(8, surface.contentWidth.rounded(.up))
+            let w = marqueeOn ? menuOuterWidth : max(8, surface.contentWidth.rounded(.up))
             if abs(si.length - w) > 0.5 { si.length = w }
         }
         barWindow?.fitContent()
@@ -708,8 +694,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         switch msg.kind {
         case .setWidth:
-            // 运行时覆盖宽度(不落盘);物理锚定下只改基准值,各面自行换算,下一轮生效
-            if let w = msg.width, w >= 5 { config.defaultWidth = min(TickerConfig.maxWidth, max(8, w)) }
+            // Legacy CLI widths still address both surfaces, in M-size character units.
+            if let w = msg.width, w >= 5 {
+                config.defaultWidth = min(TickerConfig.maxWidth, max(8, w))
+                config.menuWidthPoints = nil
+                config.barWidthFraction = nil
+                barWindow?.config = config
+                scheduleArtRefresh()
+            }
             return "ok"
         case .clearQueue:
             restartMarquee()
@@ -930,6 +922,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 bar.onHover = { [weak self] inside in self?.hover(inside) }
                 bar.onOptionClick = { [weak self] in self?.nextWatchlist() }
                 bar.onOriginChange = { [weak self] origin in self?.config.barOrigin = origin }
+                bar.onLayoutChange = { [weak self] layout in
+                    guard let self else { return }
+                    let widthChanged = self.config.barWidthFraction != layout.barWidthFraction
+                    self.config.barOrigin = layout.barOrigin
+                    self.config.barPlacement = layout.barPlacement
+                    self.config.barWidthFraction = layout.barWidthFraction
+                    self.configWindow?.syncLayout(from: self.config)
+                    if widthChanged { self.scheduleArtRefresh() }
+                }
+                bar.onScreenChange = { [weak self] in self?.scheduleArtRefresh() }
                 hook(bar.surface)
                 bar.surface.onHover = nil
                 barWindow = bar

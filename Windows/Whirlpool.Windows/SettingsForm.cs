@@ -7,6 +7,8 @@ internal sealed class SettingsForm : Form
 {
     private static readonly string[] DecimalChoices = ["Auto", "0", "1", "2", "3", "4", "5", "6", "7", "8"];
     private bool resetPositions;
+    private bool initializing = true, placementEdited, widthEdited;
+    private double? draftFreeCenter;
     private readonly Func<Settings>? currentSettings;
     private readonly Settings draft;
     private readonly List<Watchlist> lists;
@@ -16,13 +18,17 @@ internal sealed class SettingsForm : Form
     private readonly Button deleteList;
     private readonly ComboBox language = Combo([T("System Default"), "English", "简体中文"]);
     private readonly ComboBox source = Combo([T("Yahoo / Tencent"), T("Demo (simulated prices)")]);
-    private readonly ComboBox mode = Combo([T("Floating Ticker"), T("Quote Board"), T("Ticker + Board")]);
-    private readonly ComboBox theme = Combo([T("System Default"), T("Light"), T("Dark")]);
+    private readonly ChoiceCard tickerCard = new("Floating Ticker", "ticker");
+    private readonly ChoiceCard boardCard = new("Quote Board", "board");
+    private readonly Dictionary<string, ChoiceCard> themeCards = [];
+    private readonly Dictionary<string, ChoiceCard> placementCards = [];
+    private readonly DesktopPreview preview = new();
+    private readonly TrackBar width = new() { Minimum = 20, Maximum = 100, TickFrequency = 10, SmallChange = 1, LargeChange = 5, Width = 235, Height = 44, AccessibleName = T("Screen width") };
+    private readonly Label widthLabel = new() { AutoSize = true, ForeColor = Color.FromArgb(53, 94, 199), Margin = new(8, 10, 3, 3) };
     private readonly ComboBox screen = Combo([]);
     private readonly List<string> screenKeys = [];
     private readonly NumericUpDown interval = new() { Minimum = 5, Maximum = 3600, Width = 110 };
     private readonly NumericUpDown speed = new() { Minimum = 10, Maximum = 50, Width = 110 };
-    private readonly NumericUpDown width = new() { Minimum = 8, Maximum = Settings.MaxWidth, Width = 110 };
     private readonly CheckBox arrows = Check("Use ▲ / ▼ for price changes");
     private readonly CheckBox flash = Check("Flash changed price suffixes");
     private readonly CheckBox topmost = Check("Always on top");
@@ -43,28 +49,34 @@ internal sealed class SettingsForm : Form
         current = Math.Clamp(draft.ActiveWatchlist, 0, lists.Count - 1);
         deleteList = Button("Delete List", (_, _) => RemoveList());
         Text = T("Whirlpool Settings"); Font = new Font("Segoe UI", 10); AutoScaleMode = AutoScaleMode.Dpi;
-        Size = new(760, 680); MinimumSize = new(700, 620); StartPosition = FormStartPosition.CenterScreen;
+        Size = new(820, 790); MinimumSize = new(720, 560); StartPosition = FormStartPosition.CenterScreen;
+        var working = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1280, 800);
+        MinimumSize = new(Math.Min(720, working.Width - 32), Math.Min(560, working.Height - 32));
+        Size = new(Math.Min(Width, working.Width - 32), Math.Min(Height, working.Height - 32));
         var tabs = new TabControl { Dock = DockStyle.Fill, Padding = new Point(18, 8) };
-        tabs.TabPages.Add(WatchlistTab()); tabs.TabPages.Add(DisplayTab()); tabs.TabPages.Add(GeneralTab());
+        tabs.TabPages.Add(DisplayTab()); tabs.TabPages.Add(AppearanceTab()); tabs.TabPages.Add(WatchlistTab()); tabs.TabPages.Add(GeneralTab());
         var footer = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 56, FlowDirection = FlowDirection.RightToLeft, Padding = new(12), WrapContents = false };
         var save = Button("Save", (_, _) => Save()); var cancel = Button("Cancel", (_, _) => Close());
         footer.Controls.Add(save); footer.Controls.Add(cancel); AcceptButton = save; CancelButton = cancel;
         Controls.Add(tabs); Controls.Add(footer); Padding = new(14);
         language.SelectedIndex = Math.Max(0, Array.IndexOf(new[] { "system", "en", "zh-Hans" }, draft.Language));
         source.SelectedIndex = draft.Provider == "real" ? 0 : 1;
-        mode.SelectedIndex = draft.ShowTicker && draft.ShowBoard ? 2 : draft.ShowBoard ? 1 : 0;
-        theme.SelectedIndex = Math.Max(0, Array.IndexOf(new[] { "system", "light", "dark" }, draft.Theme));
+        tickerCard.Checked = draft.ShowTicker; boardCard.Checked = draft.ShowBoard;
+        themeCards[draft.Theme].Checked = true;
         screenKeys.Add("auto"); screen.Items.Add(T("Automatic (primary display)"));
         var screens = Screen.AllScreens;
         for (int i = 0; i < screens.Length; i++) { screenKeys.Add(screens[i].DeviceName); screen.Items.Add(WindowPlacement.Label(screens[i], i)); }
         if (!screenKeys.Contains(draft.DisplayScreen)) { screenKeys.Add(draft.DisplayScreen); screen.Items.Add(T("Disconnected display")); }
         screen.SelectedIndex = Math.Max(0, screenKeys.IndexOf(draft.DisplayScreen));
-        interval.Value = draft.RefreshSeconds; speed.Value = draft.ColumnsPerSecond; width.Value = draft.WidthCharacters;
+        interval.Value = draft.RefreshSeconds; speed.Value = draft.ColumnsPerSecond;
+        width.Minimum = Math.Min(20, (int)Math.Round(InitialFraction() * 100));
+        width.Value = Math.Clamp((int)Math.Round(InitialFraction() * 100), width.Minimum, 100);
         arrows.Checked = draft.ChangeArrows; flash.Checked = draft.FlashChanges; topmost.Checked = draft.AlwaysOnTop;
         hover.Checked = draft.HoverPause; smart.Checked = draft.SmartRefresh; updates.Checked = draft.CheckUpdates;
         locked.Checked = draft.LockPosition; through.Checked = draft.ClickThrough;
         login.Checked = LoginItem.Enabled;
         redUp.Checked = draft.RedUpMarkets.Contains("cn") && draft.RedUpMarkets.Contains("hk");
+        initializing = false; UpdatePreview();
         ReloadPicker(); LoadGrid();
         HandleCreated += (_, _) => WinTheme.TitleBar(this, WinTheme.SystemTone());
     }
@@ -168,17 +180,129 @@ internal sealed class SettingsForm : Form
     private TabPage DisplayTab()
     {
         var form = FormRows();
-        Row(form, "Display mode", mode); Row(form, "Screen", screen);
-        Wide(form, Note("The floating ticker and board open on this screen."));
-        Row(form, "Scroll speed", speed); Row(form, "Display width", width); Row(form, "Colors", theme);
-        Wide(form, new Label { Text = T("columns / sec") + " · " + T("characters"), AutoSize = true, ForeColor = SystemColors.GrayText });
-        Wide(form, arrows); Wide(form, flash); Wide(form, topmost); Wide(form, hover); Wide(form, locked); Wide(form, through);
-        Wide(form, Note("Flash color follows the previous quote; daily change keeps its own color."));
-        var resetLabel = new Label { AutoSize = true, ForeColor = SystemColors.GrayText };
-        Wide(form, Button("Reset Floating Windows", (_, _) => { resetPositions = true; resetLabel.Text = T("Window positions will reset after you save."); }));
-        Wide(form, resetLabel);
-        var page = Page("Display"); page.AutoScroll = true; page.Controls.Add(form); return page;
+        Wide(form, new Label { Text = T("Your desktop, your way"), AutoSize = true, Font = new Font(Font.FontFamily, 17, FontStyle.Bold), Margin = new(0, 0, 0, 8) });
+        Wide(form, Note("Choose what stays visible, then place it on your desktop."));
+        var surfaces = Flow(); surfaces.Controls.AddRange([tickerCard, boardCard]); Wide(form, surfaces);
+        tickerCard.CheckedChanged += (_, _) => { if (!initializing && !tickerCard.Checked && !boardCard.Checked) boardCard.Checked = true; UpdatePreview(); };
+        boardCard.CheckedChanged += (_, _) => { if (!initializing && !tickerCard.Checked && !boardCard.Checked) tickerCard.Checked = true; UpdatePreview(); };
+        Row(form, "Screen", screen);
+        screen.SelectedIndexChanged += (_, _) =>
+        {
+            if (initializing) return;
+            draftFreeCenter = null;
+            if (draft.TickerPlacement == "free") { draft.TickerOrigin = null; draft.TickerPlacement = "bottom-center"; placementEdited = true; }
+            UpdatePreview();
+        };
+        Wide(form, preview);
+        preview.Dragged += point => { placementEdited = true; draftFreeCenter = null; draft.TickerPlacement = "free"; draft.TickerOrigin = [point.X, point.Y]; UpdatePreview(); };
+        preview.WidthEdited += value => SetDraftWidth(value);
+        var anchors = new TableLayoutPanel { AutoSize = true, ColumnCount = 3, RowCount = 2, Margin = new(0) };
+        foreach (string key in TickerLayout.Placements.Where(p => p != "free"))
+        {
+            var card = new ChoiceCard(PlacementLabel(key), key, true) { Width = 96, Margin = new(0, 0, 4, 6), Font = new Font(Font.FontFamily, 9), AutoCheck = false };
+            card.Click += (_, _) => SelectPlacement(key);
+            placementCards[key] = card; anchors.Controls.Add(card);
+        }
+        var placementGroup = FormRows();
+        Wide(placementGroup, new Label { Text = T("Position"), AutoSize = true, Margin = new(0, 0, 0, 8) });
+        Wide(placementGroup, anchors);
+        var free = new ChoiceCard("Free position", "free", true) { Width = 150, AutoCheck = false };
+        free.Click += (_, _) => SelectPlacement("free"); placementCards["free"] = free;
+        Wide(placementGroup, free);
+        var widthGroup = FormRows(); widthGroup.Margin = new(14, 0, 0, 0);
+        Wide(widthGroup, new Label { Text = T("Screen width"), AutoSize = true, Margin = new(0, 0, 0, 8) });
+        var sliderRow = Flow(); sliderRow.Controls.AddRange([width, widthLabel]); Wide(widthGroup, sliderRow);
+        width.ValueChanged += (_, _) => { if (!initializing) SetDraftWidth(width.Value / 100.0); };
+        var presets = Flow();
+        foreach (var (label, fraction) in new[] { ("¼", .25), ("½", .5), ("⅔", 2.0 / 3), (T("Full width"), 1.0) })
+        {
+            var button = Button(label, (_, _) => SetDraftWidth(fraction));
+            presets.Controls.Add(button);
+        }
+        Wide(widthGroup, presets);
+        var layoutGroups = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2, Margin = new(0, 8, 0, 8) };
+        layoutGroups.ColumnStyles.Add(new(SizeType.Percent, 48)); layoutGroups.ColumnStyles.Add(new(SizeType.Percent, 52));
+        layoutGroups.Controls.Add(placementGroup, 0, 0); layoutGroups.Controls.Add(widthGroup, 1, 0); Wide(form, layoutGroups);
+        Wide(form, Note("Drag the ticker to place it. Drag either end to change its width."));
+        Wide(form, Note("Anchors stay attached to the available desktop. Centered tickers expand equally on both sides."));
+        Wide(form, topmost); Wide(form, locked); Wide(form, through);
+        locked.CheckedChanged += (_, _) => UpdatePreview(); through.CheckedChanged += (_, _) => UpdatePreview();
+        Wide(form, Button("Reset Floating Windows", (_, _) => { resetPositions = true; placementEdited = true; draftFreeCenter = null; draft.TickerOrigin = null; draft.BoardOrigin = null; draft.TickerPlacement = "bottom-center"; UpdatePreview(); }));
+        var page = Page("Layout"); page.AutoScroll = true; page.Controls.Add(form); return page;
     }
+
+    private TabPage AppearanceTab()
+    {
+        var form = FormRows();
+        Wide(form, new Label { Text = T("Appearance"), AutoSize = true, Font = new Font(Font.FontFamily, 17, FontStyle.Bold), Margin = new(0, 0, 0, 14) });
+        var themes = Flow();
+        foreach (var (key, title) in new[] { ("system", "System Default"), ("light", "Light"), ("dark", "Dark") })
+        {
+            var card = new ChoiceCard(title, key) { Width = 174, AutoCheck = false };
+            card.Click += (_, _) => { draft.Theme = key; foreach (var item in themeCards) item.Value.Checked = item.Key == key; UpdatePreview(); };
+            themeCards[key] = card; themes.Controls.Add(card);
+        }
+        Wide(form, themes); Row(form, "Scroll speed", speed); Wide(form, Note("columns / sec"));
+        Wide(form, arrows); Wide(form, flash); Wide(form, hover);
+        Wide(form, Note("Flash color follows the previous quote; daily change keeps its own color."));
+        var page = Page("Appearance"); page.AutoScroll = true; page.Controls.Add(form); return page;
+    }
+
+    private static string PlacementLabel(string key) => key switch
+    {
+        "top-left" => "Top left", "top-center" => "Top center", "top-right" => "Top right",
+        "bottom-left" => "Bottom left", "bottom-center" => "Bottom center", "bottom-right" => "Bottom right", _ => "Free position",
+    };
+
+    private string SelectedScreen => screenKeys.ElementAtOrDefault(screen.SelectedIndex) ?? draft.DisplayScreen;
+    private Rectangle SelectedWorkArea => (draft.TickerPlacement == "free" && draft.TickerOrigin is not null && SelectedScreen == draft.DisplayScreen
+        ? WindowPlacement.ForOrigin(draft.TickerOrigin, new(800, 40), SelectedScreen) : WindowPlacement.Target(SelectedScreen))?.WorkingArea ?? new(0, 0, 1920, 1040);
+    private int InitialWidth() => TickerLayout.Width(draft.TickerWidthFraction,
+        (draft.WidthCharacters * 18 + 16) * Math.Max(1, (int)Math.Round(DeviceDpi / 96.0)), SelectedWorkArea.Width);
+    private double InitialFraction() => InitialWidth() / (double)Math.Max(1, SelectedWorkArea.Width - 24);
+
+    private void SelectPlacement(string key)
+    {
+        placementEdited = true; draftFreeCenter = null;
+        if (key == "free" && draft.TickerPlacement != "free")
+        {
+            var area = SelectedWorkArea;
+            var origin = TickerLayout.Origin(draft.TickerPlacement, null, new(InitialWidth(), 38), area);
+            draft.TickerOrigin = [origin.X, origin.Y];
+        }
+        draft.TickerPlacement = key; UpdatePreview();
+    }
+
+    private void UpdatePreview()
+    {
+        if (initializing) return;
+        preview.WorkArea = SelectedWorkArea; preview.Fraction = InitialFraction(); preview.Placement = draft.TickerPlacement;
+        preview.FreeOrigin = draft.TickerOrigin is { Length: 2 } p ? new Point(p[0], p[1]) : null;
+        preview.TickerVisible = tickerCard.Checked; preview.BoardVisible = boardCard.Checked;
+        preview.LayoutLocked = locked.Checked || through.Checked; preview.PreviewTheme = draft.Theme;
+        widthLabel.Text = $"{preview.Fraction:P0}"; width.Enabled = tickerCard.Checked;
+        foreach (var pair in placementCards) { pair.Value.Checked = pair.Key == draft.TickerPlacement; pair.Value.Enabled = tickerCard.Checked; }
+        preview.Invalidate();
+    }
+
+    private void SetDraftWidth(double fraction)
+    {
+        var area = SelectedWorkArea;
+        int oldWidth = InitialWidth();
+        fraction = Math.Clamp(fraction, .2, 1);
+        if (draft.TickerPlacement == "free" && draft.TickerOrigin is { Length: 2 } saved)
+        {
+            draftFreeCenter ??= saved[0] + oldWidth / 2.0;
+            var size = new Size(TickerLayout.Width(fraction, 0, area.Width), 38);
+            var origin = WindowBounds.Clamp(new((int)Math.Round(draftFreeCenter.Value - size.Width / 2.0), saved[1]), size, area, 12);
+            draft.TickerOrigin = [origin.X, origin.Y];
+        }
+        widthEdited = true; draft.TickerWidthFraction = fraction;
+        initializing = true; width.Value = Math.Clamp((int)Math.Round(fraction * 100), 20, 100); initializing = false;
+        UpdatePreview();
+    }
+
+    private static FlowLayoutPanel Flow() => new() { AutoSize = true, Dock = DockStyle.Top, WrapContents = true, Margin = new(0) };
 
     private TabPage GeneralTab()
     {
@@ -225,15 +349,25 @@ internal sealed class SettingsForm : Form
         draft.Watchlists = lists; draft.ActiveWatchlist = current;
         draft.Language = new[] { "system", "en", "zh-Hans" }[Math.Max(0, language.SelectedIndex)];
         draft.Provider = source.SelectedIndex == 0 ? "real" : "demo";
-        draft.Theme = new[] { "system", "light", "dark" }[Math.Max(0, theme.SelectedIndex)];
-        draft.RefreshSeconds = (int)interval.Value; draft.ColumnsPerSecond = (int)speed.Value; draft.WidthCharacters = (int)width.Value;
-        draft.ShowTicker = mode.SelectedIndex != 1; draft.ShowBoard = mode.SelectedIndex != 0;
+        draft.RefreshSeconds = (int)interval.Value; draft.ColumnsPerSecond = (int)speed.Value;
+        draft.ShowTicker = tickerCard.Checked; draft.ShowBoard = boardCard.Checked;
         draft.ChangeArrows = arrows.Checked; draft.FlashChanges = flash.Checked; draft.AlwaysOnTop = topmost.Checked;
         draft.HoverPause = hover.Checked; draft.SmartRefresh = smart.Checked; draft.CheckUpdates = updates.Checked;
         draft.LockPosition = locked.Checked; draft.ClickThrough = through.Checked;
         var screenKey = screenKeys[Math.Max(0, screen.SelectedIndex)];
-        if (screenKey != draft.DisplayScreen || resetPositions) { draft.TickerOrigin = null; draft.BoardOrigin = null; }
-        else if (currentSettings?.Invoke() is { } latest) { draft.TickerOrigin = latest.TickerOrigin; draft.BoardOrigin = latest.BoardOrigin; }
+        bool screenEdited = screenKey != draft.DisplayScreen || resetPositions;
+        if (screenEdited) { if (!placementEdited) draft.TickerOrigin = null; draft.BoardOrigin = null; }
+        if (currentSettings?.Invoke() is { } latest)
+        {
+            TickerLayout.MergeLiveLayout(draft, latest, placementEdited, widthEdited, screenEdited);
+            if (widthEdited && !placementEdited && !screenEdited && draft.TickerPlacement == "free" && draft.TickerOrigin is { Length: 2 } saved)
+            {
+                var area = SelectedWorkArea;
+                int oldWidth = TickerLayout.Width(latest.TickerWidthFraction, latest.WidthCharacters * 18 * Math.Max(1, (int)Math.Round(DeviceDpi / 96.0)) + 16, area.Width);
+                var origin = TickerLayout.ResizeFreeOrigin(new(saved[0], saved[1]), oldWidth, new(TickerLayout.Width(draft.TickerWidthFraction, oldWidth, area.Width), 38), area);
+                draft.TickerOrigin = [origin.X, origin.Y];
+            }
+        }
         draft.DisplayScreen = screenKey;
         draft.RedUpMarkets.RemoveAll(m => m is "cn" or "hk"); if (redUp.Checked) draft.RedUpMarkets.AddRange(["cn", "hk"]);
         draft.Normalize();

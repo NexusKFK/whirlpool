@@ -59,7 +59,7 @@ if CommandLine.arguments.count > 1 {
         cliSend(msg); exit(0)
     }
 
-    // --mode marquee|board|bar|marquee,board|marquee,bar
+    // --mode accepts any nonempty comma-separated combination of marquee, bar and board.
     if let mode = value(for: ["--mode"]) {
         let msg = TickerMessage(kind: .setMode, text: mode, priority: .normal,
                                 duration: 0, onClickCommand: nil, width: nil)
@@ -107,7 +107,7 @@ if CommandLine.arguments.count > 1 {
           whirlpool --standby-urgent TEXT --duration N
           whirlpool --standby-very-urgent TEXT --duration N
           whirlpool --width N
-          whirlpool --mode marquee|board|bar|marquee,board|marquee,bar
+          whirlpool --mode marquee|bar|board|marquee,bar|marquee,board|bar,board|marquee,bar,board
           whirlpool --list NAME|N|next|prev
           whirlpool --settings
           whirlpool --restart

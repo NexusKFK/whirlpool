@@ -21,7 +21,7 @@ Edit `Shared/localization.json`, then run `python3 tools/generate-localizations.
 
 1. Run both sets of core checks. Inspect settings in English and Chinese.
 2. Update `Info.plist`, the Windows project version, and `CHANGELOG.md` together.
-3. Build macOS with `bash build-app.sh --arch arm64 --arch x86_64` and verify `codesign --verify --deep --strict Whirlpool.app`.
+3. Build macOS with `bash build-app.sh --arch arm64 --arch x86_64` and verify `codesign --verify --deep --strict .build/apps.noindex/Whirlpool.app`. Install one copy in `/Applications`; keep generated bundles out of the tracked source tree.
 4. Publish Windows using the command in the README. Do not claim native Windows QA from a cross-build. Complete `docs/WINDOWS-TESTING.md` on real Windows before promoting the preview.
 5. Create archives using `bash tools/package-release.sh`. Include license/attribution and the Windows test checklist.
 6. Scan the staged files for secrets/private configurations. Do not commit `dist/`, `.build/`, `bin/`, `obj/`, or user data.

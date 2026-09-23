@@ -17,7 +17,11 @@ public static class UpdateChecker
     public static int[]? ParseVersion(string text)
     {
         var match = Regex.Match(text ?? "", @"\d+(\.\d+)+");
-        return match.Success ? match.Value.Split('.').Select(int.Parse).ToArray() : null;
+        if (!match.Success) return null;
+        var parts = match.Value.Split('.');
+        var numbers = new int[parts.Length];
+        for (int i = 0; i < parts.Length; i++) if (!int.TryParse(parts[i], out numbers[i])) return null;
+        return numbers;
     }
 
     public static bool IsNewer(string candidate, string current)
@@ -36,12 +40,14 @@ public static class UpdateChecker
     {
         using var document = JsonDocument.Parse(json);
         var root = document.RootElement;
+        if (root.ValueKind != JsonValueKind.Object) return null;
         if (root.TryGetProperty("draft", out var draft) && draft.ValueKind == JsonValueKind.True) return null;
         if (root.TryGetProperty("prerelease", out var pre) && pre.ValueKind == JsonValueKind.True) return null;
-        var tag = root.TryGetProperty("tag_name", out var t) ? t.GetString() ?? "" : "";
-        var name = root.TryGetProperty("name", out var n) ? n.GetString() ?? tag : tag;
+        var tag = root.TryGetProperty("tag_name", out var t) && t.ValueKind == JsonValueKind.String ? t.GetString() ?? "" : "";
+        var name = root.TryGetProperty("name", out var n) && n.ValueKind == JsonValueKind.String ? n.GetString() ?? tag : tag;
         if ((ParseVersion(tag) ?? ParseVersion(name)) is not { } numbers) return null;
-        var page = root.TryGetProperty("html_url", out var u) && Uri.TryCreate(u.GetString(), UriKind.Absolute, out var parsed) ? parsed : ReleasesPage;
+        var page = root.TryGetProperty("html_url", out var u) && u.ValueKind == JsonValueKind.String
+            && Uri.TryCreate(u.GetString(), UriKind.Absolute, out var parsed) ? parsed : ReleasesPage;
         return new(string.Join('.', numbers), name, page);
     }
 

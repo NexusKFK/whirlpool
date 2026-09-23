@@ -3,7 +3,7 @@ import Foundation
 // 真实行情源,免 key 双链:
 //   美股/指数/加密  Yahoo 公开 chart 端点(yfinance 同源,Swift 原生调用)
 //   A股/港股        腾讯 qt.gtimg.cn 实时链(GBK)+ ifzq 分钟线端点
-// 任一腿失败不影响另一腿;全部失败回调空字典,显示层自会 15s 重试。
+// 任一腿失败不影响另一腿;全部失败回调空字典,由 QuoteService 统一退避重试。
 // 分钟线从同一响应/附加端点取,降采样到 60 点喂 board 缩略图。
 
 final class RealProvider: QuoteProvider {
