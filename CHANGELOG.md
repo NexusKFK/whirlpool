@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.0.2 (unreleased)
+
+- macOS menu-bar right-click menus size to their contents and open at the clicked position, independently of the ticker width. Opening or closing the menu preserves the ticker's expanded or collapsed size.
+- Native menu regression checks cover English and Chinese menus with both wide tickers and compact restore buttons.
+
+中文：修复右键菜单被菜单栏行情条撑宽的问题。菜单在点击位置按内容宽度弹出，不改变行情条尺寸；增加中英文、展开和收起状态下的原生菜单回归检查。
+
 ## 2.0.1 (unreleased)
 
 - macOS collapse now shrinks the menu-bar item to the `<w` restore button instead of leaving it at the left end of an empty full-width ticker. Expanding restores the configured width; quote-loading and standby states retain their intended geometry.
