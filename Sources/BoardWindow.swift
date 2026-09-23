@@ -11,7 +11,7 @@ final class BoardWindow: NSPanel, NSWindowDelegate {
     private var programmaticMove = false
     private var lastPrices: [String: Double] = [:]   // 上一笔价格,只闪变化位及后续小位
     private var lastUpdate: (entries: [WatchEntry], quotes: [String: Quote], redUp: [String],
-                             date: Date, arrows: Bool, status: String)?
+                             date: Date, arrows: Bool, status: String, now: Date)?
     private var saveWork: DispatchWorkItem?
     /// 双击/右键某行打开图表
     var onOpenChart: ((WatchEntry) -> Void)?
@@ -26,6 +26,12 @@ final class BoardWindow: NSPanel, NSWindowDelegate {
                 resetPriceHistory()
                 update(entries: config.watchlist, quotes: [:], redUpMarkets: config.redUpMarkets,
                        at: Date(), status: "Loading quotes…")
+            } else if oldValue.marqueeFont != config.marqueeFont || oldValue.ledDotSize != config.ledDotSize
+                || oldValue.transparentColor != config.transparentColor || oldValue.marqueeBlink != config.marqueeBlink
+                || oldValue.changeArrows != config.changeArrows || oldValue.redUpMarkets != config.redUpMarkets {
+                lastUpdate?.arrows = config.changeArrows
+                lastUpdate?.redUp = config.redUpMarkets
+                redraw()
             }
             if oldValue.boardOrigin != config.boardOrigin || oldValue.displayScreen != config.displayScreen
                 || oldValue.boardCorner != config.boardCorner { reposition() }
@@ -56,17 +62,17 @@ final class BoardWindow: NSPanel, NSWindowDelegate {
         container.layer?.masksToBounds = true
         container.onAppearanceChange = { [weak self] in self?.redraw() }
         contentView = container
-
-        reposition()
+        update(entries: config.watchlist, quotes: [:], redUpMarkets: config.redUpMarkets,
+               at: Date(), changeArrows: config.changeArrows, status: "Loading quotes…")
     }
 
     func update(entries: [WatchEntry], quotes: [String: Quote], redUpMarkets: [String],
-                at date: Date, changeArrows: Bool = true, status: String = "Updated") {
-        lastUpdate = (entries, quotes, redUpMarkets, date, changeArrows, status)
+                at date: Date, changeArrows: Bool = true, status: String = "Updated", now: Date = Date()) {
+        lastUpdate = (entries, quotes, redUpMarkets, date, changeArrows, status, now)
         // 点阵字把颜色烤进位图:必须按报价卡自己的明暗解析 labelColor 等动态色
         container.effectiveAppearance.performAsCurrentDrawingAppearance {
             build(entries: entries, quotes: quotes, redUpMarkets: redUpMarkets, at: date,
-                  changeArrows: changeArrows, status: status, flash: true)
+                  changeArrows: changeArrows, status: status, flash: true, now: now)
         }
         lastPrices = lastPrices.filter { key, _ in entries.contains { $0.symbol == key } }
         for e in entries {
@@ -79,22 +85,39 @@ final class BoardWindow: NSPanel, NSWindowDelegate {
         guard let u = lastUpdate else { return }
         container.effectiveAppearance.performAsCurrentDrawingAppearance {
             build(entries: u.entries, quotes: u.quotes, redUpMarkets: u.redUp, at: u.date,
-                  changeArrows: u.arrows, status: u.status, flash: false)
+                  changeArrows: u.arrows, status: u.status, flash: false, now: u.now)
         }
     }
 
     private func build(entries: [WatchEntry], quotes: [String: Quote], redUpMarkets: [String],
-                       at date: Date, changeArrows: Bool, status: String, flash: Bool) {
-        let rowsData = QuoteEngine.boardRows(entries: entries, quotes: quotes,
-                                             changeArrows: changeArrows)
+                       at date: Date, changeArrows: Bool, status: String, flash: Bool, now: Date) {
+        let rowsData = QuoteEngine.boardRows(entries: entries, quotes: quotes, changeArrows: changeArrows)
         container.subviews.forEach { $0.removeFromSuperview() }
-        let style = LEDStyle(tone: Tone.of(container.effectiveAppearance))
-
-        let pixel = config.boardPixelFont
-        let W: CGFloat = pixel ? max(250, Self.fittedWidth(rows: rowsData)) : 250
-        let inset: CGFloat = 10
-        let rowH: CGFloat = pixel ? 24 : 22
-        let H = inset * 2 + CGFloat(rowsData.count) * rowH + 18
+        let style = LEDStyle(tone: Tone.of(container.effectiveAppearance), mono: config.colorScheme == .mono)
+        let base = style.nsColor(config.colorScheme.baseColor)
+        let state = BoardStatus.make(entries: entries, quotes: quotes, provider: config.provider,
+                                     status: status, checkedAt: date, now: now)
+        let pixel = config.marqueeFont == "led"
+        let dot = config.ledDotSize
+        let fontSize: CGFloat = dot == 1 ? 12 : dot == 3 ? 17 : 14
+        let font: NSFont = config.marqueeFont == "mono"
+            ? .monospacedSystemFont(ofSize: fontSize, weight: .regular)
+            : .monospacedDigitSystemFont(ofSize: fontSize, weight: .regular)
+        func measure(_ text: String) -> CGFloat {
+            if pixel { return Self.pixelTextWidth(text, dot: dot) }
+            // NSTextField has its own text insets; NSString width alone clips
+            // the last digit or percent sign, particularly with tabular fonts.
+            return ceil(Self.textLabel(text, font: font, color: base, flash: nil, style: style, alignment: .right).frame.width)
+        }
+        // Measure columns independently: their longest values may be on different rows.
+        let symbolW = rowsData.map { measure($0.symbol) }.max() ?? 36
+        let priceW = rowsData.map { measure($0.price) }.max() ?? 60
+        let changeW = rowsData.map { measure($0.change) }.max() ?? 60
+        let inset: CGFloat = 12, gap: CGFloat = 12, sparkW: CGFloat = 64
+        let W = max(300, inset * 2 + symbolW + priceW + changeW + sparkW + gap * 3)
+        let rowH: CGFloat = pixel ? CGFloat(8 * dot + 8) : ceil(font.ascender - font.descender) + 8
+        let footerH: CGFloat = 16, footerBottom: CGFloat = 6, footerGap: CGFloat = 2, top: CGFloat = 8
+        let H = top + CGFloat(rowsData.count) * rowH + footerGap + footerH + footerBottom
 
         programmaticMove = true
         setFrame(NSRect(x: frame.origin.x, y: frame.origin.y, width: W, height: H), display: false)
@@ -102,76 +125,74 @@ final class BoardWindow: NSPanel, NSWindowDelegate {
 
         let rowW = W - inset * 2
         for (i, r) in rowsData.enumerated() {
-            let y = H - inset - CGFloat(i + 1) * rowH
+            let y = H - top - CGFloat(i + 1) * rowH
             let row = BoardRowView(frame: NSRect(x: inset, y: y, width: rowW, height: rowH))
-            row.entry = WatchEntry(symbol: r.symbol, market: r.market)
+            row.entry = entries.first { $0.symbol == r.symbol }
             row.onOpenChart = { [weak self] e in self?.onOpenChart?(e) }
             row.menuProvider = { [weak self] in self?.menuProvider?() }
             row.locked = config.lockPosition
             row.toolTip = L("Double-click to open chart")
-            let priceFlash = flash ? quotes[r.symbol].flatMap {
+            if state.closedSymbols.contains(r.symbol) { row.toolTip! += "\n" + L("Markets closed") }
+            if let time = quotes[r.symbol]?.marketTime {
+                row.toolTip! += " · " + L("Last quote") + " " + BoardStatus.timestamp(time, relativeTo: now)
+            }
+            let priceFlash = flash && config.marqueeBlink && !state.closedSymbols.contains(r.symbol) ? quotes[r.symbol].flatMap {
                 PriceFlash.between(lastPrices[r.symbol], and: $0.price,
                                    redUp: redUpMarkets.contains(r.market), decimals: r.decimals)
             } : nil
-
-            // 平盘白,其余按市场习惯红涨绿跌/绿涨红跌
-            let color: NSColor
-            if r.flat {
-                color = .labelColor
-            } else {
-                color = redUpMarkets.contains(r.market)
-                    ? (r.up ? .systemRed : .systemGreen)
-                    : (r.up ? .systemGreen : .systemRed)
-            }
-
-            let labelW = rowW - 74
+            let red = r.up == redUpMarkets.contains(r.market)
+            let color = r.flat ? base : style.nsColor(red ? .red : .green)
+            let changeX = rowW - sparkW - gap - changeW
+            let priceX = changeX - gap - priceW
+            let symbolWidth = priceX - gap
             if pixel {
-                // 像素字体:三段点阵图,符号左、价格/涨跌右,与跑马灯同款字形
-                let base = NSColor.labelColor
-                let symIV  = Self.pixelIV(r.symbol, base)
-                let pxIV   = Self.pixelIV(r.price, base, flash: priceFlash, style: style)
-                let chgIV  = Self.pixelIV(r.change, color)
+                let symIV = Self.pixelIV(r.symbol, base, dot: dot)
+                let pxIV = Self.pixelIV(r.price, base, flash: priceFlash, style: style, dot: dot)
+                let chgIV = Self.pixelIV(r.change, color, dot: dot)
                 let cy = (rowH - symIV.frame.height) / 2
-                chgIV.frame.origin = NSPoint(x: labelW - chgIV.frame.width, y: cy)
-                pxIV.frame.origin  = NSPoint(x: chgIV.frame.minX - 4 - pxIV.frame.width, y: cy)
+                chgIV.frame.origin = NSPoint(x: changeX + changeW - chgIV.frame.width, y: cy)
+                pxIV.frame.origin = NSPoint(x: priceX + priceW - pxIV.frame.width, y: cy)
                 symIV.frame.origin = NSPoint(x: 0, y: cy)
-                row.addSubview(symIV)
-                row.addSubview(pxIV)
-                row.addSubview(chgIV)
+                symIV.identifier = .init("board-symbol"); pxIV.identifier = .init("board-price"); chgIV.identifier = .init("board-change")
+                symIV.setAccessibilityLabel(r.symbol); pxIV.setAccessibilityLabel(r.price); chgIV.setAccessibilityLabel(r.change)
+                row.addSubview(symIV); row.addSubview(pxIV); row.addSubview(chgIV)
             } else {
-                let label = Self.rowLabel(r, color: color, width: labelW, flash: priceFlash, style: style)
-                label.frame = NSRect(x: 0, y: 2, width: labelW, height: rowH - 4)
-                row.addSubview(label)
+                for (key, text, x, width, tint, pulse) in [
+                    ("symbol", r.symbol, CGFloat(0), symbolWidth, base, nil as PriceFlash?),
+                    ("price", r.price, priceX, priceW, base, priceFlash),
+                    ("change", r.change, changeX, changeW, color, nil as PriceFlash?)
+                ] {
+                    let label = Self.textLabel(text, font: font, color: tint, flash: pulse, style: style,
+                                               alignment: key == "symbol" ? .left : .right)
+                    label.identifier = .init("board-" + key)
+                    label.frame = NSRect(x: x, y: floor((rowH - label.frame.height) / 2), width: width, height: label.frame.height)
+                    row.addSubview(label)
+                }
             }
 
             if let pts = r.series, pts.count > 1 {
-                let spark = SparklineView(frame: NSRect(x: rowW - 70, y: 3, width: 66, height: rowH - 6))
+                let spark = SparklineView(frame: NSRect(x: rowW - sparkW, y: 4, width: sparkW, height: rowH - 8))
                 spark.points = pts
                 spark.lineColor = color
                 if let q = quotes[r.symbol] {
-                    if q.changePct > -99 {
-                        spark.baseline = q.price / (1 + q.changePct / 100)   // 昨收
-                    }
-                    if let st = q.sessionStart, let en = q.sessionEnd {
-                        spark.session = (st, en)
-                    }
+                    if q.changePct > -99 { spark.baseline = q.price / (1 + q.changePct / 100) }
+                    if let st = q.sessionStart, let en = q.sessionEnd { spark.session = (st, en) }
                 }
                 row.addSubview(spark)
             }
-
             container.addSubview(row)
         }
 
-        let footer = NSTextField(labelWithString: L(status) + (rowsData.isEmpty ? "" : " · " + DateFormatter.localizedString(from: date, dateStyle: .none, timeStyle: .medium)))
-        footer.font = .systemFont(ofSize: 9)
+        let footer = NSTextField(labelWithString: state.text)
+        footer.identifier = .init("board-status")
+        footer.font = .systemFont(ofSize: 10)
         footer.textColor = .secondaryLabelColor
         footer.lineBreakMode = .byTruncatingTail
-        footer.frame = NSRect(x: inset, y: 4, width: rowW, height: 14)
-        footer.toolTip = footer.stringValue
+        footer.frame = NSRect(x: inset, y: footerBottom, width: rowW, height: footerH)
+        footer.toolTip = state.detail
         container.addSubview(footer)
-
-        // 右角锚定随实际宽度重算(手动拖过的位置不动)
-        if config.boardOrigin == nil { reposition() }
+        // Enlarging the font must not strand a manually positioned board offscreen.
+        reposition()
     }
 
     func resetPriceHistory() { lastPrices = [:] }
@@ -186,8 +207,13 @@ final class BoardWindow: NSPanel, NSWindowDelegate {
 
     func reposition() {
         if let origin = reachableOrigin(config.boardOrigin, size: frame.size) {
+            let proposed = NSRect(origin: origin, size: frame.size)
+            let screen = NSScreen.screens.max {
+                let a = $0.frame.intersection(proposed), b = $1.frame.intersection(proposed)
+                return a.width * a.height < b.width * b.height
+            }
             programmaticMove = true
-            setFrameOrigin(origin)
+            setFrameOrigin(screen.map { constrainedFrame(proposed, inside: $0.frame, margin: 0).origin } ?? origin)
             programmaticMove = false
             return
         }
@@ -217,77 +243,44 @@ final class BoardWindow: NSPanel, NSWindowDelegate {
     }
 
     // ── 行渲染 ───────────────────────────────────────────────────────────────
-    // 单条 attributed label + 右对齐 tab 站:代码左,价格/涨跌幅右,等宽数字对齐。
 
-    /// 像素模式卡宽按内容自适应:量出最长一行的三段点阵宽度,
-    /// 加 sparkline 与内边距,上限 460(字太长宁可换行观感也不无限拉宽)
-    private static func fittedWidth(rows: [BoardRow]) -> CGFloat {
-        var textW: CGFloat = 0
-        for r in rows {
-            let w = pixelTextWidth(r.symbol) + 6 + pixelTextWidth(r.price)
-                  + 4 + pixelTextWidth(r.change)
-            textW = max(textW, w)
-        }
-        return min(460, 10 * 2 + textW + 74 + 10)
-    }
-
-    private static func pixelTextWidth(_ s: String) -> CGFloat {
-        var cols = 0
-        for ch in s.uppercased() {
-            if FONT[ch] != nil { cols += 6 }
-        }
-        return CGFloat(cols) * 2   // dot 1 + gap 1 = 2pt/列
+    private static func pixelTextWidth(_ text: String, dot: Int) -> CGFloat {
+        CGFloat(text.uppercased().reduce(0) { $0 + (FONT[$1]?.count ?? 0) } * dot + 2)
     }
 
     private static func pixelIV(_ text: String, _ color: NSColor, flash: PriceFlash? = nil,
-                                style: LEDStyle = LEDStyle()) -> NSImageView {
-        let normal = renderPixelText([(text: text, color: color)])
+                                style: LEDStyle = LEDStyle(), dot: Int) -> NSImageView {
+        let normal = renderPixelText([(text: text, color: color)], dot: dot)
         let img = flash.map {
-            renderPixelText([(text: $0.prefix, color: color), (text: $0.suffix, color: style.nsColor($0.color))])
+            renderPixelText([(text: $0.prefix, color: color), (text: $0.suffix, color: style.nsColor($0.color))], dot: dot)
         } ?? normal
         let iv = NSImageView(image: img)
         iv.imageScaling = .scaleNone
         iv.frame = NSRect(origin: .zero, size: img.size)
         if flash != nil {
-            DispatchQueue.main.asyncAfter(deadline: .now() + PriceFlash.duration) { [weak iv] in
-                iv?.image = normal
-            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + PriceFlash.duration) { [weak iv] in iv?.image = normal }
         }
         return iv
     }
 
-    private static func rowLabel(_ r: BoardRow, color: NSColor, width: CGFloat,
-                                 flash: PriceFlash?, style: LEDStyle = LEDStyle()) -> NSTextField {
-        let para = NSMutableParagraphStyle()
-        para.tabStops = [
-            NSTextTab(type: .rightTabStopType, location: width - 64),
-            NSTextTab(type: .rightTabStopType, location: width),
-        ]
-        let text = "\(r.symbol)\t\(r.price)\t\(r.change)"
-        let attr = NSMutableAttributedString(string: text, attributes: [
-            .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular),
-            .foregroundColor: NSColor.labelColor,
-            .paragraphStyle: para,
-        ])
-        attr.addAttribute(.font,
-                          value: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .semibold),
-                          range: NSRange(location: 0, length: r.symbol.utf16.count))
-        let prefixLen = r.symbol.utf16.count + 1 + r.price.utf16.count + 1
-        attr.addAttribute(.foregroundColor, value: color,
-                          range: NSRange(location: prefixLen, length: r.change.utf16.count))
+    private static func textLabel(_ text: String, font: NSFont, color: NSColor,
+                                  flash: PriceFlash?, style: LEDStyle, alignment: NSTextAlignment) -> NSTextField {
+        let paragraph = NSMutableParagraphStyle(); paragraph.alignment = alignment; paragraph.lineBreakMode = .byClipping
+        let attr = NSAttributedString(string: text, attributes: [.font: font, .foregroundColor: color, .paragraphStyle: paragraph])
         let label = NSTextField(labelWithAttributedString: attr)
+        label.maximumNumberOfLines = 1
+        label.lineBreakMode = .byClipping
         if let flash {
             let highlighted = NSMutableAttributedString(attributedString: attr)
             highlighted.addAttribute(.foregroundColor, value: style.nsColor(flash.color),
-                                     range: NSRange(location: r.symbol.utf16.count + 1 + flash.prefix.utf16.count,
-                                                    length: flash.suffix.utf16.count))
+                                     range: NSRange(location: flash.prefix.utf16.count, length: flash.suffix.utf16.count))
             label.attributedStringValue = highlighted
-            DispatchQueue.main.asyncAfter(deadline: .now() + PriceFlash.duration) { [weak label] in
-                label?.attributedStringValue = attr
-            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + PriceFlash.duration) { [weak label] in label?.attributedStringValue = attr }
         }
+        label.sizeToFit()
         return label
     }
+
 }
 
 /// 报价卡底板:明暗切换时通知重画(点阵字颜色是烤进位图的)
@@ -338,6 +331,17 @@ final class SparklineView: NSView {
     override var isFlipped: Bool { true }
     override var isOpaque: Bool { false }
 
+    /// Before the next open Yahoo may return the previous day's points with
+    /// today's trading period. Keep that completed curve spread across its own
+    /// time range instead of clamping every point to the left edge.
+    static func timeRange(points: [SeriesPt], session: (start: Double, end: Double)?) -> (start: Double, end: Double)? {
+        guard let first = points.map(\.t).min(), let last = points.map(\.t).max(), last > first else { return nil }
+        if let session, session.end > session.start, first >= session.start, last <= session.end {
+            return session
+        }
+        return (first, last)
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         guard points.count > 1 else { return }
         let minV = points.map(\.v).min()!, maxV = points.map(\.v).max()!
@@ -355,6 +359,7 @@ final class SparklineView: NSView {
 
         let n = points.count
         let inset: CGFloat = 1.5
+        let timeRange = Self.timeRange(points: points, session: session)
 
         // 昨收基准虚线
         if baseline != nil {
@@ -374,7 +379,7 @@ final class SparklineView: NSView {
         var coords: [NSPoint] = []
         for (i, p) in points.enumerated() {
             let frac: CGFloat
-            if let se = session, se.end > se.start {
+            if let se = timeRange {
                 let f = (p.t - se.start) / (se.end - se.start)
                 frac = CGFloat(min(1.0, max(0.0, f)))
             } else {

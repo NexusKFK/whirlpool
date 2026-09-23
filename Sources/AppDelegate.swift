@@ -596,6 +596,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard let key = sender.representedObject as? String else { return }
         config.transparentColor = key
         saveConfig(config)
+        board?.config = config
         engine.refreshArt()
     }
 

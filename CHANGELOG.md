@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.0.4 (unreleased)
+
+- macOS quote boards follow the shared font, size and color scheme, including monochrome and light/dark appearance. Appearance changes repaint cached quotes immediately; the legacy board-only font toggle is retired. The shared price-flash switch now applies to the board. Initial loading displays a status immediately.
+- Quote columns are measured independently with native text-cell widths, keeping long prices and percent signs visible. Spacing before the footer is reduced, and changing the font keeps manually placed cards on screen.
+- Closed markets retain prices and daily-change colors without tick flashes. The footer shows the last actual quote time, while the tooltip separately reports the retrieval time. Mixed markets, demo data and feed errors retain their own state.
+- Previous-session sparklines no longer collapse to a vertical line when Yahoo returns a newer trading-period window. Live intraday lines still use the full-session axis.
+- Restored existing Chinese settings strings to the shared localization catalog so regeneration preserves them.
+- Added board regressions for all fonts, palette/appearance changes, layout, price-flash behavior, closed/live/mixed market states and historical chart axes, with English/Chinese light/dark renders. Windows remains a cross-compiled preview; these board appearance changes apply to macOS.
+
+中文：报价卡统一跟随字体、字号、配色与系统明暗，删除旧的独立字体开关；各列按实际内容对齐，收紧底部间距并修复字符裁切。休市保留最近价格与当日涨跌色、停止价格闪动，显示行情时间而非检查时间，错误提示仍保留。修复旧交易日曲线被新时段挤成竖线的问题。Windows 继续提供交叉编译预览版，本轮卡片外观修复针对 macOS。
+
 ## 2.0.3 (unreleased)
 
 - macOS settings cards use persistent button states and track clicks across the entire drawn card, including blank space and icons. Display regions, font, size, palette, background and anchor choices stay selected after clicking; the last display region stays enabled.
