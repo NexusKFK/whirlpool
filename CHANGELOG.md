@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.0.3 (unreleased)
+
+- macOS settings cards use persistent button states and track clicks across the entire drawn card, including blank space and icons. Display regions, font, size, palette, background and anchor choices stay selected after clicking; the last display region stays enabled.
+- Settings use a top-aligned layout, a single highlighted sidebar item, consistent panels and spacing, a smaller desktop preview and normally sized reset actions. Floating-window controls appear only when relevant. Long instructions wrap at the available width, and the footer stays reachable on smaller windows.
+- Menu width settings and the live ticker share the same screen cap. Existing wider preferences are preserved and show both the requested and effective width.
+- Windows settings also retain the last selected region, keep draft previews editable while actual windows are locked or click-through, and switch to the watchlist page when validation finds an invalid list. These Windows UI paths remain pending native acceptance.
+- Added full-card hit-region checks, all seven macOS display combinations, selection persistence, saved appearance, and native English/Chinese light/dark settings renders. Existing price, network, window, menu and configuration regressions pass.
+
+中文：修复设置卡片点击范围与图形不一致、选中状态被按钮复位的问题；显示区域、字体、字号、配色、背景及停靠按钮统一修复。重整侧栏、分组、间距和操作按钮，页面顶部对齐，小窗口滚动且保存栏始终可见。菜单栏宽度明确显示当前屏幕实际值并保留旧设置。Windows 同步修复最后显示区域被切换、锁定影响草稿预览和错误自选池定位，仍待 Windows 实机验收。
+
 ## 2.0.2 (unreleased)
 
 - macOS menu-bar right-click menus size to their contents and open at the clicked position, independently of the ticker width. Opening or closing the menu preserves the ticker's expanded or collapsed size.

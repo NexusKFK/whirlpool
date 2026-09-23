@@ -18,6 +18,21 @@ internal static class SmokeTest
             using var ticker = new TickerForm();
             using var board = new BoardForm();
             settings.CreateControl(); ticker.CreateControl(); board.CreateControl();
+            static IEnumerable<Control> Descendants(Control root) => root.Controls.Cast<Control>()
+                .SelectMany(child => new[] { child }.Concat(Descendants(child)));
+            var controls = Descendants(settings).ToArray();
+            var tickerChoice = controls.OfType<ChoiceCard>().Single(c => c.Illustration == "ticker");
+            var boardChoice = controls.OfType<ChoiceCard>().Single(c => c.Illustration == "board");
+            tickerChoice.Checked = true; boardChoice.Checked = false; tickerChoice.Checked = false;
+            if (!tickerChoice.Checked || boardChoice.Checked)
+                throw new Exception("Turning off the last display must keep that display selected.");
+            boardChoice.Checked = true; tickerChoice.Checked = false; boardChoice.Checked = false;
+            if (tickerChoice.Checked || !boardChoice.Checked)
+                throw new Exception("The last quote board must not silently switch to a ticker.");
+            foreach (var title in new[] { "Lock floating windows in place", "Let clicks pass through the floating ticker (turn off from the tray menu)" })
+                controls.OfType<CheckBox>().Single(c => c.Text == I18n.T(title)).Checked = true;
+            if (controls.OfType<DesktopPreview>().Single().LayoutLocked)
+                throw new Exception("Real-window locks must not disable editing the settings preview.");
             ticker.Configure(config); board.Configure(config);
             var area = WindowPlacement.Target(config.DisplayScreen)!.WorkingArea;
             foreach (string anchor in TickerLayout.Placements.Where(p => p != "free"))

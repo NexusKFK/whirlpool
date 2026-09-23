@@ -11,6 +11,7 @@ internal sealed class SettingsForm : Form
     private double? draftFreeCenter;
     private readonly Func<Settings>? currentSettings;
     private readonly Settings draft;
+    private readonly TabControl tabs = new() { Dock = DockStyle.Fill, Padding = new Point(18, 8) };
     private readonly List<Watchlist> lists;
     private int current;
     private readonly DataGridView list = new() { Dock = DockStyle.Fill, AllowUserToAddRows = false, RowHeadersVisible = false, SelectionMode = DataGridViewSelectionMode.FullRowSelect, MultiSelect = false, AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill, BackgroundColor = SystemColors.Window, BorderStyle = BorderStyle.FixedSingle };
@@ -53,7 +54,6 @@ internal sealed class SettingsForm : Form
         var working = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1280, 800);
         MinimumSize = new(Math.Min(720, working.Width - 32), Math.Min(560, working.Height - 32));
         Size = new(Math.Min(Width, working.Width - 32), Math.Min(Height, working.Height - 32));
-        var tabs = new TabControl { Dock = DockStyle.Fill, Padding = new Point(18, 8) };
         tabs.TabPages.Add(DisplayTab()); tabs.TabPages.Add(AppearanceTab()); tabs.TabPages.Add(WatchlistTab()); tabs.TabPages.Add(GeneralTab());
         var footer = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 56, FlowDirection = FlowDirection.RightToLeft, Padding = new(12), WrapContents = false };
         var save = Button("Save", (_, _) => Save()); var cancel = Button("Cancel", (_, _) => Close());
@@ -183,8 +183,8 @@ internal sealed class SettingsForm : Form
         Wide(form, new Label { Text = T("Your desktop, your way"), AutoSize = true, Font = new Font(Font.FontFamily, 17, FontStyle.Bold), Margin = new(0, 0, 0, 8) });
         Wide(form, Note("Choose what stays visible, then place it on your desktop."));
         var surfaces = Flow(); surfaces.Controls.AddRange([tickerCard, boardCard]); Wide(form, surfaces);
-        tickerCard.CheckedChanged += (_, _) => { if (!initializing && !tickerCard.Checked && !boardCard.Checked) boardCard.Checked = true; UpdatePreview(); };
-        boardCard.CheckedChanged += (_, _) => { if (!initializing && !tickerCard.Checked && !boardCard.Checked) tickerCard.Checked = true; UpdatePreview(); };
+        tickerCard.CheckedChanged += (_, _) => { if (!initializing && !tickerCard.Checked && !boardCard.Checked) tickerCard.Checked = true; UpdatePreview(); };
+        boardCard.CheckedChanged += (_, _) => { if (!initializing && !tickerCard.Checked && !boardCard.Checked) boardCard.Checked = true; UpdatePreview(); };
         Row(form, "Screen", screen);
         screen.SelectedIndexChanged += (_, _) =>
         {
@@ -279,7 +279,8 @@ internal sealed class SettingsForm : Form
         preview.WorkArea = SelectedWorkArea; preview.Fraction = InitialFraction(); preview.Placement = draft.TickerPlacement;
         preview.FreeOrigin = draft.TickerOrigin is { Length: 2 } p ? new Point(p[0], p[1]) : null;
         preview.TickerVisible = tickerCard.Checked; preview.BoardVisible = boardCard.Checked;
-        preview.LayoutLocked = locked.Checked || through.Checked; preview.PreviewTheme = draft.Theme;
+        // These options lock the real windows; the settings draft stays editable.
+        preview.LayoutLocked = false; preview.PreviewTheme = draft.Theme;
         widthLabel.Text = $"{preview.Fraction:P0}"; width.Enabled = tickerCard.Checked;
         foreach (var pair in placementCards) { pair.Value.Checked = pair.Key == draft.TickerPlacement; pair.Value.Enabled = tickerCard.Checked; }
         preview.Invalidate();
@@ -343,6 +344,7 @@ internal sealed class SettingsForm : Form
             var entries = lists[i].Entries;
             if (Settings.ValidEntries(entries)) continue;
             current = i; ReloadPicker(); LoadGrid();
+            tabs.SelectedIndex = 2;
             Warn(T("List “%@”: ").Replace("%@", lists[i].Name) + T(entries.Count == 0 ? "Add at least one symbol." : "Use unique symbols with valid market codes."));
             return;
         }

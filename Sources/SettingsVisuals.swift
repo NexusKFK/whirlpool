@@ -1,8 +1,17 @@
 import AppKit
 
+private final class SettingsChoiceCell: NSButtonCell {
+    override func hitTest(for event: NSEvent, in cellFrame: NSRect, of controlView: NSView) -> NSCell.HitResult {
+        // A borderless stock cell only tracks its native title/image region.
+        // These cards draw their own content, so the entire visible card is the button.
+        guard isEnabled, cellFrame.contains(controlView.convert(event.locationInWindow, from: nil)) else { return [] }
+        return [.contentArea, .trackableArea]
+    }
+}
+
 /// Native vector controls: no web view or raster assets, and the system palette follows appearance.
 final class SettingsChoiceButton: NSButton {
-    enum Artwork { case text, surface, anchor, font, background, color }
+    enum Artwork { case text, surface, anchor, font, background, color, navigation }
     var artwork: Artwork = .text
     var key = ""
     var subtitle = ""
@@ -10,22 +19,29 @@ final class SettingsChoiceButton: NSButton {
 
     init(_ title: String, key: String = "", artwork: Artwork = .text) {
         super.init(frame: .zero)
+        cell = SettingsChoiceCell(textCell: title)
         self.title = title; self.key = key; self.artwork = artwork
-        setButtonType(.momentaryChange); isBordered = false
+        // AppKit owns the persistent state change; momentary buttons restore it
+        // after tracking and can silently undo the choice made by the action.
+        setButtonType(.pushOnPushOff); isBordered = false
         target = self; action = #selector(choose)
         setAccessibilityLabel(title)
         focusRingType = .exterior
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     override var isFlipped: Bool { false }
-    @objc private func choose() { onChoose?() }
+    @objc private func choose() { onChoose?(); needsDisplay = true }
     override var intrinsicContentSize: NSSize { NSSize(width: 100, height: artwork == .surface ? 78 : artwork == .anchor ? 32 : 48) }
     override func draw(_ dirtyRect: NSRect) {
         let selected = state == .on
         let rect = bounds.insetBy(dx: 1, dy: 1)
-        let card = NSBezierPath(roundedRect: rect, xRadius: 9, yRadius: 9)
-        (selected ? NSColor.controlAccentColor.withAlphaComponent(0.10) : NSColor.controlBackgroundColor).setFill(); card.fill()
-        (selected ? NSColor.controlAccentColor : NSColor.separatorColor).setStroke(); card.lineWidth = selected ? 1.5 : 0.8; card.stroke()
+        let card = NSBezierPath(roundedRect: rect, xRadius: artwork == .navigation ? 7 : 9, yRadius: artwork == .navigation ? 7 : 9)
+        if artwork != .navigation || selected || isHighlighted {
+            (selected || isHighlighted ? NSColor.controlAccentColor.withAlphaComponent(isHighlighted ? 0.18 : 0.10) : NSColor.controlBackgroundColor).setFill(); card.fill()
+        }
+        if artwork != .navigation {
+            (selected ? NSColor.controlAccentColor : NSColor.separatorColor).setStroke(); card.lineWidth = selected ? 1.5 : 0.8; card.stroke()
+        }
         let ink = isEnabled ? NSColor.labelColor : NSColor.disabledControlTextColor
         let accent = isEnabled ? NSColor.controlAccentColor : NSColor.disabledControlTextColor
         func label(_ string: String, _ at: NSRect, font: NSFont, color: NSColor, align: NSTextAlignment = .left) {
@@ -45,7 +61,17 @@ final class SettingsChoiceButton: NSButton {
             }
             accent.setFill(); NSBezierPath(roundedRect: mark, xRadius: 2, yRadius: 2).fill()
             label(title, NSRect(x: 13, y: 9, width: bounds.width - 25, height: 18), font: .systemFont(ofSize: 12, weight: .medium), color: ink)
-            if selected { NSImage(systemSymbolName: "checkmark.circle.fill", accessibilityDescription: nil)?.draw(in: NSRect(x: bounds.width - 25, y: bounds.height - 26, width: 14, height: 14)) }
+            let indicator = NSRect(x: bounds.width - 27, y: bounds.height - 27, width: 15, height: 15)
+            if selected {
+                accent.setFill(); NSBezierPath(ovalIn: indicator).fill()
+                let check = NSBezierPath(); check.lineWidth = 1.6; check.lineCapStyle = .round; check.lineJoinStyle = .round
+                check.move(to: NSPoint(x: indicator.minX + 4, y: indicator.midY))
+                check.line(to: NSPoint(x: indicator.minX + 6.5, y: indicator.minY + 4.5))
+                check.line(to: NSPoint(x: indicator.maxX - 3.5, y: indicator.maxY - 4.5))
+                NSColor.white.setStroke(); check.stroke()
+            } else {
+                NSColor.tertiaryLabelColor.setStroke(); NSBezierPath(ovalIn: indicator).stroke()
+            }
         case .anchor:
             let x: CGFloat = key.hasSuffix("left") ? 12 : key.hasSuffix("right") ? bounds.width - 29 : (bounds.width - 17) / 2
             let y: CGFloat = key.hasPrefix("top") ? bounds.height - 12 : 8
@@ -72,6 +98,9 @@ final class SettingsChoiceButton: NSButton {
             label(title, NSRect(x: 12, y: 8, width: bounds.width - 24, height: 18), font: .systemFont(ofSize: 11), color: ink)
         case .text:
             label(title, NSRect(x: 8, y: (bounds.height - 18) / 2, width: bounds.width - 16, height: 18), font: .systemFont(ofSize: 12, weight: selected ? .medium : .regular), color: selected ? accent : ink, align: .center)
+        case .navigation:
+            image?.withSymbolConfiguration(.init(paletteColors: [selected ? accent : .secondaryLabelColor]))?.draw(in: NSRect(x: 10, y: (bounds.height - 17) / 2, width: 17, height: 17))
+            label(title, NSRect(x: 36, y: (bounds.height - 18) / 2, width: bounds.width - 44, height: 18), font: .systemFont(ofSize: 13, weight: selected ? .semibold : .regular), color: selected ? accent : ink)
         }
     }
 }
@@ -89,6 +118,8 @@ final class SettingsChoiceGroup: NSStackView {
         for view in arrangedSubviews { removeArrangedSubview(view); view.removeFromSuperview() }
         buttons = labels.enumerated().map { i, label in
             let b = SettingsChoiceButton(label, key: keys.indices.contains(i) ? keys[i] : "", artwork: artwork)
+            b.identifier = NSUserInterfaceItemIdentifier("choice-\(artwork)-\(b.key.isEmpty ? String(i) : b.key)")
+            b.setAccessibilityRole(.radioButton)
             b.onChoose = { [weak self] in self?.selectItem(at: i); self?.onChange?() }
             addArrangedSubview(b)
             b.heightAnchor.constraint(equalToConstant: artwork == .font || artwork == .background ? 68 : artwork == .color ? 58 : 36).isActive = true
@@ -161,10 +192,10 @@ final class LayoutPreviewView: NSView {
         fill(dock, .controlBackgroundColor, 7)
         for i in 0..<6 { fill(NSRect(x: dock.minX + 8 + CGFloat(i) * 18, y: 13, width: 13, height: 13), .separatorColor, 3) }
         if boardOn {
-            let b = NSRect(x: bounds.width - 142, y: 69, width: 128, height: 89)
+            let b = NSRect(x: bounds.width - 142, y: area.maxY - 76, width: 128, height: 76)
             fill(b, .controlBackgroundColor, 7)
             text(L("Watchlist"), NSRect(x: b.minX + 9, y: b.maxY - 20, width: 110, height: 15))
-            for (i, s) in ["SPY    759.72", "QQQ    717.37", "TLT     81.30"].enumerated() { text(s, NSRect(x: b.minX + 9, y: b.maxY - 40 - CGFloat(i) * 18, width: 110, height: 16), 10, .labelColor, mono: true) }
+            for (i, s) in ["SPY    759.72", "QQQ    717.37", "TLT     81.30"].enumerated() { text(s, NSRect(x: b.minX + 9, y: b.maxY - 36 - CGFloat(i) * 15, width: 110, height: 15), 10, .labelColor, mono: true) }
         }
         if barOn {
             let r = tickerFrame

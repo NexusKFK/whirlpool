@@ -1,6 +1,11 @@
 # Windows preview acceptance / Windows 预览验收
 
-Version: **2.0.2 preview**. Cross-compilation and core checks can run on macOS. Native Windows execution and visual QA require a Windows machine. Do not mark the items below as passed merely because compilation succeeded.
+Version: **2.0.3 preview**. Cross-compilation and core checks can run on macOS. Native Windows execution and visual QA require a Windows machine. Do not mark the items below as passed merely because compilation succeeded.
+
+2.0.3 settings acceptance:
+- [ ] Click each display card on its icon, label and empty area; selected states persist. Trying to disable the last display keeps that display selected.
+- [ ] Lock floating windows or enable click-through; the settings preview can still be edited before saving.
+- [ ] Save an invalid watchlist while another tab is selected; the invalid list appears on the Watchlist tab.
 
 建议先在 Windows 10/11 x64 用少量自选股验收。发布包无安装步骤，解压后运行 `Whirlpool.exe`；尚未使用商业代码签名。
 
