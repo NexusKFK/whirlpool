@@ -33,9 +33,13 @@ server.bind(path); os.chmod(path, 0o666); server.listen(4); server.settimeout(60
 try:
     while True:
         client, _ = server.accept()
-        client.recv(65536)
-        client.sendall(json.dumps({"pid": os.getpid(), "legacy": True}).encode())
-        client.close()
+        try:
+            client.recv(65536)
+            client.sendall(json.dumps({"pid": os.getpid(), "legacy": True}).encode())
+        except OSError:
+            pass   # a client that rejects this peer hangs up at once
+        finally:
+            client.close()
 except socket.timeout:
     pass
 finally:
@@ -97,7 +101,9 @@ if sudo -n true 2>/dev/null; then
     squatter_pid=$!
     wait_for_socket "$legacy"
     limited 10 "$bin" --status >/dev/null 2>&1 && fail "CLI trusted a socket owned by another user"
+    [ -S "$legacy" ] || fail "the planted socket vanished before the launch check"
     launch
+    [ -S "$legacy" ] || fail "the planted socket vanished during launch"
     quit
     sudo -n pkill -u nobody -f "socket.AF_UNIX" 2>/dev/null || true
     wait "$squatter_pid" 2>/dev/null || true
