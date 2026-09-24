@@ -4,7 +4,7 @@
     <UseWindowsForms>true</UseWindowsForms><EnableWindowsTargeting>true</EnableWindowsTargeting>
     <ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
     <AssemblyName>Whirlpool</AssemblyName><RootNamespace>Whirlpool.Windows</RootNamespace>
-    <Version>2.0.4</Version><Product>Whirlpool</Product><Company>NexusKFK</Company>
+    <Version>2.0.5</Version><Product>Whirlpool</Product><Company>NexusKFK</Company>
     <Description>A quiet desktop ticker for your watchlist.</Description>
     <ApplicationIcon>../../icons/whirlpool.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>

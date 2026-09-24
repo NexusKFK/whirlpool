@@ -145,6 +145,10 @@ func runGPUMarqueeTests() throws {
     check(chartURL(for: WatchEntry(symbol: "00700", market: "hk"))?.absoluteString.hasSuffix("HKEX:700") == true, "HK chart")
     check(chartURL(for: WatchEntry(symbol: "^GSPC", market: "us"))?.absoluteString.hasSuffix("SP:SPX") == true, "index chart")
     check(chartURL(for: btc)?.host == "finance.yahoo.com", "crypto chart via Yahoo")
+    check(chartURL(for: WatchEntry(symbol: "SH000001", market: "cn"))?.absoluteString == "https://www.tradingview.com/chart/?symbol=SSE:000001",
+          "an exchange prefix picks the SSE Composite chart")
+    check(chartURL(for: WatchEntry(symbol: "430047", market: "cn"))?.absoluteString == "https://gu.qq.com/bj430047",
+          "Beijing codes open Tencent's quote page")
     print("PASS: chart links")
 
     // 8) 时间线引擎:滚完一轮自动接下一条、轮内定时暂停生效、预取只发一次

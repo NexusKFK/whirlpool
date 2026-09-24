@@ -13,6 +13,8 @@ Issues and pull requests are welcome in English or Chinese. Keep changes focused
 
 Run `bash tools/test-price-flash.sh` on macOS and `dotnet run --project Windows/Whirlpool.Core.Tests -c Release` on any .NET 10 host. Run `Whirlpool.exe --smoke-test` on Windows to instantiate both languages and render the ticker. This is a smoke test, not a substitute for the Windows manual checklist.
 
+`bash tools/test-cli.sh` launches the built macOS binary on the real per-user control socket and drives it through the CLI (quit any running Whirlpool first). `python3 tools/check-calendars.py` checks that both platforms carry identical exchange tables and that the current year, and from December the next one, is covered; add each year's China A-share and HKEX tables to both `MarketClock` files when they are published. GitHub Actions (`.github/workflows/ci.yml`) runs all of these on macOS, Windows and Linux for pull requests and pushes to `main`, and a monthly scheduled run fails once a holiday table is overdue.
+
 ## Translations / 翻译
 
 Edit `Shared/localization.json`, then run `python3 tools/generate-localizations.py`. Commit the generated `Sources/Localization.swift` too. English is the source language; avoid stitching translated sentence fragments together. Test both languages at larger text/display scaling. UI strings must use `L(...)` on macOS or `I18n.T(...)` on Windows.
@@ -26,7 +28,7 @@ Edit `Shared/localization.json`, then run `python3 tools/generate-localizations.
 5. Create archives using `bash tools/package-release.sh`. Include license/attribution and the Windows test checklist.
 6. Scan the staged files for secrets/private configurations. Do not commit `dist/`, `.build/`, `bin/`, `obj/`, or user data.
 7. Code-sign and notarize with the maintainer's own credentials if available. Builds here are locally signed on macOS and unsigned on Windows.
-8. Publish release artifacts only after review. The workflow uploads CI artifacts; it does not automatically create a public release.
+8. Publish release artifacts only after review. CI builds and tests; it does not upload artifacts or create a release.
 
 New config fields must have defaults. Invalid config files must not be silently destroyed. Preserve the suffix flash rule, separate quote direction from daily change, and never bypass provider cooldowns to make refresh appear faster.
 
