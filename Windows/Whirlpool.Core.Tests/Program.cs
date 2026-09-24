@@ -29,6 +29,13 @@ Check(PriceFlash.Format(1.14896, 4) == "1.1490" && PriceFlash.Format(419, 3) == 
 
 // ── Providers ──
 Check(QuoteFeed.TencentCode(new("700", "hk")) == "hk00700", "Hong Kong padding");
+foreach (var (symbol, code) in new[] { ("600519", "sh600519"), ("510300", "sh510300"), ("900901", "sh900901"), ("000001", "sz000001"), ("300750", "sz300750"),
+                                       ("SH000001", "sh000001"), ("SZ399001", "sz399001"), ("430047", "bj430047"), ("830799", "bj830799"), ("920118", "bj920118"), ("BJ430047", "bj430047") })
+    Check(QuoteFeed.TencentCode(new(symbol, "cn")) == code, "A-share exchange for " + symbol);
+Check(Settings.ValidEntries([new("SH000001", "cn"), new("000001", "cn")]), "the SSE Composite and Ping An Bank are different instruments");
+Check(!Settings.ValidEntries([new("SZ000001", "cn"), new("000001", "cn")]) && !Settings.ValidEntries([new("SX000001", "cn")]) && !Settings.ValidEntries([new("SH00001", "cn")]),
+    "exchange prefixes are canonical and validated");
+Check(!Settings.ValidEntries([new("600519", "cn"), new("600519", "us")]), "symbols stay unique across markets");
 Check(QuoteFeed.RetryDelay(1) == 30 && QuoteFeed.RetryDelay(10) == 900, "bounded exponential backoff");
 var fields = Enumerable.Repeat("0", 40).ToArray();
 fields[3] = "4.582"; fields[30] = "20260918161452"; fields[32] = "1.10";
@@ -131,6 +138,15 @@ Check(MarketClock.NextOpen(spy, At("2026-09-19 12:00", "America/New_York")) == A
 var holiday = At("2026-10-05 10:00", "Asia/Shanghai");
 Check(MarketClock.RefreshSeconds([moutai], 30, holiday) > 30 && MarketClock.RefreshSeconds([moutai], 30, holiday, new Dictionary<string, DateTimeOffset> { ["600519"] = holiday.AddMinutes(-2) }) == 30, "holiday backs off; fresh trade overrides");
 Check(MarketClock.RefreshSeconds([spy, new("BTC-USD", "crypto")], 30, At("2026-09-19 12:00", "America/New_York")) == 30, "crypto keeps the base cadence");
+foreach (var (symbol, venue) in new (string, MarketClock.Exchange?)[] { ("SPY", MarketClock.Exchange.Nyse), ("BRK-B", MarketClock.Exchange.Nyse), ("^GSPC", MarketClock.Exchange.Nyse),
+             ("^HSI", MarketClock.Exchange.Hkex), ("0700.HK", MarketClock.Exchange.Hkex), ("000001.SS", MarketClock.Exchange.Sse), ("399001.SZ", MarketClock.Exchange.Sse),
+             ("^N225", null), ("7203.T", null), ("VOD.L", null), ("ES=F", null), ("EURUSD=X", null), ("BTC-USD", null), ("ETH-EUR", null) })
+    Check(MarketClock.ExchangeFor(new(symbol, "us")) == venue, "Yahoo venue for " + symbol);
+var tokyoMorning = At("2026-09-24 10:00", "Asia/Tokyo");   // Wednesday 21:00 in New York
+WatchEntry toyota = new("7203.T", "us");
+Check(MarketClock.IsOpen(toyota, tokyoMorning) && MarketClock.RefreshSeconds([toyota], 30, tokyoMorning) == 30
+      && MarketClock.RefreshSeconds([spy, toyota], 30, tokyoMorning) == 30 && MarketClock.RefreshSeconds([spy], 30, tokyoMorning) > 30,
+    "a Tokyo listing is not held to NYSE hours");
 
 // ── Updates and chart links ──
 Check(UpdateChecker.ParseVersion("v1.6.0-main")!.SequenceEqual([1, 6, 0]) && UpdateChecker.IsNewer("1.10", "1.9.9") && !UpdateChecker.IsNewer("1.6.0", "1.9.0") && !UpdateChecker.IsNewer("2.0", "dev"), "version compare");
@@ -138,6 +154,8 @@ Check(UpdateChecker.ParseRelease("{\"tag_name\":\"v1.9.0-main\",\"name\":\"Whirl
       && UpdateChecker.ParseRelease("{\"tag_name\":\"v2.0.0\",\"prerelease\":true}") is null, "release parsing");
 Check(ChartLinks.For(spy).ToString() == "https://www.tradingview.com/chart/?symbol=SPY" && ChartLinks.For(moutai).ToString().EndsWith("SSE:600519")
       && ChartLinks.For(new("00700", "hk")).ToString().EndsWith("HKEX:700") && ChartLinks.For(new("BTC-USD", "crypto")).Host == "finance.yahoo.com", "chart links");
+Check(ChartLinks.For(new("SH000001", "cn")).ToString().EndsWith("symbol=SSE:000001") && ChartLinks.For(new("000001", "cn")).ToString().EndsWith("symbol=SZSE:000001")
+      && ChartLinks.For(new("430047", "cn")).ToString() == "https://gu.qq.com/bj430047", "A-share chart links follow the exchange");
 
 // ── Feed caching, 429 and smart refresh ──
 var time = DateTimeOffset.Parse("2026-09-16T14:00:00Z");   // Wednesday 10:00 New York

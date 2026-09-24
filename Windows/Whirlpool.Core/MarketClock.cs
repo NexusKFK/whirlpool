@@ -1,3 +1,5 @@
+using System.Text.RegularExpressions;
+
 namespace Whirlpool.Core;
 
 /// <summary>
@@ -33,8 +35,26 @@ public static class MarketClock
         "crypto" => null,
         "cn" => Exchange.Sse,
         "hk" => Exchange.Hkex,
-        _ => entry.Symbol.Contains('=') || entry.Symbol.EndsWith("-USD") ? null : Exchange.Nyse,
+        _ => YahooExchange(entry.Symbol),
     };
+
+    private static readonly HashSet<string> UsIndices = ["^GSPC", "^SPX", "^DJI", "^IXIC", "^NDX", "^RUT", "^VIX", "^NYA", "^XAX",
+        "^SOX", "^OEX", "^DJT", "^DJU", "^W5000", "^TNX", "^TYX", "^FVX", "^IRX"];
+    private static readonly HashSet<string> HongKongIndices = ["^HSI", "^HSCE"];
+
+    /// <summary>
+    /// Yahoo symbols name their venue: no suffix is a US listing, and .HK/.SS/.SZ use the tables above. Other venues
+    /// (7203.T, VOD.L, ^N225…) have no modeled calendar, so they never count as closed.
+    /// </summary>
+    public static Exchange? YahooExchange(string symbol)
+    {
+        // Futures and FX (ES=F, EURUSD=X) trade almost 24×5; crypto pairs (BTC-USD, ETH-EUR) 24×7.
+        if (symbol.Contains('=') || Regex.IsMatch(symbol, "-[A-Z]{3,}$")) return null;
+        if (symbol.StartsWith('^')) return UsIndices.Contains(symbol) ? Exchange.Nyse : HongKongIndices.Contains(symbol) ? Exchange.Hkex : null;
+        var dot = symbol.LastIndexOf('.');
+        if (dot < 0) return Exchange.Nyse;
+        return symbol[(dot + 1)..] switch { "HK" => Exchange.Hkex, "SS" or "SZ" => Exchange.Sse, _ => null };
+    }
 
     private static TimeZoneInfo Zone(string iana, string windows)
     {

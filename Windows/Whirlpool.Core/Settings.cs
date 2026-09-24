@@ -167,10 +167,12 @@ public sealed class Settings
 
     public static bool ValidEntries(IReadOnlyList<WatchEntry> entries)
     {
+        // Symbols key the quote cache; China/Hong Kong rows are also unique by the Tencent code they request
+        // (700 = 00700, SZ000001 = 000001). Those codes are lowercase, so they cannot collide with a symbol.
         var seen = new HashSet<string>();
-        return entries.Count > 0 && entries.All(e => seen.Add(e.Market == "hk" ? e.Symbol.PadLeft(5, '0') : e.Symbol) && Regex.IsMatch(e.Symbol, e.Market switch
+        return entries.Count > 0 && entries.All(e => Regex.IsMatch(e.Symbol, e.Market switch
         {
-            "cn" => "^[0-9]{6}$", "hk" => "^[0-9]{1,5}$", "us" or "crypto" => "^[A-Z0-9^][A-Z0-9.^=_-]{0,31}$", _ => "(?!)"
-        }));
+            "cn" => "^(SH|SZ|BJ)?[0-9]{6}$", "hk" => "^[0-9]{1,5}$", "us" or "crypto" => "^[A-Z0-9^][A-Z0-9.^=_-]{0,31}$", _ => "(?!)"
+        }) && seen.Add(e.Symbol) && (e.Market is not ("cn" or "hk") || seen.Add(QuoteFeed.TencentCode(e))));
     }
 }

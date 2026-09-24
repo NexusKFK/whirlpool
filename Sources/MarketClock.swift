@@ -20,10 +20,28 @@ enum MarketClock {
         case "crypto": return nil                                         // 7×24
         case "cn": return .sse
         case "hk": return .hkex
-        default:
-            // 期货/外汇(ES=F、EURUSD=X)近乎 24×5,加密后缀同理:按全天候处理
-            if entry.symbol.contains("=") || entry.symbol.hasSuffix("-USD") { return nil }
-            return .nyse
+        default: return yahooExchange(entry.symbol)
+        }
+    }
+
+    static let usIndices: Set<String> = ["^GSPC", "^SPX", "^DJI", "^IXIC", "^NDX", "^RUT", "^VIX", "^NYA", "^XAX",
+                                         "^SOX", "^OEX", "^DJT", "^DJU", "^W5000", "^TNX", "^TYX", "^FVX", "^IRX"]
+    static let hongKongIndices: Set<String> = ["^HSI", "^HSCE"]
+
+    /// Yahoo 代码自带交易所:无后缀 = 美股;.HK/.SS/.SZ 用上面的日历。
+    /// 其余交易所(东京 7203.T、伦敦 VOD.L、^N225…)没有建模日历,一律不判休市——宁可多拉几次。
+    static func yahooExchange(_ symbol: String) -> Exchange? {
+        // 期货/外汇(ES=F、EURUSD=X)近乎 24×5,加密货币对(BTC-USD、ETH-EUR)7×24
+        if symbol.contains("=") || symbol.range(of: "-[A-Z]{3,}$", options: .regularExpression) != nil { return nil }
+        if symbol.hasPrefix("^") {
+            if usIndices.contains(symbol) { return .nyse }
+            return hongKongIndices.contains(symbol) ? .hkex : nil
+        }
+        guard let dot = symbol.lastIndex(of: ".") else { return .nyse }
+        switch String(symbol[symbol.index(after: dot)...]) {
+        case "HK": return .hkex
+        case "SS", "SZ": return .sse
+        default: return nil
         }
     }
 
@@ -210,8 +228,10 @@ func chartURL(for entry: WatchEntry) -> URL? {
     var tv: String?
     switch entry.market {
     case "cn":
-        let sh = s.hasPrefix("6") || s.hasPrefix("5") || s.hasPrefix("9")
-        tv = (sh ? "SSE:" : "SZSE:") + s
+        // TradingView 只有沪深两市;北交所代码打开腾讯行情页
+        let code = RealProvider.tencentCode(for: entry)
+        if code.hasPrefix("bj") { return URL(string: "https://gu.qq.com/" + code) }
+        tv = (code.hasPrefix("sh") ? "SSE:" : "SZSE:") + String(code.dropFirst(2))
     case "hk":
         tv = "HKEX:" + String(Int(s) ?? 0)
     case "crypto":
