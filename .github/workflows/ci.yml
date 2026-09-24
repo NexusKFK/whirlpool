@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    # Monthly: turns red once next year's exchange holiday table is overdue (from December 1).
+    - cron: "17 3 1 * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  macos:
+    name: macOS build and regressions
+    # NSGlassEffectView needs the macOS 26 SDK.
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - name: Toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          swift --version
+      - name: Build
+        run: swift build
+      - name: Regression suite
+        run: bash tools/test-price-flash.sh
+
+  windows:
+    name: Windows core, publish and smoke test
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+      - name: Core regressions
+        run: dotnet run --project Windows/Whirlpool.Core.Tests -c Release
+      - name: Publish
+        run: >
+          dotnet publish Windows/Whirlpool.Windows -c Release -r win-x64 --self-contained true
+          -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:EnableCompressionInSingleFile=true -p:DebugType=none -o dist/windows-x64
+      - name: Smoke test
+        shell: pwsh
+        run: |
+          $run = Start-Process -FilePath dist/windows-x64/Whirlpool.exe -ArgumentList '--smoke-test' `
+            -Wait -PassThru -NoNewWindow -RedirectStandardError smoke-error.txt
+          Get-Content smoke-error.txt -ErrorAction SilentlyContinue
+          if ($run.ExitCode -ne 0) { throw "Whirlpool.exe --smoke-test exited with $($run.ExitCode)" }
+
+  checks:
+    name: Generated files and exchange calendars
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - name: Localization matches Shared/localization.json
+        run: |
+          python3 tools/generate-localizations.py
+          git diff --exit-code Sources/Localization.swift
+      - name: Exchange calendars
+        run: python3 tools/check-calendars.py ${{ github.event_name == 'schedule' && '--strict' || '' }}
