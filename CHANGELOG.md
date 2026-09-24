@@ -4,9 +4,12 @@
 
 - Yahoo symbols follow their own exchange for smart refresh and closed-market display. Previously every symbol in the US / Global market was held to NYSE hours: a Tokyo, London or European listing (`7203.T`, `VOD.L`, `^N225`) was polled at most every 30 minutes and shown as closed while its market traded. Symbols without a suffix and major US indices still use the NYSE calendar; `.HK`/`^HSI` and `.SS`/`.SZ` use the HKEX and A-share calendars; other venues have no modeled calendar and never count as closed. Crypto pairs in other currencies (`ETH-EUR`) are treated like `-USD` pairs.
 - China A-share codes may name their exchange: `SH000001` is the SSE Composite, while `000001` remains Ping An Bank in Shenzhen. Beijing Stock Exchange codes (4, 8 and 92 prefixes) are requested from Tencent as `bj` instead of Shenzhen/Shanghai, and their charts open Tencent's quote page. A prefixed code and the same unprefixed code are rejected as duplicates.
-- Both platforms share the change and its regressions.
+- The watchlist page names `SH000001` in its examples.
+- macOS: the control socket moved from `/tmp/whirlpool-<uid>.sock` to the per-user temporary directory, so another local account can no longer occupy its path, and the CLI also rejects peers running as another user. A running 2.0.4 on the old path is still recognized, and `--restart` replaces it.
+- CI runs the macOS regression suite and a CLI/socket test on macOS 26, the Windows core suite, self-contained publish and `--smoke-test` on Windows, and localization/calendar checks on Linux. `tools/check-calendars.py` keeps the exchange tables identical on both platforms and turns the monthly run red once next year's table is overdue.
+- Both platforms share the changes and their regressions.
 
-中文：Yahoo 代码按自身交易所判断开休市。此前“美股/全球”下的所有代码都按纽交所时段处理，东京、伦敦、欧洲等标的（`7203.T`、`VOD.L`、`^N225`）在本地交易时段被当成休市，最慢 30 分钟才刷新一次，报价卡还显示“休市”。现在无后缀代码与主要美股指数仍按 NYSE 日历，`.HK`/`^HSI` 与 `.SS`/`.SZ` 分别用港股、A 股日历，其余交易所不判休市。A 股代码可加 `SH`/`SZ`/`BJ` 前缀：`SH000001` 为上证指数，`000001` 仍是深市平安银行；北交所代码（4、8、92 开头）改为向腾讯请求 `bj` 代码，图表打开腾讯行情页。两个平台同步修改并补充回归测试。
+中文：Yahoo 代码按自身交易所判断开休市。此前“美股/全球”下的所有代码都按纽交所时段处理，东京、伦敦、欧洲等标的（`7203.T`、`VOD.L`、`^N225`）在本地交易时段被当成休市，最慢 30 分钟才刷新一次，报价卡还显示“休市”。现在无后缀代码与主要美股指数仍按 NYSE 日历，`.HK`/`^HSI` 与 `.SS`/`.SZ` 分别用港股、A 股日历，其余交易所不判休市。A 股代码可加 `SH`/`SZ`/`BJ` 前缀：`SH000001` 为上证指数，`000001` 仍是深市平安银行；北交所代码（4、8、92 开头）改为向腾讯请求 `bj` 代码，图表打开腾讯行情页，自选页示例加入 `SH000001`。macOS 控制 socket 从 `/tmp` 移到每用户私有临时目录，其他本地用户无法抢占路径，CLI 也只连接同一用户的实例；仍在旧路径运行的 2.0.4 能被识别并由 `--restart` 替换。新增 CI：macOS 26 跑回归与 CLI/socket 测试，Windows 跑核心测试、自包含发布与冒烟测试，Linux 检查本地化生成与两端交易所日历一致；下一年休市表逾期时每月定时检查会报红。两个平台同步修改并补充回归测试。
 
 ## 2.0.4 (unreleased)
 

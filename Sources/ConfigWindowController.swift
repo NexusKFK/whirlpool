@@ -290,7 +290,7 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
         let content = stack([pageTitle("Watchlist", "Organize the symbols you follow."), listRow,
                              note("The list selected here is shown after saving. Switch lists from the menu or Option-click the ticker."),
                              scroll, actions,
-                             note("Examples: AAPL, ^GSPC, 600519, 00700, BTC-USD. Decimals: Auto uses the data source's precision (A-share ETFs 3, FX 4, low-priced crypto more).")])
+                             note("Examples: AAPL, ^GSPC, 600519, SH000001 (SSE Composite), 00700, BTC-USD. Decimals: Auto uses the data source's precision (A-share ETFs 3, FX 4, low-priced crypto more).")])
         scroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 230).isActive = true
         return content
     }
