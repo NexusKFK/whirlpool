@@ -67,9 +67,12 @@ public static class ChartLinks
     public static Uri For(WatchEntry entry)
     {
         var s = entry.Symbol;
+        var code = entry.Market == "cn" ? QuoteFeed.TencentCode(entry) : "";
+        // TradingView lists Shanghai and Shenzhen only; Beijing codes open Tencent's quote page.
+        if (code.StartsWith("bj")) return new Uri("https://gu.qq.com/" + code);
         string? tv = entry.Market switch
         {
-            "cn" => (s.StartsWith('6') || s.StartsWith('5') || s.StartsWith('9') ? "SSE:" : "SZSE:") + s,
+            "cn" => (code.StartsWith("sh") ? "SSE:" : "SZSE:") + code[2..],
             "hk" => "HKEX:" + (int.TryParse(s, out var n) ? n : 0),
             "crypto" => null,
             _ => Indices.TryGetValue(s, out var mapped) ? mapped

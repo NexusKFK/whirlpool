@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.0.5 (unreleased)
+
+- Yahoo symbols follow their own exchange for smart refresh and closed-market display. Previously every symbol in the US / Global market was held to NYSE hours: a Tokyo, London or European listing (`7203.T`, `VOD.L`, `^N225`) was polled at most every 30 minutes and shown as closed while its market traded. Symbols without a suffix and major US indices still use the NYSE calendar; `.HK`/`^HSI` and `.SS`/`.SZ` use the HKEX and A-share calendars; other venues have no modeled calendar and never count as closed. Crypto pairs in other currencies (`ETH-EUR`) are treated like `-USD` pairs.
+- China A-share codes may name their exchange: `SH000001` is the SSE Composite, while `000001` remains Ping An Bank in Shenzhen. Beijing Stock Exchange codes (4, 8 and 92 prefixes) are requested from Tencent as `bj` instead of Shenzhen/Shanghai, and their charts open Tencent's quote page. A prefixed code and the same unprefixed code are rejected as duplicates.
+- Both platforms share the change and its regressions.
+
+中文：Yahoo 代码按自身交易所判断开休市。此前“美股/全球”下的所有代码都按纽交所时段处理，东京、伦敦、欧洲等标的（`7203.T`、`VOD.L`、`^N225`）在本地交易时段被当成休市，最慢 30 分钟才刷新一次，报价卡还显示“休市”。现在无后缀代码与主要美股指数仍按 NYSE 日历，`.HK`/`^HSI` 与 `.SS`/`.SZ` 分别用港股、A 股日历，其余交易所不判休市。A 股代码可加 `SH`/`SZ`/`BJ` 前缀：`SH000001` 为上证指数，`000001` 仍是深市平安银行；北交所代码（4、8、92 开头）改为向腾讯请求 `bj` 代码，图表打开腾讯行情页。两个平台同步修改并补充回归测试。
+
 ## 2.0.4 (unreleased)
 
 - macOS quote boards follow the shared font, size and color scheme, including monochrome and light/dark appearance. Appearance changes repaint cached quotes immediately; the legacy board-only font toggle is retired. The shared price-flash switch now applies to the board. Initial loading displays a status immediately.

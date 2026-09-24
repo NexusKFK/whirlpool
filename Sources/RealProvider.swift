@@ -123,12 +123,22 @@ final class RealProvider: QuoteProvider {
         return f.date(from: raw.trimmingCharacters(in: .whitespaces))
     }
 
-    func tencentCode(_ e: WatchEntry) -> String {
+    func tencentCode(_ e: WatchEntry) -> String { Self.tencentCode(for: e) }
+
+    /// 港股左补零到 5 位。A 股可带交易所前缀(SH000001 = 上证指数;只写 000001 是深市平安银行);
+    /// 不带前缀按号段:92/4/8 北交所,6/5/9 沪市,其余深市。
+    static func tencentCode(for e: WatchEntry) -> String {
+        let s = e.symbol
         if e.market == "hk" {
-            return "hk" + String(repeating: "0", count: max(0, 5 - e.symbol.count)) + e.symbol
+            return "hk" + String(repeating: "0", count: max(0, 5 - s.count)) + s
         }
-        let sh = e.symbol.hasPrefix("6") || e.symbol.hasPrefix("5") || e.symbol.hasPrefix("9")
-        return (sh ? "sh" : "sz") + e.symbol
+        let named = String(s.prefix(2))
+        if s.count == 8, ["SH", "SZ", "BJ"].contains(named) {
+            return named.lowercased() + String(s.dropFirst(2))
+        }
+        if s.hasPrefix("92") || s.hasPrefix("4") || s.hasPrefix("8") { return "bj" + s }
+        if s.hasPrefix("6") || s.hasPrefix("5") || s.hasPrefix("9") { return "sh" + s }
+        return "sz" + s
     }
 
     /// https://web.ifzq.gtimg.cn/appstock/app/minute/query?code=sh600519
