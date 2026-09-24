@@ -111,7 +111,7 @@ internal sealed class SettingsForm : Form
         page.Controls.Add(list); page.Controls.Add(actions);
         page.Controls.Add(new Label { Text = T("The list selected here is shown after saving. Switch lists from the menu or Ctrl-click the ticker."), Dock = DockStyle.Top, Height = 42, ForeColor = SystemColors.GrayText });
         page.Controls.Add(top);
-        page.Controls.Add(new Label { Text = T("Examples: AAPL, ^GSPC, 600519, 00700, BTC-USD. Decimals: Auto uses the data source's precision (A-share ETFs 3, FX 4, low-priced crypto more)."), Dock = DockStyle.Bottom, Height = 48, ForeColor = SystemColors.GrayText });
+        page.Controls.Add(new Label { Text = T("Examples: AAPL, ^GSPC, 600519, SH000001 (SSE Composite), 00700, BTC-USD. Decimals: Auto uses the data source's precision (A-share ETFs 3, FX 4, low-priced crypto more)."), Dock = DockStyle.Bottom, Height = 48, ForeColor = SystemColors.GrayText });
         return page;
     }
 

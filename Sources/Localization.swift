@@ -158,7 +158,7 @@ enum L10n {
         "Rename": "重命名",
         "A list with this name already exists.": "已有同名自选池。",
         "The list selected here is shown after saving. Switch lists from the menu or Option-click the ticker.": "保存后显示这里选中的自选池。平时可在菜单里切换，或 ⌥ 单击行情条。",
-        "Examples: AAPL, ^GSPC, 600519, 00700, BTC-USD. Decimals: Auto uses the data source's precision (A-share ETFs 3, FX 4, low-priced crypto more).": "示例：AAPL、^GSPC、600519、00700、BTC-USD。小数位选「自动」时跟随行情源精度（A 股 ETF 3 位、外汇 4 位、低价加密资产更多）。",
+        "Examples: AAPL, ^GSPC, 600519, SH000001 (SSE Composite), 00700, BTC-USD. Decimals: Auto uses the data source's precision (A-share ETFs 3, FX 4, low-priced crypto more).": "示例：AAPL、^GSPC、600519、SH000001（上证指数）、00700、BTC-USD。小数位选「自动」时跟随行情源精度（A 股 ETF 3 位、外汇 4 位、低价加密资产更多）。",
         "List “%@”: ": "自选池「%@」：",
         "Check for updates automatically": "自动检查更新",
         "Once a day Whirlpool asks GitHub for the latest release (no identifiers sent). New versions appear in the menu and scroll by once.": "每天向 GitHub 查询一次最新发布（不发送任何标识）。有新版本时出现在菜单里，并在行情条上滚动提示一次。",

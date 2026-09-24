@@ -290,7 +290,7 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
         let content = stack([pageTitle("Watchlist", "Organize the symbols you follow."), listRow,
                              note("The list selected here is shown after saving. Switch lists from the menu or Option-click the ticker."),
                              scroll, actions,
-                             note("Examples: AAPL, ^GSPC, 600519, 00700, BTC-USD. Decimals: Auto uses the data source's precision (A-share ETFs 3, FX 4, low-priced crypto more).")])
+                             note("Examples: AAPL, ^GSPC, 600519, SH000001 (SSE Composite), 00700, BTC-USD. Decimals: Auto uses the data source's precision (A-share ETFs 3, FX 4, low-priced crypto more).")])
         scroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 230).isActive = true
         return content
     }
@@ -840,13 +840,17 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
         return entries.allSatisfy { entry in
             let pattern: String
             switch entry.market {
-            case "cn": pattern = "^[0-9]{6}$"
+            case "cn": pattern = "^(SH|SZ|BJ)?[0-9]{6}$"
             case "hk": pattern = "^[0-9]{1,5}$"
             case "us", "crypto": pattern = "^[A-Z0-9^][A-Z0-9.^=_-]{0,31}$"
             default: return false
             }
-            let identity = entry.market == "hk" ? String(repeating: "0", count: max(0, 5 - entry.symbol.count)) + entry.symbol : entry.symbol
-            return seen.insert(identity).inserted && entry.symbol.range(of: pattern, options: .regularExpression) != nil
+            guard entry.symbol.range(of: pattern, options: .regularExpression) != nil,
+                  seen.insert(entry.symbol).inserted else { return false }
+            // 代码是行情缓存的键;沪深港另按实际请求的腾讯代码去重(700 = 00700,SZ000001 = 000001)。
+            // 腾讯代码是小写,不会与代码本身撞车。
+            guard entry.market == "cn" || entry.market == "hk" else { return true }
+            return seen.insert(RealProvider.tencentCode(for: entry)).inserted
         }
     }
 }

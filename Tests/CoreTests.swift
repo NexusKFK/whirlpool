@@ -49,7 +49,21 @@ func runCoreTests() throws {
     let real = RealProvider()
     precondition(real.tencentCode(WatchEntry(symbol: "700", market: "hk")) == "hk00700")
     precondition(real.tencentCode(WatchEntry(symbol: "510300", market: "cn")) == "sh510300")
-    print("PASS: watchlist validation and Hong Kong symbol normalization")
+    let aShareCodes: [(String, String)] = [("600519", "sh600519"), ("900901", "sh900901"), ("000001", "sz000001"), ("300750", "sz300750"),
+                                           ("SH000001", "sh000001"), ("SZ399001", "sz399001"), ("430047", "bj430047"),
+                                           ("830799", "bj830799"), ("920118", "bj920118"), ("BJ430047", "bj430047")]
+    for (symbol, code) in aShareCodes {
+        precondition(real.tencentCode(WatchEntry(symbol: symbol, market: "cn")) == code, "A-share exchange for \(symbol)")
+    }
+    precondition(ConfigWindowController.validEntries([WatchEntry(symbol: "SH000001", market: "cn"), WatchEntry(symbol: "000001", market: "cn")]),
+                 "the SSE Composite and Ping An Bank are different instruments")
+    precondition(!ConfigWindowController.validEntries([WatchEntry(symbol: "SZ000001", market: "cn"), WatchEntry(symbol: "000001", market: "cn")]),
+                 "a prefix naming the default exchange is a duplicate")
+    precondition(!ConfigWindowController.validEntries([WatchEntry(symbol: "SX000001", market: "cn")])
+                 && !ConfigWindowController.validEntries([WatchEntry(symbol: "SH00001", market: "cn")]))
+    precondition(!ConfigWindowController.validEntries([WatchEntry(symbol: "600519", market: "cn"), WatchEntry(symbol: "600519", market: "us")]),
+                 "symbols stay unique across markets")
+    print("PASS: watchlist validation, Hong Kong padding and A-share exchange prefixes")
 
     let originalLanguage = L10n.language
     L10n.language = "en"; precondition(L("Settings…") == "Settings…")

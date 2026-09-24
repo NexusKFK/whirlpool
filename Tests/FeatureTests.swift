@@ -50,6 +50,22 @@ func runFeatureTests() throws {
           "fresh trade timestamp overrides the calendar")
     print("PASS: exchange holidays, half days, early closes and live-trade override")
 
+    // 2.0.5:Yahoo 代码按交易所后缀定日历;没有建模日历的交易所不判休市
+    let venues: [(String, MarketClock.Exchange?)] = [
+        ("SPY", .nyse), ("BRK-B", .nyse), ("^GSPC", .nyse), ("^HSI", .hkex), ("0700.HK", .hkex),
+        ("000001.SS", .sse), ("399001.SZ", .sse), ("^N225", nil), ("7203.T", nil), ("VOD.L", nil),
+        ("ES=F", nil), ("EURUSD=X", nil), ("BTC-USD", nil), ("ETH-EUR", nil)]
+    for (symbol, venue) in venues {
+        check(MarketClock.exchange(for: WatchEntry(symbol: symbol, market: "us")) == venue, "Yahoo venue for \(symbol)")
+    }
+    let tokyoMorning = date("2026-09-24 10:00", "Asia/Tokyo")   // 纽约周三 21:00
+    let toyota = WatchEntry(symbol: "7203.T", market: "us")
+    check(MarketClock.isOpen(toyota, at: tokyoMorning), "Tokyo listing is not held to NYSE hours")
+    check(MarketClock.refreshInterval([toyota], base: 30, now: tokyoMorning) == 30
+          && MarketClock.refreshInterval([spy, toyota], base: 30, now: tokyoMorning) == 30, "a Tokyo listing keeps the base cadence")
+    check(MarketClock.refreshInterval([spy], base: 30, now: tokyoMorning) > 30, "NYSE alone still backs off overnight")
+    print("PASS: Yahoo symbols follow their own exchange")
+
     // 3) 按品种小数位:手动 > 行情源 > 港股价位表 > 2 位;闪变按同一精度比较
     let etf = WatchEntry(symbol: "510300", market: "cn")
     var hinted = Quote(price: 4.582, changePct: 1.1, series: nil, sessionStart: nil, sessionEnd: nil)

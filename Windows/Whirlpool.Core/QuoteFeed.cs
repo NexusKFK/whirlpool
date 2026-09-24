@@ -19,7 +19,7 @@ public sealed class QuoteFeed : IDisposable
     private (int Interval, bool Smart)? cadence;
     public string Status { get; private set; } = "Waiting for quotes";
     public DateTimeOffset? LastUpdated { get; private set; }
-    public static string Version { get; set; } = "2.0.4";
+    public static string Version { get; set; } = "2.0.5";
 
     public QuoteFeed(HttpMessageHandler? handler = null, Func<DateTimeOffset>? clock = null)
     {
@@ -31,8 +31,19 @@ public sealed class QuoteFeed : IDisposable
     }
 
     public static double RetryDelay(int count) => Math.Min(900, 30 * Math.Pow(2, Math.Clamp(count - 1, 0, 5)));
-    public static string TencentCode(WatchEntry entry) => entry.Market == "hk" ? "hk" + entry.Symbol.PadLeft(5, '0')
-        : (entry.Symbol.StartsWith('6') || entry.Symbol.StartsWith('5') || entry.Symbol.StartsWith('9') ? "sh" : "sz") + entry.Symbol;
+    /// <summary>
+    /// Hong Kong codes are left-padded to five digits. An A-share code may name its exchange (SH000001 is the SSE
+    /// Composite; 000001 alone is Ping An Bank in Shenzhen); otherwise 92/4/8 are Beijing, 6/5/9 Shanghai, the rest Shenzhen.
+    /// </summary>
+    public static string TencentCode(WatchEntry entry)
+    {
+        var s = entry.Symbol;
+        if (entry.Market == "hk") return "hk" + s.PadLeft(5, '0');
+        if (s.Length == 8 && s[..2] is "SH" or "SZ" or "BJ") return s[..2].ToLowerInvariant() + s[2..];
+        var exchange = s.StartsWith("92") || s.StartsWith('4') || s.StartsWith('8') ? "bj"
+            : s.StartsWith('6') || s.StartsWith('5') || s.StartsWith('9') ? "sh" : "sz";
+        return exchange + s;
+    }
 
     /// <summary>Makes the next call fetch (still honoring backoff), e.g. after waking from sleep.</summary>
     public void Invalidate() { if (failures == 0 && Now >= cooldownUntil) nextFetch = DateTimeOffset.MinValue; }
