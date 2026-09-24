@@ -33,6 +33,8 @@ jobs:
         run: swift build
       - name: Regression suite
         run: bash tools/test-price-flash.sh
+      - name: CLI and control socket
+        run: bash tools/test-cli.sh .build/debug/whirlpool
 
   windows:
     name: Windows core, publish and smoke test
