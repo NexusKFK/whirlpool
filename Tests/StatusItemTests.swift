@@ -6,7 +6,8 @@ func runStatusItemTests() throws {
                  "status item tests require a separate socket from the installed app")
     var config = TickerConfig()
     config.provider = "demo"; config.checkUpdates = false; config.smartRefresh = false
-    config.displayMode = "marquee"; config.menuWidthPoints = 1200; config.marqueeFont = "system"
+    config.displayMode = "marquee"; config.menuWidthPoints = 600  // fits a small CI menu bar; wider items get hidden by macOS
+    config.marqueeFont = "system"
     try writeConfig(config, to: configURL)
     let delegate = AppDelegate()
     delegate.applicationDidFinishLaunching(Notification(name: NSApplication.didFinishLaunchingNotification))
@@ -15,10 +16,11 @@ func runStatusItemTests() throws {
     let button = NSApp.windows.compactMap(\.contentView).flatMap(descendants)
         .first { $0.identifier?.rawValue == "whirlpool-status-button" } as! NSButton
     let surface = button.subviews.compactMap { $0 as? MarqueeView }.first!
-    func waitUntil(_ predicate: () -> Bool) {
+    func waitUntil(line: UInt = #line, _ predicate: () -> Bool) {
         let deadline = Date().addingTimeInterval(3)
         while !predicate(), Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.02)) }
-        precondition(predicate(), "status item did not reach the expected geometry")
+        precondition(predicate(), "status item did not reach the expected geometry (line \(line): button \(button.frame.width) pt, "
+                     + "art \(surface.art != nil), surface hidden \(surface.isHidden), screen \(NSScreen.main?.frame.width ?? 0) pt)")
     }
     func expectClickableStatusButton() {
         for x in [CGFloat(0.05), 0.5, 0.95] {
@@ -45,12 +47,12 @@ func runStatusItemTests() throws {
                                eventNumber: 0, clickCount: 1, pressure: type == .leftMouseDown ? 1 : 0)!
         }
         // Native buttons consume mouse-up in their tracking loop. A custom view returns
-        // immediately, so deliver any remaining release to the hit-tested view.
+        // immediately, so drain the posted release and deliver it to the hit-tested view.
+        // Headless CI can clamp a queued synthetic event's x to 0, so rebuild it at the click point.
         NSApp.postEvent(event(.leftMouseUp), atStart: true)
         target.mouseDown(with: event(.leftMouseDown))
-        if let release = NSApp.nextEvent(matching: .leftMouseUp,
-                                         until: Date(), inMode: .default, dequeue: true) {
-            target.mouseUp(with: release)
+        if NSApp.nextEvent(matching: .leftMouseUp, until: Date(), inMode: .default, dequeue: true) != nil {
+            target.mouseUp(with: event(.leftMouseUp))
         }
         RunLoop.main.run(until: Date().addingTimeInterval(0.05))
     }
