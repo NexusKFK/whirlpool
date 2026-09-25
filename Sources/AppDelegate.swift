@@ -11,6 +11,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var statusItem: NSStatusItem?
     private var menuSurface: MarqueeView?
+    private lazy var restoreStatusImage: NSImage = {
+        let image = renderIdleIcon(color: .white, dot: 1,
+                                   style: LEDStyle(tone: .dark, mono: true, panel: false), scale: 2)
+        image.isTemplate = true
+        return image
+    }()
     private var config: TickerConfig!
     private var quoteService: QuoteService!
     private var provider: QuoteProvider?
@@ -200,7 +206,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let item = NSStatusBar.system.statusItem(withLength: 24)
         guard let button = item.button else { statusItem = item; return }
         button.title = ""
-        button.image = nil
+        button.image = restoreStatusImage
         button.identifier = NSUserInterfaceItemIdentifier("whirlpool-status-button")
         button.action = #selector(statusItemClicked)
         button.target = self
@@ -208,6 +214,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         button.setAccessibilityLabel("Whirlpool")
         let surface = MarqueeView(frame: button.bounds)
         surface.autoresizingMask = [.width, .height]
+        surface.onClick = { [weak self] event in self?.handleStatusItemClick(event) }
+        surface.setAccessibilityElement(false)
+        surface.isHidden = true
         button.addSubview(surface)
         hook(surface)
         menuSurface = surface
@@ -346,13 +355,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// 状态项长度与浮动条尺寸跟随内容;固定长度免得 AppKit 反复重解内在尺寸
     private func syncSurfaceSizes() {
-        if let si = statusItem, let surface = menuSurface {
-            // Idle artwork is a small restore button. Keeping the expanded width here
-            // leaves the badge at the far left of an otherwise empty status item.
+        if let si = statusItem, let button = si.button, let surface = menuSurface {
+            // Give AppKit real native content for the persistent restore handle.
             // A held quote frame can also have an idle engine while fresh data loads.
-            let showsTicker = marqueeOn && (surface.art != nil || engine.phase != .idle)
-            let w = showsTicker ? menuOuterWidth : max(8, surface.contentWidth.rounded(.up))
+            let showsTicker = !userPaused && marqueeOn && (surface.art != nil || engine.phase != .idle)
+            if surface.superview !== button { button.addSubview(surface) }
+            surface.isHidden = !showsTicker
+            let image = showsTicker ? nil : restoreStatusImage
+            if button.image !== image { button.image = image }
+            let w = showsTicker ? menuOuterWidth : restoreStatusImage.size.width
             if abs(si.length - w) > 0.5 { si.length = w }
+            surface.frame = button.bounds
         }
         barWindow?.fitContent()
     }
@@ -391,7 +404,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // ── Menü ───────────────────────────────────────────────────────────────────
 
     @objc private func statusItemClicked() {
-        handleStatusItemClick(NSApp.currentEvent)
+        // Finish the native button's tracking before changing its image and width.
+        let event = NSApp.currentEvent
+        DispatchQueue.main.async { [weak self] in self?.handleStatusItemClick(event) }
     }
 
     func handleStatusItemClick(_ event: NSEvent?) {
@@ -557,7 +572,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func configureQuoteService() {
         let p = QuoteEngine.provider(for: config.provider)
         provider = p
-        (p as? RealProvider)?.includeSeries = boardOn
+        if let real = p as? RealProvider {
+            real.includeSeries = boardOn
+            real.usSource = RealProvider.USSource(rawValue: config.usQuoteSource) ?? .eastmoney
+        }
         quoteService = QuoteService(provider: p, interval: config.boardRefresh)
         applyCadence()
         quoteService.onUpdate = { [weak self] in
@@ -657,7 +675,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             configWindow?.currentConfig = { [weak self] in self?.config }
             configWindow?.onApplied = { [weak self] c in
                 guard let self else { return }
-                let resetSource = self.config.provider != c.provider
+                let resetSource = self.config.provider != c.provider || self.config.usQuoteSource != c.usQuoteSource
                 self.config = c
                 L10n.language = c.language
                 self.installMainMenu()
@@ -752,7 +770,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let cols = engine.surfaces().map { $0.presentationCol.map { String(format: "%.1f", $0) } ?? "null" }
         if let window = statusItem?.button?.window, menubar != "null" {
             let screen = (try? JSONEncoder().encode(window.screen?.localizedName ?? "")).flatMap { String(data: $0, encoding: .utf8) } ?? "\"\""
-            menubar = String(menubar.dropLast()) + ",\"screen\":\(screen)}"
+            menubar = String(menubar.dropLast()) + ",\"screen\":\(screen),\"itemVisible\":\(statusItem?.isVisible == true),\"nativeIcon\":\(statusItem?.button?.image != nil),\"surfaceHidden\":\(menuSurface?.isHidden == true),\"collapsed\":\(userPaused)}"
         }
         let listName = config.watchlists.indices.contains(config.activeWatchlist) ? config.watchlists[config.activeWatchlist].name : ""
         let list = (try? JSONEncoder().encode(listName)).flatMap { String(data: $0, encoding: .utf8) } ?? "\"\""
@@ -987,6 +1005,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // 跑马灯引擎(marquee/bar 共用同一时间线):清旧一轮、按新配置立即重拉
         engine.showIdle()
         restartMarquee()
+        configWindow?.reload(config: config)
     }
 
     private func startBoardTimer() {

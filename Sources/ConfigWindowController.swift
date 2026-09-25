@@ -83,8 +83,23 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
 
     init(config: TickerConfig) { self.config = config; super.init() }
     func reload(config: TickerConfig) {
-        if window?.isVisible == true { syncLayout(from: config) }
-        else { self.config = config }
+        if window?.isVisible == true {
+            // A live mode change supersedes the display draft, but keeps other edits.
+            // Reopening Settings without a live change must preserve draft selections.
+            if self.config.displayMode != config.displayMode {
+                self.config.displayMode = config.displayMode
+                syncDisplayChoices()
+            }
+            syncLayout(from: config)
+        } else { self.config = config }
+    }
+
+    private func syncDisplayChoices() {
+        let selected = config.displayMode.split(separator: ",")
+        for button in surfaces {
+            button.state = selected.contains(Substring(button.key)) ? .on : .off
+            button.needsDisplay = true
+        }
     }
 
     /// Keep an untouched layout draft aligned with real-window drags, without discarding edits.
@@ -114,8 +129,8 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
         entries = lists.isEmpty ? [] : lists[currentList].entries
         reloadListPicker()
         table.reloadData()
-        for button in surfaces { button.state = config.displayMode.split(separator: ",").contains(Substring(button.key)) ? .on : .off; button.needsDisplay = true }
-        source.selectItem(at: config.provider == "real" ? 0 : 1)
+        syncDisplayChoices()
+        source.selectItem(at: Self.sourceIndex(config))
         language.selectItem(at: ["system", "en", "zh-Hans"].firstIndex(of: config.language) ?? 0)
         refresh.stringValue = String(Int(config.boardRefresh))
         speed.doubleValue = 1 / config.scrollSpeed
@@ -125,7 +140,8 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
         width.minValue = min(20, displayedFraction(config) * 100)
         width.doubleValue = displayedFraction(config) * 100
         let menuPoints = config.menuWidthPoints ?? Double(config.defaultWidth * 18 + 8)
-        menuWidth.minValue = 120; menuWidth.maxValue = max(menuScreenWidth * 0.40, menuPoints)
+        menuWidth.minValue = 120
+        menuWidth.maxValue = max(menuTickerWidth(requested: 1200, screenWidth: menuScreenWidth), menuPoints)
         menuWidth.doubleValue = menuPoints
         size.selectItem(at: max(0, min(2, config.ledDotSize - 1)))
         font.selectItem(at: ["led", "system", "mono"].firstIndex(of: config.marqueeFont) ?? 0)
@@ -483,7 +499,8 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
     }
 
     private func generalTab() -> NSView {
-        source.removeAllItems(); source.addItems(withTitles: [L("Yahoo / Tencent"), L("Demo (simulated prices)")])
+        source.removeAllItems()
+        source.addItems(withTitles: [L("EastMoney first (recommended)"), L("Tencent first"), L("Yahoo for US stocks"), L("Demo (simulated prices)")])
         language.removeAllItems(); language.addItems(withTitles: [L("System Default"), "English", "简体中文"])
         refresh.widthAnchor.constraint(equalToConstant: 80).isActive = true
         refresh.setAccessibilityLabel(L("Refresh interval"))
@@ -495,12 +512,19 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
         updates.title = L("Check for updates automatically")
         return stack([pageTitle("General", "Data, language and startup."),
                       panel([formRow("Language", [language]), note("Language changes apply after saving.")]),
-                      panel([formRow("Data source", [source]), formRow("Refresh interval", [refresh, NSTextField(labelWithString: L("seconds"))]),
+                      panel([formRow("Data source", [source]),
+                             note("The choice applies to US stocks. EastMoney and Tencent back each other up, with Yahoo as the last fallback; index, futures and exchange-suffixed symbols such as ^GSPC or 7203.T go to Yahoo. China and Hong Kong always use Tencent; crypto uses Yahoo. Yahoo may need a proxy in mainland China."),
+                             formRow("Refresh interval", [refresh, NSTextField(labelWithString: L("seconds"))]),
                       note("30 seconds is recommended. Short intervals may be rate-limited. All displays share one request cycle."),
                       smart, note("Uses exchange calendars with holidays and half days (NYSE, SSE/SZSE, HKEX); crypto, futures and FX count as always open. Refreshing resumes at the next open."),
                       redUp]), panel([login, dock, note("The Dock icon gives a visible handle on the running app — right-click it to quit or relaunch."),
                       updates, note("Once a day Whirlpool asks GitHub for the latest release (no identifiers sent). New versions appear in the menu and scroll by once."),
-                      note("Your watchlist stays on this device. Symbols are sent only to the selected quote provider.")])])
+                      note("Your watchlist stays on this device. Symbols are sent only to the quote providers above.")])])
+    }
+
+    /// 配置 → 数据源弹窗索引(前 3 项是 real 的三种链序,第 4 项 demo)
+    private static func sourceIndex(_ config: TickerConfig) -> Int {
+        config.provider == "demo" ? 3 : ["eastmoney", "tencent", "yahoo"].firstIndex(of: config.usQuoteSource) ?? 0
     }
 
     private func stack(_ views: [NSView]) -> NSStackView {
@@ -786,7 +810,10 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
         draft.watchlists = cleanedLists
         draft.activeWatchlist = currentList
         draft.displayMode = ["marquee", "bar", "board"].filter { key in surfaces.first { $0.key == key }?.state == .on }.joined(separator: ",")
-        draft.provider = source.indexOfSelectedItem == 0 ? "real" : "demo"
+        draft.provider = source.indexOfSelectedItem == 3 ? "demo" : "real"
+        if (0...2).contains(source.indexOfSelectedItem) {   // 选演示时保留原链序
+            draft.usQuoteSource = ["eastmoney", "tencent", "yahoo"][source.indexOfSelectedItem]
+        }
         draft.language = ["system", "en", "zh-Hans"][language.indexOfSelectedItem]
         draft.boardRefresh = interval
         draft.scrollSpeed = 1 / speed.doubleValue

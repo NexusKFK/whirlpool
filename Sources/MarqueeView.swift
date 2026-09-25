@@ -20,6 +20,7 @@ final class MarqueeView: NSView {
     var onAppearanceChange: (() -> Void)?
     var onBackingChange: (() -> Void)?
     var onHover: ((Bool) -> Void)?
+    var onClick: ((NSEvent) -> Void)?
 
     private let panel = CALayer()
     private let viewport = CALayer()
@@ -59,8 +60,20 @@ final class MarqueeView: NSView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
-    // 点击交给宿主(状态项按钮 / 浮动条窗口拖动与右键)
-    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    // The custom menu ticker owns its mouse events; floating windows keep their drag/menu host.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard onClick != nil, !isHidden else { return nil }
+        return super.hitTest(point)
+    }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { onClick != nil }
+    override func mouseDown(with event: NSEvent) {}
+    override func rightMouseDown(with event: NSEvent) {}
+    override func mouseUp(with event: NSEvent) { clickInside(event) }
+    override func rightMouseUp(with event: NSEvent) { clickInside(event) }
+    private func clickInside(_ event: NSEvent) {
+        guard bounds.contains(convert(event.locationInWindow, from: nil)) else { return }
+        onClick?(event)
+    }
 
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()

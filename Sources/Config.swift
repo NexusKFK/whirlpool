@@ -52,6 +52,7 @@ struct TickerConfig: Codable {
     var pausePerSymbol:    Double            = 0      // >0 时每个标的滚到左缘停留 N 秒
     var redUpMarkets:      [String]          = ["cn", "hk"]
     var provider:          String            = "real" // demo | real(见 RealProvider.swift)
+    var usQuoteSource:     String            = "eastmoney" // 美股数据链优先源:eastmoney | tencent | yahoo(见 RealProvider.swift)
 
     // Board 模式(缩略图报价卡,贴程序坞两端空位)
     var displayMode:       String            = "marquee" // 可组合: marquee|board|bar,逗号分隔;both=旧别名
@@ -76,7 +77,7 @@ struct TickerConfig: Codable {
     init() {}
 
     private enum CodingKeys: String, CodingKey {
-        case tickerEnabled, defaultColor, defaultWidth, ledDotSize, marqueeFont, showDockIcon, scrollSpeed, defaultPause, customChars, transparent, transparentColor, marqueeSeparator, changeArrows, quoteLoop, watchlist, pausePerSymbol, redUpMarkets, provider, displayMode, boardCorner, boardOrigin, boardRefresh, barOrigin, boardPixelFont, marqueeBlink, barBackground, hoverPause, smartRefresh, language
+        case tickerEnabled, defaultColor, defaultWidth, ledDotSize, marqueeFont, showDockIcon, scrollSpeed, defaultPause, customChars, transparent, transparentColor, marqueeSeparator, changeArrows, quoteLoop, watchlist, pausePerSymbol, redUpMarkets, provider, usQuoteSource, displayMode, boardCorner, boardOrigin, boardRefresh, barOrigin, boardPixelFont, marqueeBlink, barBackground, hoverPause, smartRefresh, language
         case watchlists, activeWatchlist, checkUpdates, displayScreen, lockPosition, barClickThrough
         case barPlacement, barWidthFraction, menuWidthPoints
     }
@@ -114,6 +115,7 @@ struct TickerConfig: Codable {
         pausePerSymbol = try values.decodeIfPresent(type(of: pausePerSymbol), forKey: .pausePerSymbol) ?? pausePerSymbol
         redUpMarkets = try values.decodeIfPresent(type(of: redUpMarkets), forKey: .redUpMarkets) ?? redUpMarkets
         provider = try values.decodeIfPresent(type(of: provider), forKey: .provider) ?? provider
+        usQuoteSource = try values.decodeIfPresent(type(of: usQuoteSource), forKey: .usQuoteSource) ?? usQuoteSource
         displayMode = try values.decodeIfPresent(type(of: displayMode), forKey: .displayMode) ?? displayMode
         boardCorner = try values.decodeIfPresent(type(of: boardCorner), forKey: .boardCorner) ?? boardCorner
         boardRefresh = try values.decodeIfPresent(type(of: boardRefresh), forKey: .boardRefresh) ?? boardRefresh
@@ -160,6 +162,7 @@ struct TickerConfig: Codable {
         try c.encode(pausePerSymbol, forKey: .pausePerSymbol)
         try c.encode(redUpMarkets, forKey: .redUpMarkets)
         try c.encode(provider, forKey: .provider)
+        try c.encode(usQuoteSource, forKey: .usQuoteSource)
         try c.encode(displayMode, forKey: .displayMode)
         try c.encode(boardCorner, forKey: .boardCorner)
         try c.encodeIfPresent(boardOrigin, forKey: .boardOrigin)
@@ -193,6 +196,7 @@ struct TickerConfig: Codable {
         pausePerSymbol = pausePerSymbol.isFinite ? min(60, max(0, pausePerSymbol)) : 0
         if !["system", "en", "zh-Hans"].contains(language) { language = "system" }
         if !["real", "demo"].contains(provider) { provider = "real" }
+        if !["eastmoney", "tencent", "yahoo"].contains(usQuoteSource) { usQuoteSource = "eastmoney" }
         transparentColor = ColorScheme(configKey: transparentColor).rawValue
         if !["glass", "none"].contains(barBackground) { barBackground = "glass" }
         displayScreen = displayScreen.trimmingCharacters(in: .whitespaces)
