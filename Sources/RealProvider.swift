@@ -7,6 +7,7 @@ import Foundation
 //   加密货币等       只有 Yahoo 覆盖,直接走 Yahoo。
 // 报价与分时分开凑:链上先凑齐报价,再由供分时的源(东财,其次 Yahoo)补曲线;
 // 腾讯没有美股分钟数据。Yahoo 不可达只是没缩略图,行情不受影响。
+// 分时线走 SeriesCache:5 分钟整条校准一次,其间用报价接尾,不必每次刷新都整条重拉。
 // 任一环失败不影响其他环;全部失败回调空字典,由 QuoteService 统一退避重试。
 
 final class RealProvider: QuoteProvider {
@@ -16,8 +17,14 @@ final class RealProvider: QuoteProvider {
     enum USSource: String { case eastmoney, tencent, yahoo }
     var usSource: USSource = .eastmoney
 
-    private let client = QuoteHTTPClient()
+    private let client: QuoteHTTPClient
+    private let seriesCache: SeriesCache
     var cooldownUntil: Date? { client.cooldownUntil }
+
+    init(client: QuoteHTTPClient = QuoteHTTPClient(), seriesCache: SeriesCache = SeriesCache()) {
+        self.client = client
+        self.seriesCache = seriesCache
+    }
     /// 只有报价卡需要当日分时线;纯跑马灯时不拉分钟端点
     var includeSeries = true
 
@@ -27,6 +34,7 @@ final class RealProvider: QuoteProvider {
         private var map: [String: String] = [:]
         func get(_ symbol: String) -> String? { lock.lock(); defer { lock.unlock() }; return map[symbol] }
         func set(_ secid: String, for symbol: String) { lock.lock(); defer { lock.unlock() }; map[symbol] = secid }
+        func remove(_ symbol: String) { lock.lock(); defer { lock.unlock() }; map[symbol] = nil }
         func unresolved(_ entries: [WatchEntry]) -> [WatchEntry] {
             lock.lock(); defer { lock.unlock() }
             return entries.filter { map[$0.symbol] == nil }
@@ -70,7 +78,7 @@ final class RealProvider: QuoteProvider {
         }
         if !yahooSide.isEmpty {
             group.enter()
-            fetchYahoo(yahooSide, includeSeries: wantsSeries) { qs in
+            fetchYahooCached(yahooSide, includeSeries: wantsSeries) { qs in
                 lock.lock(); results.merge(qs) { a, _ in a }; lock.unlock()
                 group.leave()
             }
@@ -87,25 +95,32 @@ final class RealProvider: QuoteProvider {
         fetchTencentQuotes(entries) { quotes in
             guard includeSeries else { completion(quotes); return }
             var out = quotes
-            // 分钟线:每标的单独取,取不到就让该行没有缩略图
+            // 分钟线:缓存新鲜就把报价接到尾巴上;否则每标的单独取,取不到就让该行没有缩略图
             let codeToSymbol = Dictionary(entries.map { (self.tencentCode($0), $0.symbol) }, uniquingKeysWith: { first, _ in first })
-            let present = Set(out.keys)
             let outLock = NSLock()
             let seriesGroup = DispatchGroup()
-            for (code, symbol) in codeToSymbol where present.contains(symbol) {
-                let market = entries.first { $0.symbol == symbol }?.market ?? "cn"
-                let session: (Double, Double) = market == "hk" ? (9.5 * 3600, 16 * 3600)
-                                                                : (9.5 * 3600, 15 * 3600)
+            for (code, symbol) in codeToSymbol {
+                outLock.lock(); let quote = out[symbol]; outLock.unlock()
+                guard let quote else { continue }
+                let key = "tc:" + code
+                if let cached = self.seriesCache.extended(key, with: quote) {
+                    outLock.lock(); out[symbol] = cached; outLock.unlock()
+                    continue
+                }
+                let hk = entries.first { $0.symbol == symbol }?.market == "hk"
+                let session: (Double, Double) = hk ? (9.5 * 3600, 16 * 3600) : (9.5 * 3600, 15 * 3600)
+                let zone = TimeZone(identifier: hk ? "Asia/Hong_Kong" : "Asia/Shanghai")!
                 seriesGroup.enter()
                 self.fetchTencentSeries(code: code) { series in
                     if let series {
+                        self.seriesCache.store(key, series: series, start: session.0, end: session.1,
+                                               clock: .daySeconds, zone: zone,
+                                               day: quote.marketTime.map { SeriesCache.day($0, zone) })
                         outLock.lock()
-                        if let q = out[symbol] {
-                            out[symbol] = Quote(price: q.price, changePct: q.changePct,
-                                                series: series,
-                                                sessionStart: session.0, sessionEnd: session.1,
-                                                decimals: q.decimals, marketTime: q.marketTime)
-                        }
+                        out[symbol] = Quote(price: quote.price, changePct: quote.changePct,
+                                            series: series,
+                                            sessionStart: session.0, sessionEnd: session.1,
+                                            decimals: quote.decimals, marketTime: quote.marketTime)
                         outLock.unlock()
                     }
                     seriesGroup.leave()
@@ -165,13 +180,25 @@ final class RealProvider: QuoteProvider {
     /// 腾讯时间戳:A 股 "20260918150003"(北京时间),港股 "2026/09/18 16:08:32"(香港时间),
     /// 美股 "2026-09-25 11:41:20"(美东,随冬令时切换)
     static func tencentTime(_ raw: String, zone: String) -> Date? {
+        let format = raw.contains("/") ? "yyyy/MM/dd HH:mm:ss"
+                   : raw.contains("-") ? "yyyy-MM-dd HH:mm:ss"
+                   : "yyyyMMddHHmmss"
+        return cachedFormatter(format, zone: zone).date(from: raw.trimmingCharacters(in: .whitespaces))
+    }
+
+    /// DateFormatter 建一次要几十微秒,每条报价/每条分时都新建会白耗;只读使用是线程安全的
+    private static let formatterLock = NSLock()
+    private static var formatters: [String: DateFormatter] = [:]
+    static func cachedFormatter(_ format: String, zone: String) -> DateFormatter {
+        formatterLock.lock(); defer { formatterLock.unlock() }
+        let key = zone + "|" + format
+        if let f = formatters[key] { return f }
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
         f.timeZone = TimeZone(identifier: zone)
-        f.dateFormat = raw.contains("/") ? "yyyy/MM/dd HH:mm:ss"
-                     : raw.contains("-") ? "yyyy-MM-dd HH:mm:ss"
-                     : "yyyyMMddHHmmss"
-        return f.date(from: raw.trimmingCharacters(in: .whitespaces))
+        f.dateFormat = format
+        formatters[key] = f
+        return f
     }
 
     func tencentCode(_ e: WatchEntry) -> String { Self.tencentCode(for: e) }
@@ -242,8 +269,12 @@ final class RealProvider: QuoteProvider {
     // 分时 trends2 是当日逐分钟(北京时间),换算成 epoch 后与 Yahoo 分时同一坐标系。
 
     private func fetchEastMoneyQuotes(_ entries: [WatchEntry], completion: @escaping ([String: Quote]) -> Void) {
-        let symbolBySecid = Dictionary(entries.flatMap { e in Self.eastMoneySecids(e.symbol).map { ($0, e.symbol) } },
-                                       uniquingKeysWith: { first, _ in first })
+        // 解析过上市组的只问那一个 secid,没解析过的三个前缀一起问
+        let candidates = entries.flatMap { e -> [(String, String)] in
+            if let known = secidCache.get(e.symbol) { return [(known, e.symbol)] }
+            return Self.eastMoneySecids(e.symbol).map { ($0, e.symbol) }
+        }
+        let symbolBySecid = Dictionary(candidates, uniquingKeysWith: { first, _ in first })
         let secids = symbolBySecid.keys.joined(separator: ",")
         guard let url = URL(string: "https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&invt=2&fields=f2,f3,f12,f13,f124&secids=\(secids)") else {
             completion([:]); return
@@ -265,6 +296,8 @@ final class RealProvider: QuoteProvider {
                                     decimals: Self.eastMoneyDecimals(parsed.price),
                                     marketTime: (row["f124"] as? Double).map { Date(timeIntervalSince1970: $0) })
             }
+            // 缓存的 secid 不再回数(停牌、换了上市组):忘掉,下次三个前缀重新解析
+            for e in entries where out[e.symbol] == nil { self.secidCache.remove(e.symbol) }
             completion(out)
         }
     }
@@ -362,10 +395,7 @@ final class RealProvider: QuoteProvider {
     /// "2026-09-25 21:30,335.950,…" → 逐分钟点(北京时间换算 epoch);
     /// 时段轴取首点起 6.5 小时,提前收盘只是轴更宽,不影响画线
     static func parseEastMoneyTrends(_ lines: [String], preClose: Double) -> EMSeries? {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.timeZone = TimeZone(identifier: "Asia/Shanghai")
-        f.dateFormat = "yyyy-MM-dd HH:mm"
+        let f = cachedFormatter("yyyy-MM-dd HH:mm", zone: "Asia/Shanghai")
         var pts: [SeriesPt] = []
         var lastTime: Date?
         for line in lines {
@@ -402,14 +432,26 @@ final class RealProvider: QuoteProvider {
 
         func seriesPass() {
             guard includeSeries else { finish(); return }
+            // 缓存新鲜的线直接接尾(东财线优先,其次 Yahoo 线),剩下的才去拉
+            for e in entries {
+                guard let q = merged[e.symbol], q.series == nil else { continue }
+                if let hit = seriesCache.extended("em:" + e.symbol, with: q)
+                    ?? seriesCache.extended("yh:" + e.symbol, with: q) {
+                    merged[e.symbol] = hit
+                }
+            }
             let need = entries.filter { merged[$0.symbol]?.series == nil }
             guard !need.isEmpty, usSource != .yahoo else { finish(); return }
             fetchEastMoneySeries(need) { got in
                 for (symbol, em) in got {
+                    self.seriesCache.store("em:" + symbol, series: em.series, start: em.start, end: em.end,
+                                           clock: .epoch, zone: Self.newYork)
                     if let q = merged[symbol] {
-                        merged[symbol] = Quote(price: q.price, changePct: q.changePct,
-                                               series: em.series, sessionStart: em.start, sessionEnd: em.end,
-                                               decimals: q.decimals, marketTime: q.marketTime ?? em.lastTime)
+                        // 分时与快照是两次请求,快照更新:线尾接上快照价,缩略图末端与报价一致
+                        merged[symbol] = self.seriesCache.extended("em:" + symbol, with: q)
+                            ?? Quote(price: q.price, changePct: q.changePct,
+                                     series: em.series, sessionStart: em.start, sessionEnd: em.end,
+                                     decimals: q.decimals, marketTime: q.marketTime ?? em.lastTime)
                     } else if em.preClose > 0, em.lastPrice > 0 {
                         merged[symbol] = Quote(price: em.lastPrice,
                                                changePct: (em.lastPrice - em.preClose) / em.preClose * 100,
@@ -419,7 +461,7 @@ final class RealProvider: QuoteProvider {
                 }
                 let still = entries.filter { !yahooTried.contains($0.symbol) && merged[$0.symbol]?.series == nil }
                 guard !still.isEmpty else { finish(); return }
-                self.fetchYahoo(still, includeSeries: true) { fresh in
+                self.fetchYahooCached(still, includeSeries: true) { fresh in
                     for (symbol, yq) in fresh {
                         if let q = merged[symbol] {
                             if let series = yq.series {
@@ -443,7 +485,7 @@ final class RealProvider: QuoteProvider {
             switch head {
             case .yahoo:
                 yahooTried.formUnion(todo.map(\.symbol))
-                fetchYahoo(todo, includeSeries: includeSeries) { qs in merge(qs); seriesPass() }
+                fetchYahooCached(todo, includeSeries: includeSeries) { qs in merge(qs); seriesPass() }
             case .tencent:
                 let plain = todo.filter { Self.usListed($0.symbol) }
                 guard !plain.isEmpty else { step(rest.dropFirst()); return }
@@ -461,12 +503,35 @@ final class RealProvider: QuoteProvider {
     // v8 chart 端点,免 crumb。chartPreviousClose = 区间前收盘(1d 即昨收),
     // regularMarketPrice 与之相除得涨跌幅;同一响应的 indicators 即分钟线。
 
-    private func fetchYahoo(_ entries: [WatchEntry], includeSeries: Bool, completion: @escaping ([String: Quote]) -> Void) {
+    /// Yahoo 报价 + 分时:缓存还新鲜的只要报价(1d 包,实测约为 1m 分时包的五分之一),
+    /// 再把报价接到缓存线尾;缓存过期的整条重拉,报价已跨交易日的补拉一次整条
+    private func fetchYahooCached(_ entries: [WatchEntry], includeSeries: Bool, completion: @escaping ([String: Quote]) -> Void) {
+        guard includeSeries else { fetchYahoo(entries, seriesFor: [], completion: completion); return }
+        let full = Set(entries.filter { !seriesCache.isFresh("yh:" + $0.symbol) }.map(\.symbol))
+        fetchYahoo(entries, seriesFor: full) { fresh in
+            var out = fresh
+            var stale: [WatchEntry] = []
+            for e in entries where !full.contains(e.symbol) {
+                guard let q = out[e.symbol] else { continue }
+                if let cached = self.seriesCache.extended("yh:" + e.symbol, with: q) { out[e.symbol] = cached }
+                else { stale.append(e) }
+            }
+            guard !stale.isEmpty else { completion(out); return }
+            self.fetchYahoo(stale, seriesFor: Set(stale.map(\.symbol))) { again in
+                out.merge(again) { _, new in new }
+                completion(out)
+            }
+        }
+    }
+
+    /// seriesFor 里的标的要 1 分钟线(整条),其余只要报价
+    private func fetchYahoo(_ entries: [WatchEntry], seriesFor: Set<String>, completion: @escaping ([String: Quote]) -> Void) {
         var out: [String: Quote] = [:]
         let lock = NSLock()
         let group = DispatchGroup()
 
         for e in entries {
+            let includeSeries = seriesFor.contains(e.symbol)
             group.enter()
             let raw = e.market == "us" ? Self.yahooUSSymbol(e.symbol) : e.symbol
             let sym = raw.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? raw
@@ -508,7 +573,12 @@ final class RealProvider: QuoteProvider {
                         if day.count > 1 { pts = day }
                         else { sStart = nil; sEnd = nil }
                     }
-                    if pts.count > 1 { series = pts }
+                    if pts.count > 1 {
+                        series = pts
+                        let zone = (meta["exchangeTimezoneName"] as? String).flatMap(TimeZone.init(identifier:)) ?? Self.newYork
+                        self.seriesCache.store("yh:" + e.symbol, series: pts, start: sStart, end: sEnd,
+                                               clock: .epoch, zone: zone)
+                    }
                 }
 
                 let hint = meta["priceHint"] as? Int
@@ -528,6 +598,8 @@ final class RealProvider: QuoteProvider {
     static func yahooUSSymbol(_ symbol: String) -> String {
         usListed(symbol) ? symbol.replacingOccurrences(of: ".", with: "-") : symbol
     }
+
+    static let newYork = TimeZone(identifier: "America/New_York")!
 
     private func httpOK(_ resp: URLResponse?) -> Bool {
         guard let code = (resp as? HTTPURLResponse)?.statusCode else { return false }

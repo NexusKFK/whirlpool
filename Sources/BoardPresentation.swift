@@ -34,10 +34,20 @@ struct BoardStatus {
     }
 
     static func timestamp(_ date: Date, relativeTo now: Date, seconds: Bool = false) -> String {
+        let template = Calendar.current.isDate(date, inSameDayAs: now) ? (seconds ? "HHmmss" : "HHmm") : "MMMdHHmm"
+        return formatter(template).string(from: date)
+    }
+
+    /// 每次刷新报价卡都要给每行、页脚格式化时间;DateFormatter 按语言+模板复用(主线程)
+    private static var formatters: [String: DateFormatter] = [:]
+    private static func formatter(_ template: String) -> DateFormatter {
+        let language = L10n.isChinese ? "zh_Hans" : "en_US"
+        let key = language + "|" + template + "|" + TimeZone.current.identifier
+        if let cached = formatters[key] { return cached }
         let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: L10n.isChinese ? "zh_Hans" : "en_US")
-        formatter.setLocalizedDateFormatFromTemplate(
-            Calendar.current.isDate(date, inSameDayAs: now) ? (seconds ? "HHmmss" : "HHmm") : "MMMdHHmm")
-        return formatter.string(from: date)
+        formatter.locale = Locale(identifier: language)
+        formatter.setLocalizedDateFormatFromTemplate(template)
+        formatters[key] = formatter
+        return formatter
     }
 }

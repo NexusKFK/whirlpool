@@ -398,7 +398,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard !userPaused, config.tickerEnabled else { return }
         quoteService.requestRefresh()
         if marqueeOn || barOn { fetchNextQuoteCycle() }
-        if boardOn { startBoardTimer(); refreshBoard() }
+        if boardOn { refreshBoard() }
     }
 
     // ── Menü ───────────────────────────────────────────────────────────────────
@@ -433,7 +433,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             board?.orderOut(nil)
         } else {
             if barOn { barWindow?.orderFrontRegardless() }
-            if boardOn { board?.orderFrontRegardless(); startBoardTimer(); refreshBoard() }
+            if boardOn { board?.orderFrontRegardless(); refreshBoard() }
             restartMarquee()
         }
     }
@@ -638,7 +638,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func toggleTickerEnabled() {
         config.tickerEnabled.toggle()
         saveConfig(config)
-        if config.tickerEnabled { restartMarquee() } else { engine.stop() }
+        if config.tickerEnabled { restartMarquee(); if boardOn { refreshBoard() } } else { engine.stop() }
     }
 
     @objc private func clearQueue() {
@@ -774,7 +774,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let listName = config.watchlists.indices.contains(config.activeWatchlist) ? config.watchlists[config.activeWatchlist].name : ""
         let list = (try? JSONEncoder().encode(listName)).flatMap { String(data: $0, encoding: .utf8) } ?? "\"\""
-        return "{\"phase\":\"\(engine.phaseName)\",\"queue\":\(engine.queueCount),\"pid\":\(getpid()),\"version\":\"\(Self.version)\",\"list\":\(list),\"menubar\":\(menubar),\"cols\":[\(cols.joined(separator: ","))]}"
+        // board:报价卡是否被挡住、离下一次拉取还有几秒(遮挡时应停拉)
+        var boardInfo = "null"
+        if boardOn, let board {
+            boardInfo = "{\"visible\":\(board.isVisible),\"occluded\":\(boardHidden),\"timer\":\(boardTimer?.isValid == true)}"
+        }
+        let next = quoteService.map { Int(max(0, $0.nextRefresh.timeIntervalSinceNow).rounded()) } ?? 0
+        let quotes = (try? JSONEncoder().encode(quoteService?.status ?? "")).flatMap { String(data: $0, encoding: .utf8) } ?? "\"\""
+        return "{\"phase\":\"\(engine.phaseName)\",\"queue\":\(engine.queueCount),\"pid\":\(getpid()),\"version\":\"\(Self.version)\",\"list\":\(list),\"menubar\":\(menubar),\"board\":\(boardInfo),\"quotes\":\(quotes),\"nextFetchIn\":\(next),\"cols\":[\(cols.joined(separator: ","))]}"
     }
 
     // ── Quote-Loop ───────────────────────────────────────────────────────────────
@@ -993,10 +1000,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 board?.menuProvider = { [weak self] in self?.buildMenu() ?? NSMenu() }
                 board?.onOpenChart = { [weak self] entry in self?.openChart(for: entry) }
                 board?.onOriginChange = { [weak self] origin in self?.config.boardOrigin = origin }
+                NotificationCenter.default.addObserver(self, selector: #selector(boardOcclusionChanged),
+                                                       name: NSWindow.didChangeOcclusionStateNotification, object: board)
             }
             board?.config = config
             if !userPaused { board?.orderFrontRegardless() }
-            startBoardTimer()
             refreshBoard()
         } else {
             board?.orderOut(nil)
@@ -1008,25 +1016,45 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         configWindow?.reload(config: config)
     }
 
-    private func startBoardTimer() {
-        guard boardTimer == nil, !suspended else { return }
-        let t = Timer(timeInterval: max(5, config.boardRefresh), repeats: true) { [weak self] _ in
-            self?.refreshBoard()
-        }
-        t.tolerance = 2
+    /// 报价卡开着却看不见:被全屏 app 的空间盖住、所在屏幕关了。
+    private var boardHidden: Bool {
+        guard let board, board.isVisible else { return false }
+        return !board.occlusionState.contains(.visible)
+    }
+
+    /// 露面立刻补一次(未到期直接用缓存);被盖住就停掉定时拉取
+    @objc private func boardOcclusionChanged() {
+        guard boardOn, !userPaused, !suspended else { return }
+        if boardHidden { scheduleBoardRefresh(in: 60) } else { refreshBoard() }
+    }
+
+    /// 在行情服务的下一次请求时刻醒来:节拍、智能刷新、失败退避、限流都已在那里算好。
+    /// (旧做法是固定节拍的重复定时器,总比缓存到期早醒一点 → 撞缓存再等一整轮,15 秒实际成了 30 秒)
+    private func scheduleBoardRefresh(in delay: TimeInterval? = nil) {
+        boardTimer?.invalidate(); boardTimer = nil
+        guard boardOn, !userPaused, !suspended, config.tickerEnabled else { return }
+        let wait = delay ?? min(1800, max(1, quoteService.nextRefresh.timeIntervalSinceNow + 0.05))
+        let t = Timer(timeInterval: wait, repeats: false) { [weak self] _ in self?.refreshBoard(fromTimer: true) }
+        t.tolerance = min(0.3, wait * 0.05)   // 只会晚不会早;给大了刷新间隔会被悄悄拉长
         RunLoop.main.add(t, forMode: .common)
         boardTimer = t
     }
 
-    private func refreshBoard() {
-        guard !userPaused, !suspended, config.tickerEnabled else { return }
+    private func refreshBoard(fromTimer: Bool = false) {
+        boardTimer?.invalidate(); boardTimer = nil
+        guard boardOn, !userPaused, !suspended, config.tickerEnabled else { return }
+        // 定时刷新时报价卡被挡住:不拉,等露面(遮挡通知)再刷;每分钟复核一次兜底
+        if fromTimer, boardHidden { scheduleBoardRefresh(in: 60); return }
         let revision = configRevision
         let entries = config.watchlist
         let redUp   = config.redUpMarkets
         let arrows  = config.changeArrows
         quoteService.quotes(for: entries) { [weak self] quotes in
             DispatchQueue.main.async {
-                guard let self, self.configRevision == revision, !self.userPaused, !self.suspended,
+                guard let self else { return }
+                // 刷新链不能断:这批数据哪怕因配置变了作废,也要排上下一次(暂停/休眠/关闭由排程自己拦)
+                defer { self.scheduleBoardRefresh() }
+                guard self.configRevision == revision, !self.userPaused, !self.suspended,
                       self.config.tickerEnabled else { return }
                 self.board?.update(entries: entries, quotes: quotes,
                                    redUpMarkets: redUp, at: self.quoteService.lastUpdated ?? Date(), changeArrows: arrows,

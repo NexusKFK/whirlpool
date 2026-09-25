@@ -207,4 +207,28 @@ func runStatusItemTests() throws {
         expectClickableStatusButton()
     }
     print("PASS: full mouse down/up dispatch and native restore icons work across all 7 display modes")
+
+    // Quote-board refreshes are one-shot timers due at the quote service's next request.
+    // A refresh whose data is discarded by a config change must still schedule the next one.
+    func status() -> [String: Any] {
+        var reply: String?
+        DispatchQueue.global().async {
+            guard let instance = connectInstance(timeout: 2) else { return }
+            let text = roundTrip(instance.fd, "{\"type\":\"get_status\"}")
+            close(instance.fd)
+            DispatchQueue.main.async { reply = text ?? "" }
+        }
+        let deadline = Date().addingTimeInterval(3)
+        while reply == nil, Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.02)) }
+        return (try? JSONSerialization.jsonObject(with: Data((reply ?? "{}").utf8))) as? [String: Any] ?? [:]
+    }
+    func boardTimerScheduled() -> Bool { (status()["board"] as? [String: Any])?["timer"] as? Bool == true }
+    selectMode("marquee,board")   // with a ticker on, Clear Messages restarts it and bumps the revision
+    RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+    precondition(boardTimerScheduled(), "the quote board schedules its next refresh")
+    menuAction("refreshQuotes")
+    menuAction("clearQueue")   // bumps the revision while the refresh result is still queued
+    RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+    precondition(boardTimerScheduled(), "a discarded refresh result must not end the board refresh chain")
+    print("PASS: quote-board refreshes stay scheduled across discarded results")
 }
