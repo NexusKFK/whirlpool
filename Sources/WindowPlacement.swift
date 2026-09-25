@@ -53,7 +53,7 @@ func constrainedFrame(_ frame: NSRect, inside area: NSRect, margin: CGFloat = 8)
 
 /// Settings and the live status item share the same screen-width cap.
 func menuTickerWidth(requested: CGFloat, screenWidth: CGFloat) -> CGFloat {
-    max(120, min(requested, screenWidth * 0.40))
+    max(120, min(requested, screenWidth * 0.60))
 }
 
 /// Percentage widths describe the complete capsule, including its background padding.

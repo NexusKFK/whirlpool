@@ -8,7 +8,10 @@ func runWindowStateTests() throws {
     let oversized = constrainedFrame(NSRect(x: -5000, y: -5000, width: 1600, height: 900), inside: area)
     precondition(oversized.origin == NSPoint(x: -1192, y: 8), "oversized windows retain a reachable corner")
     precondition(placementScreen("auto") == NSScreen.screens.first, "automatic placement uses the primary display")
-    precondition(abs(menuTickerWidth(requested: 1200, screenWidth: 2048) - 819.2) < 0.001)
+    precondition(menuTickerWidth(requested: 1200, screenWidth: 2048) == 1200,
+                 "wide menu preferences must use the space beyond the former 40 percent cap")
+    precondition(menuTickerWidth(requested: 1200, screenWidth: 1440) == 864,
+                 "smaller screens retain space for application menus and other status items")
     precondition(menuTickerWidth(requested: 280, screenWidth: 2048) == 280)
     precondition(menuTickerWidth(requested: 80, screenWidth: 1440) == 120)
     let usable = NSRect(x: -1200, y: 70, width: 1200, height: 700)

@@ -63,6 +63,7 @@ func runCoreTests() throws {
                  && !ConfigWindowController.validEntries([WatchEntry(symbol: "SH00001", market: "cn")]))
     precondition(!ConfigWindowController.validEntries([WatchEntry(symbol: "600519", market: "cn"), WatchEntry(symbol: "600519", market: "us")]),
                  "symbols stay unique across markets")
+    precondition(real.tencentCode(WatchEntry(symbol: "AAPL", market: "us")) == "usAAPL")
     print("PASS: watchlist validation, Hong Kong padding and A-share exchange prefixes")
 
     let originalLanguage = L10n.language

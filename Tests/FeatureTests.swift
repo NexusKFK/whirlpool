@@ -93,6 +93,33 @@ func runFeatureTests() throws {
     fields[3] = "419.000"; fields[30] = "2026/09/18 16:08:32"
     let (_, hk) = try unwrap(RealProvider().parseTencentLine("v_hk00700=\"" + fields.joined(separator: "~") + "\""))
     check(hk.decimals == nil && hk.marketTime == date("2026-09-18 16:08", "Asia/Hong_Kong").addingTimeInterval(32), "tencent HK")
+    // 美股同族布局:精度来自价格串,时间戳是美东的 yyyy-MM-dd 格式
+    fields[3] = "338.45"; fields[30] = "2026-09-25 11:41:20"; fields[32] = "0.75"
+    let (usCode, us) = try unwrap(RealProvider().parseTencentLine("v_usAAPL=\"" + fields.joined(separator: "~") + "\""))
+    check(usCode == "usAAPL" && us.decimals == 2 && us.marketTime == date("2026-09-25 11:41", "America/New_York").addingTimeInterval(20),
+          "tencent US precision and time")
+    check(RealProvider.usCodeAllowed("AAPL") && RealProvider.usCodeAllowed("BRK.A") && RealProvider.usCodeAllowed("BF-B"),
+          "plain US tickers allowed")
+    check(!RealProvider.usCodeAllowed("^GSPC") && !RealProvider.usCodeAllowed("BTC USD") && !RealProvider.usCodeAllowed(""),
+          "odd symbols go straight to Yahoo")
+    check(RealProvider().tencentCode(WatchEntry(symbol: "AAPL", market: "us")) == "usAAPL", "tencent US code")
+    // 东财:三个上市组前缀候选,^指数给空;diff 行拒停牌 "-";trends2 北京时间 → epoch
+    check(RealProvider.eastMoneySecids("SPY") == ["105.SPY", "106.SPY", "107.SPY"] && RealProvider.eastMoneySecids("^GSPC").isEmpty,
+          "eastmoney secid candidates")
+    let emRow = try unwrap(RealProvider.parseEastMoneyRow(["f2": 929.615, "f3": 0.69, "f12": "GS", "f13": 106, "f124": 1790352659]))
+    check(emRow.secid == "106.GS" && emRow.price == 929.615 && emRow.changePct == 0.69, "eastmoney snapshot row")
+    check(RealProvider.parseEastMoneyRow(["f2": "-", "f3": "-", "f12": "HALT", "f13": 105]) == nil, "eastmoney halted row rejected")
+    check(RealProvider.eastMoneyDecimals(339.345) == 2 && RealProvider.eastMoneyDecimals(0.5234) == 4, "eastmoney precision")
+    check(RealProvider.eastMoneySecids("brk.b") == ["105.BRK_B", "106.BRK_B", "107.BRK_B"]
+          && RealProvider.yahooUSSymbol("BRK.B") == "BRK-B" && RealProvider.yahooUSSymbol("^GSPC") == "^GSPC"
+          && RealProvider.yahooUSSymbol("VOD.L") == "VOD.L" && RealProvider.yahooUSSymbol("0700.HK") == "0700.HK"
+          && RealProvider.eastMoneySecids("7203.T").isEmpty && RealProvider.eastMoneySecids("VOD.L").isEmpty,
+          "share-class tickers use each source's spelling")
+    let em = try unwrap(RealProvider.parseEastMoneyTrends(["2026-09-25 21:30,335.950", "2026-09-25 21:31,336.100", "bad"], preClose: 336.04))
+    check(em.series.count == 2 && em.series[0].t == date("2026-09-25 09:30", "America/New_York").timeIntervalSince1970
+          && em.end - em.start == 6.5 * 3600 && em.lastPrice == 336.1 && em.preClose == 336.04,
+          "eastmoney intraday trend in exchange time")
+    check(RealProvider.parseEastMoneyTrends(["2026-09-25 21:30,335.950"], preClose: 1) == nil, "single-point trend ignored")
     print("PASS: per-instrument price precision end to end")
 
     // 4) 多自选池:旧配置迁移、写回兼容旧键、空池/重名/越界规整、小数位随配置往返
