@@ -7,7 +7,7 @@
 <p align="center">
   <b>A desktop stock ticker for your watchlist.</b><br>
   Seamless scrolling quotes · compact quote board · floating ticker with visual layout controls.<br>
-  Free key-less data: Yahoo + Tencent. No subscription, no telemetry.
+  Free key-less data: EastMoney, Tencent and Yahoo. No subscription, no telemetry.
 </p>
 
 <p align="center">
@@ -24,7 +24,7 @@
   <img src="docs/img/whirlpool-demo.gif" width="960" alt="Whirlpool: LED ticker in the menu bar, floating ticker and quote board, in dark and light">
 </p>
 
-[简体中文](README.zh-CN.md) · English
+[简体中文](README.zh-CN.md) · [繁體中文](README.zh-TW.md) · English
 
 A quiet desktop ticker for your watchlist. Whirlpool displays a scrolling LED ticker and a compact quote board, with price changes highlighted from the highest changed digit through the end of the price.
 
@@ -34,7 +34,7 @@ A quiet desktop ticker for your watchlist. Whirlpool displays a scrolling LED ti
 |---|---|---|
 | System integration | Menu bar + floating ticker + quote board | Notification-area icon + floating ticker + quote board |
 | Language | English / Simplified Chinese / system default | same |
-| Quotes | Yahoo Finance / Tencent, or clearly labeled demo data | same |
+| Quotes | US stocks: EastMoney first, then Tencent, then Yahoo (selectable in Settings); A-shares and Hong Kong: Tencent; indices, futures and crypto: Yahoo; or clearly labeled demo data | Yahoo Finance / Tencent, or demo data |
 | Display | LED dots or system-font ticker with three sizes; pixel or system-font board; intraday chart | LED ticker; native board |
 | Layout | Independent display cards; desktop preview; anchored or free placement; separate menu-bar width | Ticker/board cards; desktop preview; anchored or free placement |
 | Light / dark | Per surface (menu bar, floating ticker, board) | Follows the Windows app mode, or fixed light/dark |
@@ -76,7 +76,7 @@ The default refresh interval is **30 seconds**. All displays share one cached sn
 
 Yahoo requests are per symbol. Four symbols every five seconds would be approximately **48 requests/minute / 2,880 per hour**, before retries or other apps sharing the same IP. With **Refresh slowly while all watched markets are closed** (on by default), Whirlpool stretches the interval while every watched market is outside its session — using exchange calendars with holidays and half days (NYSE rules; China A-share and HKEX tables for the published years; crypto, futures and FX count as always open, as do Yahoo symbols on exchanges without a modeled calendar, such as `7203.T` or `^N225`) — and resumes at the next open. A market whose latest trade is under five minutes old always counts as open. Fetching and scrolling also pause while the screens sleep. There is no fixed public allowance that Whirlpool can guarantee. Short intervals can trigger HTTP 429 even if they worked previously. Whirlpool retains the latest known prices, merges partial results, honors `Retry-After`, and backs off from 30 seconds up to 15 minutes on repeated failures. Failed symbols have their own retry schedule, so one unavailable code does not slow healthy quotes; a full outage or HTTP 429 still backs off the shared feed. The menu shows unavailable/stale/rate-limited state and the last successful update time. Data may be delayed by its provider or market.
 
-Whirlpool uses native HTTP requests to public Yahoo/Tencent endpoints; it does **not** depend on Python or yfinance. The [yfinance project](https://ranaroussi.github.io/yfinance/) uses related Yahoo endpoints and [handles HTTP 429](https://github.com/ranaroussi/yfinance/blob/main/yfinance/data.py); it is not an official Yahoo service. The application's GPL-3.0 license does not grant rights to redistribute market data. Review each provider's applicable terms for your use.
+Whirlpool uses native HTTP requests to public EastMoney, Tencent and Yahoo endpoints (on macOS, US stock quotes come from one batched EastMoney request, which needs no proxy in mainland China); it does **not** depend on Python or yfinance. The [yfinance project](https://ranaroussi.github.io/yfinance/) uses related Yahoo endpoints and [handles HTTP 429](https://github.com/ranaroussi/yfinance/blob/main/yfinance/data.py); it is not an official Yahoo service. The application's GPL-3.0 license does not grant rights to redistribute market data. Review each provider's applicable terms for your use.
 
 ## Build
 
@@ -116,7 +116,7 @@ On Windows, `Whirlpool.exe --smoke-test` builds every window in both languages a
 
 - macOS: `~/.config/whirlpool/config.json` (the existing path is retained for upgrades).
 - Update check: once a day one anonymous request to `api.github.com` for the latest release (turn off in **General → Check for updates automatically**). Nothing is downloaded automatically.
-- No account, telemetry, analytics, or cloud sync. Watchlists/settings stay on the device. Requested symbols and network metadata are sent to Yahoo/Tencent when using live data. Demo mode makes no quote requests.
+- No account, telemetry, analytics, or cloud sync. Watchlists/settings stay on the device. Requested symbols and network metadata are sent to EastMoney, Tencent or Yahoo when using live data. Demo mode makes no quote requests.
 - Saving is atomic. Missing fields receive defaults; malformed files are not silently replaced on startup. No private watchlist/configuration is included in this repository.
 - Use **Advanced → Show Configuration File…** on macOS  for the file location.
 
@@ -170,3 +170,5 @@ artwork. See [NOTICE.md](NOTICE.md).
 
 > 转载 / 二次开发请保留本行出处:Project **Whirlpool · WP行情带** by
 > [NexusKFK](https://github.com/NexusKFK) · github.com/NexusKFK/whirlpool
+
+Also by the author: [Shepherd](https://github.com/NexusKFK/shepherd), a risk-first trading desk for macOS (position sizing by R, heat, option payoff charts).

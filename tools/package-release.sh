@@ -9,7 +9,7 @@ if [ -d "$mac_app" ]; then
     ditto -c -k --sequesterRsrc --keepParent "$mac_app" "dist/Whirlpool-v$version-macOS.zip"
 fi
 if [ -f dist/windows-x64/Whirlpool.exe ]; then
-    cp README.md README.zh-CN.md LICENSE ATTRIBUTION.md docs/WINDOWS-TESTING.md dist/windows-x64/
+    cp README.md README.zh-CN.md README.zh-TW.md LICENSE ATTRIBUTION.md docs/WINDOWS-TESTING.md dist/windows-x64/
     python3 - "$version" <<'PY'
 from pathlib import Path
 import sys, zipfile

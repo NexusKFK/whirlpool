@@ -1,6 +1,6 @@
 # WP行情带 · Whirlpool
 
-简体中文 · [English](README.md)
+简体中文 · [繁體中文](README.zh-TW.md) · [English](README.md)
 
 <p align="center">
   <img src="docs/img/whirlpool-demo.gif" width="960" alt="Whirlpool：菜单栏 LED 跑马灯、浮动行情条与报价卡，暗色与亮色">
@@ -14,7 +14,7 @@
 |---|---|---|
 | 系统入口 | 菜单栏、浮动行情条、报价卡 | 任务栏通知区域图标、浮动行情条、报价卡 |
 | 语言 | 中文 / 英文 / 跟随系统 | 同左 |
-| 行情 | Yahoo / 腾讯，或明确标注的模拟行情 | 同左 |
+| 行情 | 美股：东方财富优先，再腾讯、Yahoo 兜底（设置里可改）；A 股、港股：腾讯；指数、期货、加密资产：Yahoo；或明确标注的模拟行情 | Yahoo / 腾讯，或模拟行情 |
 | 显示 | LED 点阵或系统字体跑马灯，三档字号；像素或系统字体报价卡；分时图 | LED 跑马灯；原生报价卡 |
 | 布局 | 独立显示卡片、桌面预览、边缘锚点或自由位置；菜单栏宽度独立 | 行情条/报价卡卡片、桌面预览、边缘锚点或自由位置 |
 | 亮 / 暗 | 按显示面各自适应（菜单栏、浮动条、报价卡） | 跟随 Windows 应用模式，或固定浅色/深色 |
@@ -61,7 +61,7 @@ macOS 滚动由 GPU 合成：每轮行情只绘制一次，Core Animation 按屏
 
 Yahoo 按标的逐个请求。四只股票每五秒拉一次，约为 **48 次/分钟、2880 次/小时**，尚未计入重试或同一 IP 下的其他软件。没有可保证的固定免费额度，五秒不能保证不被限流。遇到失败时保留最近报价、合并部分成功结果，HTTP 429 时遵循 `Retry-After`；连续失败从 30 秒递增退避，最高 15 分钟。失败股票单独计算重试时间，不拖慢正常股票；全部失败或 HTTP 429 时仍对共享行情请求退避。菜单会显示连接失败、部分行情不可用、被限流等状态和最近成功更新时间。数据可能受提供方或市场规则影响而延迟。
 
-Whirlpool 使用原生 HTTP 请求访问 Yahoo/腾讯公开端点，**不依赖 Python 或 yfinance**。[yfinance](https://ranaroussi.github.io/yfinance/) 使用相关 Yahoo 接口，也会[处理 HTTP 429](https://github.com/ranaroussi/yfinance/blob/main/yfinance/data.py)，并非 Yahoo 官方服务。软件采用 GPL-3.0 协议，不代表同时取得了行情数据再分发权；数据使用遵循提供方条款。
+Whirlpool 使用原生 HTTP 请求访问东方财富、腾讯、Yahoo 的公开端点（macOS 上美股一次批量请求东方财富，国内网络无需代理），**不依赖 Python 或 yfinance**。[yfinance](https://ranaroussi.github.io/yfinance/) 使用相关 Yahoo 接口，也会[处理 HTTP 429](https://github.com/ranaroussi/yfinance/blob/main/yfinance/data.py)，并非 Yahoo 官方服务。软件采用 GPL-3.0 协议，不代表同时取得了行情数据再分发权；数据使用遵循提供方条款。
 
 ## 从源码构建
 
@@ -95,7 +95,7 @@ dotnet publish Whirlpool.Windows -c Release -r win-x64 --self-contained true \
 ## 配置与隐私
 
 - macOS：`~/.config/whirlpool/config.json`；沿用原路径，升级保留自选股。
-- 无账号、遥测、分析或云同步。自选股与配置保存在本机；真实行情请求会将代码及网络元数据发送到 Yahoo/腾讯。演示源不发行情请求。
+- 无账号、遥测、分析或云同步。自选股与配置保存在本机；真实行情请求会将代码及网络元数据发送到东方财富、腾讯或 Yahoo。演示源不发行情请求。
 - 原子保存；旧配置缺字段时补默认值，损坏文件不会在启动时被默认配置悄悄覆盖。仓库不包含私人自选股配置。
 - macOS 菜单 **高级 → 显示配置文件…** 可定位文件。
 
@@ -118,3 +118,5 @@ macOS 显示引擎基于 MIT 许可的 [rhsev/ticker](https://github.com/rhsev/t
 
 > 转载 / 二次开发请保留本行出处:Project **Whirlpool · WP行情带** by
 > [NexusKFK](https://github.com/NexusKFK) · github.com/NexusKFK/whirlpool
+
+作者的另一个项目：[Shepherd](https://github.com/NexusKFK/shepherd)，以损定仓的 macOS 交易工作台（按 R 定仓、热度、期权盈亏图）。

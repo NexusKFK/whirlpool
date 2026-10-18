@@ -1,6 +1,10 @@
 # Changelog
 
-## 2.0.5 (unreleased)
+## 2.0.5 (2026-10-18)
+
+First published build since 1.9.2; it also carries everything listed under 1.9.3 and 2.0.0–2.0.4 below.
+
+- Added a Traditional Chinese README (`README.zh-TW.md`); both READMEs now describe the EastMoney-first US quote chain.
 
 - Yahoo symbols follow their own exchange for smart refresh and closed-market display. Previously every symbol in the US / Global market was held to NYSE hours: a Tokyo, London or European listing (`7203.T`, `VOD.L`, `^N225`) was polled at most every 30 minutes and shown as closed while its market traded. Symbols without a suffix and major US indices still use the NYSE calendar; `.HK`/`^HSI` and `.SS`/`.SZ` use the HKEX and A-share calendars; other venues have no modeled calendar and never count as closed. Crypto pairs in other currencies (`ETH-EUR`) are treated like `-USD` pairs.
 - China A-share codes may name their exchange: `SH000001` is the SSE Composite, while `000001` remains Ping An Bank in Shenzhen. Beijing Stock Exchange codes (4, 8 and 92 prefixes) are requested from Tencent as `bj` instead of Shenzhen/Shanghai, and their charts open Tencent's quote page. A prefixed code and the same unprefixed code are rejected as duplicates.
@@ -21,7 +25,7 @@
 
 中文：Yahoo 代码按自身交易所判断开休市。此前“美股/全球”下的所有代码都按纽交所时段处理，东京、伦敦、欧洲等标的（`7203.T`、`VOD.L`、`^N225`）在本地交易时段被当成休市，最慢 30 分钟才刷新一次，报价卡还显示“休市”。现在无后缀代码与主要美股指数仍按 NYSE 日历，`.HK`/`^HSI` 与 `.SS`/`.SZ` 分别用港股、A 股日历，其余交易所不判休市。A 股代码可加 `SH`/`SZ`/`BJ` 前缀：`SH000001` 为上证指数，`000001` 仍是深市平安银行；北交所代码（4、8、92 开头）改为向腾讯请求 `bj` 代码，图表打开腾讯行情页，自选页示例加入 `SH000001`。macOS 控制 socket 从 `/tmp` 移到每用户私有临时目录，其他本地用户无法抢占路径，CLI 也只连接同一用户的实例；仍在旧路径运行的 2.0.4 能被识别并由 `--restart` 替换。新增 CI：macOS 26 跑回归与 CLI/socket 测试，Windows 跑核心测试、自包含发布与冒烟测试，Linux 检查本地化生成与两端交易所日历一致；下一年休市表逾期时每月定时检查会报红。两个平台同步修改并补充回归测试。macOS 美股报价与分时缩略图改为东财优先(批量实时快照 + 逐分钟分时，国内直连免代理)，腾讯为第二报价源，Yahoo 最后兜底；^GSPC 这类指数/期货代码与 7203.T 这类带交易所后缀的海外代码直接走 Yahoo，加密货币仍走 Yahoo，A 股与港股仍走腾讯。Yahoo 不可达时只影响仅 Yahoo 覆盖的标的，整板不再离线。分级股按各源写法换算(BRK.B → BRK_B / BRK-B)；美股价格 1 美元以上 2 位小数、以下 4 位，亚美分成交不再让列宽跳动。设置 → 通用 → 行情来源可选东财优先(默认)/腾讯优先/美股走 Yahoo/演示，选演示不丢原链序；Windows 预览版数据源不变。macOS 收起态菜单栏把手改用原生模板图标，展开的跑马灯自行处理鼠标事件；菜单栏跑马灯宽度上限从屏宽 40% 提到 60%；右键菜单或命令行切换显示模式时，已打开的设置页即时同步，不丢其他未保存改动。报价卡按设定间隔刷新:原先重复定时器总在共享缓存到期前一点醒来,15 秒的设置实际 30 秒才刷新一次;现在在下一次请求到期时准点醒来,智能刷新、失败退避和限流等待也一并遵守。分时缩略图缓存 5 分钟,其间用每笔新报价接到线尾(同一分钟改尾点、新的一分钟追加),到期整条校准,报价进入新交易日立即重拉;7 个美股标的的一次刷新从 8 个请求(约 27 KB)降到 1 个快照请求(不到 1 KB)。Yahoo 标的在校准间隔内只取日线报价,东财复用已解析的上市组。报价卡被全屏 app 盖住或所在屏幕关闭时暂停定时刷新,重新露面立即补一次。某个行情源回 429 只冷却该主机,其他源照常,数据链自动落到可用的源。行情状态变化与限流写入系统日志,`whirlpool --status` 报告报价卡是否被遮挡、行情状态与距下一次请求的秒数。
 
-## 2.0.4 (unreleased)
+## 2.0.4 (released in 2.0.5)
 
 - macOS quote boards follow the shared font, size and color scheme, including monochrome and light/dark appearance. Appearance changes repaint cached quotes immediately; the legacy board-only font toggle is retired. The shared price-flash switch now applies to the board. Initial loading displays a status immediately.
 - Quote columns are measured independently with native text-cell widths, keeping long prices and percent signs visible. Spacing before the footer is reduced, and changing the font keeps manually placed cards on screen.
@@ -32,7 +36,7 @@
 
 中文：报价卡统一跟随字体、字号、配色与系统明暗，删除旧的独立字体开关；各列按实际内容对齐，收紧底部间距并修复字符裁切。休市保留最近价格与当日涨跌色、停止价格闪动，显示行情时间而非检查时间，错误提示仍保留。修复旧交易日曲线被新时段挤成竖线的问题。Windows 继续提供交叉编译预览版，本轮卡片外观修复针对 macOS。
 
-## 2.0.3 (unreleased)
+## 2.0.3 (released in 2.0.5)
 
 - macOS settings cards use persistent button states and track clicks across the entire drawn card, including blank space and icons. Display regions, font, size, palette, background and anchor choices stay selected after clicking; the last display region stays enabled.
 - Settings use a top-aligned layout, a single highlighted sidebar item, consistent panels and spacing, a smaller desktop preview and normally sized reset actions. Floating-window controls appear only when relevant. Long instructions wrap at the available width, and the footer stays reachable on smaller windows.
@@ -42,14 +46,14 @@
 
 中文：修复设置卡片点击范围与图形不一致、选中状态被按钮复位的问题；显示区域、字体、字号、配色、背景及停靠按钮统一修复。重整侧栏、分组、间距和操作按钮，页面顶部对齐，小窗口滚动且保存栏始终可见。菜单栏宽度明确显示当前屏幕实际值并保留旧设置。Windows 同步修复最后显示区域被切换、锁定影响草稿预览和错误自选池定位，仍待 Windows 实机验收。
 
-## 2.0.2 (unreleased)
+## 2.0.2 (released in 2.0.5)
 
 - macOS menu-bar right-click menus size to their contents and open at the clicked position, independently of the ticker width. Opening or closing the menu preserves the ticker's expanded or collapsed size.
 - Native menu regression checks cover English and Chinese menus with both wide tickers and compact restore buttons.
 
 中文：修复右键菜单被菜单栏行情条撑宽的问题。菜单在点击位置按内容宽度弹出，不改变行情条尺寸；增加中英文、展开和收起状态下的原生菜单回归检查。
 
-## 2.0.1 (unreleased)
+## 2.0.1 (released in 2.0.5)
 
 - macOS collapse now shrinks the menu-bar item to the `<w` restore button instead of leaving it at the left end of an empty full-width ticker. Expanding restores the configured width; quote-loading and standby states retain their intended geometry.
 - macOS explicitly loads the bundled app icon for Dock/About, and packaged icon resources use a content-based filename so upgrades invalidate cached older artwork without resetting other apps' icons.
@@ -57,7 +61,7 @@
 
 中文：修复收起后菜单栏仍占整条宽度、`<w` 留在空白左端的问题；展开恢复用户设置的宽度。应用启动时直接加载包内新图标，并为图标资源使用随内容变化的文件名，避免升级后 Dock 沿用旧图标。
 
-## 2.0.0 (unreleased)
+## 2.0.0 (released in 2.0.5)
 
 - macOS builds now go to `.build/apps.noindex/Whirlpool.app` instead of a tracked app in the repository root, preventing development copies from appearing as another installed Whirlpool. Install and launch the single copy in `/Applications/Whirlpool.app`.
 - Native visual settings replace the large display-mode form. macOS has a Watchlist / Layout / Appearance / General sidebar; Windows has Layout / Appearance / Watchlist / General tabs. Display cards enable any supported nonempty combination, with visual placement controls and appearance choices.
@@ -79,7 +83,7 @@
 
 中文：行情失败按股票分别退避，失效代码不再拖慢正常股票；仍遵守服务器限流与断网退避。修复 macOS 等待行情、插播和切池提示期间丢失悬停暂停，以及离开悬停后跳过定时停顿的问题；演示行情不再受真实市场休市影响。完善浮窗变宽、跨屏及 Windows 显示器拔插后的可见位置与尺寸，默认显示器选择保持稳定。加强异常行情字段、版本号和消息时长/闪烁次数的处理，并补充对应回归测试。
 
-## 1.9.3 (unreleased)
+## 1.9.3 (released in 2.0.5)
 
 - Refresh settings take effect without waiting out an earlier market-closed interval; minimum request spacing and error/rate-limit backoff remain enforced. Windows queues a manual refresh pressed during the five-second guard instead of losing it.
 - Opening the macOS board during an in-flight summary request retains the pending request for intraday charts instead of deferring it until the next regular refresh; each request snapshots its data requirements.
