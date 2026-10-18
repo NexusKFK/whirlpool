@@ -9,6 +9,8 @@ trap 'rm -rf "$stage"' EXIT
 app="$stage/Whirlpool.app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$bin_path/whirlpool" "$app/Contents/MacOS/whirlpool"
+# Drop the debug map: it records the build machine's absolute source paths.
+strip -S -x "$app/Contents/MacOS/whirlpool"
 cp Info.plist "$app/Contents/Info.plist"
 # A changed icon gets a new resource URL, invalidating LaunchServices/Dock caches.
 icon_hash=$(shasum -a 256 icons/whirlpool.icns | cut -c1-12)
