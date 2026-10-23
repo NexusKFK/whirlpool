@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- US class-share tickers (`BRK.B`, `BF.B`) now follow the NYSE calendar for smart refresh and closed-market display; previously they had no calendar, never slowed down overnight and never showed as closed. Both platforms.
+- Dotted overseas symbols (`7203.T`, `VOD.L`) open Yahoo instead of a TradingView link TradingView cannot resolve; US class shares keep their TradingView chart. Both platforms.
+- Windows: the refresh cadence is anchored at the moment the request is sent, like macOS; a 15-second setting no longer drifts to 16–17 seconds.
+- Docs: the three READMEs state the 60% menu-bar width cap introduced in 2.0.5 (they still said 40%); the Chinese READMEs document choosing the data source in General; the macOS bundle now ships `README.zh-TW.md` alongside the other docs.
+- `tools/package-release.sh` warns when the macOS app bundle is missing instead of silently rewriting `SHA256SUMS.txt` without the macOS zip.
+- Removed the unused pre-2.0 ticker icon files; `CONTRIBUTING.md` now lists all five places a release version must be bumped.
+
+中文：美股分级股（`BRK.B`、`BF.B`）改按 NYSE 日历参与智能刷新与休市显示，此前它们没有日历、夜间也不放慢；`7203.T` 这类带点海外代码的图表改开 Yahoo，此前拼出的 TradingView 链接无法解析，分级股仍走 TradingView；Windows 刷新节拍改为从请求发出时刻起算，与 macOS 一致，15 秒设置不再实际变成 16–17 秒。三份 README 的菜单栏宽度上限从 40% 更正为 2.0.5 的 60%，中文 README 补上“通用页选择行情来源”的说明，macOS 安装包补带繁中 README。打包脚本在 macOS 包缺失时给出警告而不是静默跳过。删除 2.0 之前遗留的未引用图标；CONTRIBUTING 列出发版需同步的五个版本号位置。
+
 ## 2.0.5 (2026-10-18)
 
 First published build since 1.9.2; it also carries everything listed under 1.9.3 and 2.0.0–2.0.4 below.

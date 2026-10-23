@@ -41,6 +41,7 @@ enum MarketClock {
         switch String(symbol[symbol.index(after: dot)...]) {
         case "HK": return .hkex
         case "SS", "SZ": return .sse
+        case "A", "B", "C": return .nyse   // 美股分级股(BRK.B、BF.B)单字母后缀,同样按 NYSE 日历
         default: return nil
         }
     }
@@ -238,7 +239,9 @@ func chartURL(for entry: WatchEntry) -> URL? {
         tv = nil
     default:
         if let mapped = tvIndex[s] { tv = mapped }
-        else if !s.contains("^"), !s.contains("="), !s.hasSuffix("-USD") { tv = s }
+        // 带点后缀只放行美股分级股(BRK.B);其余海外代码(7203.T、VOD.L)TradingView 不认,落到 Yahoo
+        else if !s.contains("^"), !s.contains("="), !s.hasSuffix("-USD"),
+                !s.contains(".") || RealProvider.usListed(s) { tv = s }
     }
     if let tv, let q = tv.addingPercentEncoding(withAllowedCharacters: .alphanumerics.union(CharacterSet(charactersIn: ":.-"))) {
         return URL(string: "https://www.tradingview.com/chart/?symbol=\(q)")

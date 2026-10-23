@@ -64,6 +64,15 @@ public static class ChartLinks
         ["^DJI"] = "DJ:DJI", ["^VIX"] = "CBOE:VIX", ["^RUT"] = "TVC:RUT", ["^HSI"] = "HSI:HSI",
     };
 
+    // Single-letter suffixes are US class shares (BRK.B); other dotted symbols (7203.T, VOD.L)
+    // are not valid TradingView names, so they fall through to the Yahoo link.
+    private static bool TradingViewAccepts(string s)
+    {
+        var dot = s.IndexOf('.');
+        return dot < 0 || (dot == s.LastIndexOf('.')
+                           && s[(dot + 1)..].ToUpperInvariant() is "A" or "B" or "C");
+    }
+
     public static Uri For(WatchEntry entry)
     {
         var s = entry.Symbol;
@@ -76,7 +85,7 @@ public static class ChartLinks
             "hk" => "HKEX:" + (int.TryParse(s, out var n) ? n : 0),
             "crypto" => null,
             _ => Indices.TryGetValue(s, out var mapped) ? mapped
-                 : !s.Contains('^') && !s.Contains('=') && !s.EndsWith("-USD") ? s : null,
+                 : !s.Contains('^') && !s.Contains('=') && !s.EndsWith("-USD") && TradingViewAccepts(s) ? s : null,
         };
         return tv is not null
             ? new Uri("https://www.tradingview.com/chart/?symbol=" + Uri.EscapeDataString(tv).Replace("%3A", ":"))

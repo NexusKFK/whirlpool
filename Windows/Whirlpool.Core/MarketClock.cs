@@ -53,7 +53,8 @@ public static class MarketClock
         if (symbol.StartsWith('^')) return UsIndices.Contains(symbol) ? Exchange.Nyse : HongKongIndices.Contains(symbol) ? Exchange.Hkex : null;
         var dot = symbol.LastIndexOf('.');
         if (dot < 0) return Exchange.Nyse;
-        return symbol[(dot + 1)..] switch { "HK" => Exchange.Hkex, "SS" or "SZ" => Exchange.Sse, _ => null };
+        // Single-letter suffixes are US class shares (BRK.B, BF.B); they follow the NYSE calendar too.
+        return symbol[(dot + 1)..] switch { "HK" => Exchange.Hkex, "SS" or "SZ" => Exchange.Sse, "A" or "B" or "C" => Exchange.Nyse, _ => null };
     }
 
     private static TimeZoneInfo Zone(string iana, string windows)

@@ -236,7 +236,7 @@ struct TickerConfig: Codable {
 
     var colorScheme: ColorScheme { ColorScheme(configKey: transparentColor) }
 
-    /// 显示宽度上限(M 档字符,1 字符≈18pt)。实际宽度另受屏宽约束:菜单栏 40%、浮动条整屏。
+    /// 显示宽度上限(M 档字符,1 字符≈18pt)。实际宽度另受屏宽约束:菜单栏 60%、浮动条整屏。
     static let maxWidth = 120
     static let barPlacements = ["top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right", "free"]
 

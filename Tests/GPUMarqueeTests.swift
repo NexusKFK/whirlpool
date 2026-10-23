@@ -149,6 +149,10 @@ func runGPUMarqueeTests() throws {
           "an exchange prefix picks the SSE Composite chart")
     check(chartURL(for: WatchEntry(symbol: "430047", market: "cn"))?.absoluteString == "https://gu.qq.com/bj430047",
           "Beijing codes open Tencent's quote page")
+    check(chartURL(for: WatchEntry(symbol: "BRK.B", market: "us"))?.absoluteString.hasSuffix("symbol=BRK.B") == true,
+          "US class shares keep the TradingView chart")
+    check(chartURL(for: WatchEntry(symbol: "7203.T", market: "us"))?.host == "finance.yahoo.com",
+          "dotted overseas symbols open Yahoo, not a broken TradingView link")
     print("PASS: chart links")
 
     // 8) 时间线引擎:滚完一轮自动接下一条、轮内定时暂停生效、预取只发一次

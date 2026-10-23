@@ -138,7 +138,7 @@ Check(MarketClock.NextOpen(spy, At("2026-09-19 12:00", "America/New_York")) == A
 var holiday = At("2026-10-05 10:00", "Asia/Shanghai");
 Check(MarketClock.RefreshSeconds([moutai], 30, holiday) > 30 && MarketClock.RefreshSeconds([moutai], 30, holiday, new Dictionary<string, DateTimeOffset> { ["600519"] = holiday.AddMinutes(-2) }) == 30, "holiday backs off; fresh trade overrides");
 Check(MarketClock.RefreshSeconds([spy, new("BTC-USD", "crypto")], 30, At("2026-09-19 12:00", "America/New_York")) == 30, "crypto keeps the base cadence");
-foreach (var (symbol, venue) in new (string, MarketClock.Exchange?)[] { ("SPY", MarketClock.Exchange.Nyse), ("BRK-B", MarketClock.Exchange.Nyse), ("^GSPC", MarketClock.Exchange.Nyse),
+foreach (var (symbol, venue) in new (string, MarketClock.Exchange?)[] { ("SPY", MarketClock.Exchange.Nyse), ("BRK-B", MarketClock.Exchange.Nyse), ("BRK.B", MarketClock.Exchange.Nyse), ("BF.B", MarketClock.Exchange.Nyse), ("^GSPC", MarketClock.Exchange.Nyse),
              ("^HSI", MarketClock.Exchange.Hkex), ("0700.HK", MarketClock.Exchange.Hkex), ("000001.SS", MarketClock.Exchange.Sse), ("399001.SZ", MarketClock.Exchange.Sse),
              ("^N225", null), ("7203.T", null), ("VOD.L", null), ("ES=F", null), ("EURUSD=X", null), ("BTC-USD", null), ("ETH-EUR", null) })
     Check(MarketClock.ExchangeFor(new(symbol, "us")) == venue, "Yahoo venue for " + symbol);
@@ -156,6 +156,8 @@ Check(ChartLinks.For(spy).ToString() == "https://www.tradingview.com/chart/?symb
       && ChartLinks.For(new("00700", "hk")).ToString().EndsWith("HKEX:700") && ChartLinks.For(new("BTC-USD", "crypto")).Host == "finance.yahoo.com", "chart links");
 Check(ChartLinks.For(new("SH000001", "cn")).ToString().EndsWith("symbol=SSE:000001") && ChartLinks.For(new("000001", "cn")).ToString().EndsWith("symbol=SZSE:000001")
       && ChartLinks.For(new("430047", "cn")).ToString() == "https://gu.qq.com/bj430047", "A-share chart links follow the exchange");
+Check(ChartLinks.For(new("BRK.B", "us")).ToString().EndsWith("symbol=BRK.B") && ChartLinks.For(new("7203.T", "us")).Host == "finance.yahoo.com"
+      && ChartLinks.For(new("VOD.L", "us")).Host == "finance.yahoo.com", "class shares chart on TradingView, dotted overseas symbols on Yahoo");
 
 // ── Feed caching, 429 and smart refresh ──
 var time = DateTimeOffset.Parse("2026-09-16T14:00:00Z");   // Wednesday 10:00 New York

@@ -133,7 +133,9 @@ public sealed class QuoteFeed : IDisposable
                 var lastTrade = cache.Where(p => p.Value.MarketTime is not null).ToDictionary(p => p.Key, p => p.Value.MarketTime!.Value);
                 var next = settings.SmartRefresh ? MarketClock.RefreshSeconds(entries, settings.RefreshSeconds, Now, lastTrade) : settings.RefreshSeconds;
                 Status = next > settings.RefreshSeconds ? "Markets closed · refreshing slowly" : "Updated";
-                nextFetch = Now.AddSeconds(next);
+                // Anchor at the attempt, not the response: measuring from the response folds the request
+                // duration into every cycle (a 15s setting drifts to 16–17s). Matches the macOS engine.
+                nextFetch = Max(lastAttempt.AddSeconds(Math.Max(5, next)), Now.AddSeconds(1));
                 if (retries.Count > 0)
                 {
                     Status = "Some quotes unavailable · showing last prices";

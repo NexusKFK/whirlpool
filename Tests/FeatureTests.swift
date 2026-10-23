@@ -52,7 +52,7 @@ func runFeatureTests() throws {
 
     // 2.0.5:Yahoo 代码按交易所后缀定日历;没有建模日历的交易所不判休市
     let venues: [(String, MarketClock.Exchange?)] = [
-        ("SPY", .nyse), ("BRK-B", .nyse), ("^GSPC", .nyse), ("^HSI", .hkex), ("0700.HK", .hkex),
+        ("SPY", .nyse), ("BRK-B", .nyse), ("BRK.B", .nyse), ("BF.B", .nyse), ("HEI.A", .nyse), ("^GSPC", .nyse), ("^HSI", .hkex), ("0700.HK", .hkex),
         ("000001.SS", .sse), ("399001.SZ", .sse), ("^N225", nil), ("7203.T", nil), ("VOD.L", nil),
         ("ES=F", nil), ("EURUSD=X", nil), ("BTC-USD", nil), ("ETH-EUR", nil)]
     for (symbol, venue) in venues {

@@ -22,7 +22,7 @@ Edit `Shared/localization.json`, then run `python3 tools/generate-localizations.
 ## Release checklist / 发布检查
 
 1. Run both sets of core checks. Inspect settings in English and Chinese.
-2. Update `Info.plist`, the Windows project version, and `CHANGELOG.md` together.
+2. Bump the version in all five places together: `Info.plist`, `Windows/Whirlpool.Core/Whirlpool.Core.csproj`, `Windows/Whirlpool.Windows/Whirlpool.Windows.csproj`, `Windows/Whirlpool.Windows/app.manifest`, and `CHANGELOG.md`.
 3. Build macOS with `bash build-app.sh --arch arm64 --arch x86_64` and verify `codesign --verify --deep --strict .build/apps.noindex/Whirlpool.app`. Install one copy in `/Applications`; keep generated bundles out of the tracked source tree.
 4. Publish Windows using the command in the README. Do not claim native Windows QA from a cross-build. Complete `docs/WINDOWS-TESTING.md` on real Windows before promoting the preview.
 5. Create archives using `bash tools/package-release.sh`. Include license/attribution and the Windows test checklist.

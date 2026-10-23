@@ -7,6 +7,8 @@ mac_app=".build/apps.noindex/Whirlpool.app"
 if [ -d "$mac_app" ]; then
     codesign --verify --deep --strict "$mac_app"
     ditto -c -k --sequesterRsrc --keepParent "$mac_app" "dist/Whirlpool-v$version-macOS.zip"
+else
+    echo "WARNING: $mac_app not found — the macOS zip is skipped, but SHA256SUMS.txt is still rewritten without it." >&2
 fi
 if [ -f dist/windows-x64/Whirlpool.exe ]; then
     cp README.md README.zh-CN.md README.zh-TW.md LICENSE ATTRIBUTION.md docs/WINDOWS-TESTING.md dist/windows-x64/

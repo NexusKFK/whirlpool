@@ -17,7 +17,7 @@ icon_hash=$(shasum -a 256 icons/whirlpool.icns | cut -c1-12)
 icon_name="whirlpool-$icon_hash"
 cp icons/whirlpool.icns "$app/Contents/Resources/$icon_name.icns"
 plutil -replace CFBundleIconFile -string "$icon_name" "$app/Contents/Info.plist"
-for doc in README.md README.zh-CN.md LICENSE ATTRIBUTION.md; do
+for doc in README.md README.zh-CN.md README.zh-TW.md LICENSE ATTRIBUTION.md; do
     if [ -f "$doc" ]; then cp "$doc" "$app/Contents/Resources/"; fi
 done
 # ── Signing ──────────────────────────────────────────────────────────────────
