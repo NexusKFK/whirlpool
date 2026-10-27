@@ -18,11 +18,16 @@ from pathlib import Path
 asyncio.set_event_loop(asyncio.new_event_loop())  # Python 3.14 下必须在 import ib_insync 之前
 from ib_insync import IB  # noqa: E402
 
-HOST, PORT = '127.0.0.1', 8899
-GW_HOST, GW_PORT, CLIENT_ID = '127.0.0.1', 4001, 93
+HOST = os.environ.get('IB_HTTP_HOST', '127.0.0.1')
+PORT = int(os.environ.get('IB_HTTP_PORT', '8899'))
+GW_HOST = os.environ.get('IB_GW_HOST', '127.0.0.1')
+GW_PORT = int(os.environ.get('IB_GW_PORT', '4001'))
+CLIENT_ID = 93
 REFRESH_SECONDS = 30   # 与 Whirlpool 持仓板的默认档位一致
 RETRY_SECONDS = 10
 PAGE = Path(__file__).with_name('page.html')
+LAST_SNAPSHOT = Path(__file__).with_name('last_snapshot.json')   # 网关不在时的最后快照
+ALLOWED_HOSTS = {f'127.0.0.1:{PORT}', f'localhost:{PORT}', f'[::1]:{PORT}'}
 
 SUMMARY_TAGS = ('NetLiquidation', 'TotalCashValue', 'SettledCash', 'AvailableFunds')
 
@@ -34,6 +39,35 @@ _lock = threading.Lock()
 def put(**kw):
     with _lock:
         _state.update(kw)
+
+
+def persist_last():
+    """网关在线时把完整状态原子落盘;下次启动连不上就用它回填展示。"""
+    with _lock:
+        snap = json.loads(json.dumps(_state, ensure_ascii=False))
+    if not snap.get('positions') and snap.get('pnl') is None:
+        return   # 空状态不值得覆盖上一份好数据
+    try:
+        tmp = LAST_SNAPSHOT.with_suffix('.tmp')
+        tmp.write_text(json.dumps(snap, ensure_ascii=False))
+        tmp.replace(LAST_SNAPSHOT)
+    except Exception:
+        pass
+
+
+def restore_last() -> bool:
+    """启动即断连时回填最后快照(标记 connected=False),面板有东西可看。"""
+    try:
+        snap = json.loads(LAST_SNAPSHOT.read_text())
+    except Exception:
+        return False
+    if not snap.get('positions'):
+        return False
+    snap['connected'] = False
+    snap['error'] = 'gateway down, showing last snapshot'
+    with _lock:
+        _state.update(snap)
+    return True
 
 
 def snapshot():
@@ -157,6 +191,7 @@ def collect(ib, acct, pnl, subs):
 
 
 def run_ib():
+    restored = False
     while True:
         ib = IB()
         try:
@@ -166,10 +201,14 @@ def run_ib():
             subs = {}
             while ib.isConnected():
                 collect(ib, acct, pnl, subs)
+                persist_last()
                 ib.sleep(REFRESH_SECONDS)
             put(connected=False, error='网关连接断开')
         except Exception as e:
             put(connected=False, error=f'{type(e).__name__}: {e}')
+        # 启动即断连且内存无数据:回填最后快照,面板显示旧数据+未连接标注
+        if not restored and not _state.get('positions'):
+            restored = restore_last()
         try:
             ib.disconnect()
         except Exception:
@@ -190,7 +229,7 @@ class Handler(BaseHTTPRequestHandler):
         # 只服务本机回环:Host 白名单挡 DNS 重绑定;数据接口再要求自定义头,
         # 浏览器里别的网页发起的跨站 fetch 带不上这个头(会先卡在预检)。
         host = (self.headers.get('Host') or '').lower()
-        if host not in ('127.0.0.1:8899', 'localhost:8899', '[::1]:8899'):
+        if host not in ALLOWED_HOSTS:
             self._send(403, 'text/plain; charset=utf-8', b'forbidden')
             return
         if self.path == '/api/snapshot.json':

@@ -26,12 +26,12 @@ final class PortfolioWindow: NSPanel, NSWindowDelegate {
             let kind: String?          // STK | OPT | SPREAD
             let secType: String?
             let qty: Double
-            let last: Double?
+            var last: Double?
             let mktValue: Double?
             let costBasis: Double?
-            let unrealized: Double?
-            let unrealizedPct: Double?
-            let dayPnl: Double?
+            var unrealized: Double?
+            var unrealizedPct: Double?
+            var dayPnl: Double?
             let legCount: Int?
             let netCost: Double?       // SPREAD:两腿成本basis合计(含乘数,借方为正)
             let netMark: Double?       // SPREAD:两腿市值合计
@@ -39,13 +39,16 @@ final class PortfolioWindow: NSPanel, NSWindowDelegate {
     }
 
     private static let decoder = JSONDecoder()
-    static let feederURL = URL(string: "http://127.0.0.1:8899/api/snapshot.json")!
+    /// 网关在线时数据全来自喂料;离线 fallback 的正股现价走 App 自己的行情链(东财/腾讯)
+    static let feederURL = URL(string: ProcessInfo.processInfo.environment["WHIRLPOOL_IB_FEEDER"]
+        ?? "http://127.0.0.1:8899")!
 
     private let container = NSVisualEffectView()
     private var programmaticMove = false
     private var saveWork: DispatchWorkItem?
     private var lastSnapshot: Snapshot?
     private var lastError: String?
+    private var liveQuotes: [String: Quote] = [:]   // 网关离线时:正股现价(东财/腾讯)
 
     var config: TickerConfig {
         didSet {
@@ -62,6 +65,8 @@ final class PortfolioWindow: NSPanel, NSWindowDelegate {
     var menuProvider: (() -> NSMenu)?
     var onOriginChange: (([Double]) -> Void)?
     var onTogglePrivacy: (() -> Void)?   // 小眼睛按钮:切换资金金额打码
+    /// 网关离线时取正股现价:AppDelegate 注入,内部走 quoteService(东财/腾讯)
+    var quoteProvider: (([String], @escaping ([String: Quote]) -> Void) -> Void)?
     /// 默认落点参照(通常是报价卡的 frame):持仓板默认叠在它上方,不重叠
     var referenceFrame: (() -> NSRect)?
 
@@ -93,7 +98,7 @@ final class PortfolioWindow: NSPanel, NSWindowDelegate {
     // ── 数据入口(AppDelegate 定时调用) ─────────────────────────────────────────
 
     func fetch(completion: @escaping () -> Void) {
-        var request = URLRequest(url: Self.feederURL)
+        var request = URLRequest(url: Self.feederURL.appendingPathComponent("api/snapshot.json"))
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.timeoutInterval = 5
         request.setValue("1", forHTTPHeaderField: "X-Whirlpool")   // 喂料服务的本机探针头
@@ -103,12 +108,27 @@ final class PortfolioWindow: NSPanel, NSWindowDelegate {
                 if let data, let snap = try? Self.decoder.decode(Snapshot.self, from: data) {
                     lastSnapshot = snap
                     lastError = nil
+                    liveQuotes = [:]   // 新快照到了,离线补算的行情作废
+                    rebuild()
+                    completion()      // 刷新节拍先排上;下面的行情回来只是补一次重画
+                    // 网关离线 fallback:正股用自选池行情源的现价 + 快照成本重算盈亏
+                    if snap.connected == false, let provider = quoteProvider {
+                        let symbols = (snap.positions ?? []).filter { ($0.kind ?? "STK") == "STK" }.map(\.label)
+                        guard !symbols.isEmpty else { return }
+                        provider(symbols) { [weak self] qs in
+                            DispatchQueue.main.async { [weak self] in
+                                guard let self, !qs.isEmpty else { return }
+                                self.liveQuotes = qs
+                                self.rebuild()
+                            }
+                        }
+                    }
                 } else {
                     lastError = L("Feeder starting…")
                         + (error.map { "\n\($0.localizedDescription)" } ?? "")
+                    rebuild()
+                    completion()
                 }
-                rebuild()
-                completion()
             }
         }.resume()
     }
@@ -181,12 +201,25 @@ final class PortfolioWindow: NSPanel, NSWindowDelegate {
         let col2W = max(cellW(cUn), cellW(cCa))
         let cellGap: CGFloat = 18
 
-        // 小字一律用开仓成本(现价盯盘交给报价卡):股票均价、期权每张成本、价差净成本
-        for p in positions {
+        // 网关离线:正股用行情源现价 + 快照成本重算盈亏(行保持彩色=活数据);
+        // 期权/价差没有行情源,冻结在快照并整行灰显,归属一眼可辨
+        let stale = snap?.connected == false
+        for var p in positions {
             let kind = p.kind ?? p.secType ?? "STK"
-            let left = textLabel(p.label, 12, .semibold)
+            let live = stale && kind == "STK" && liveQuotes[p.label] != nil
+            if live, let q = liveQuotes[p.label], q.price.isFinite, q.price > 0,
+               let cb = p.costBasis, p.qty != 0 {
+                let avg = cb / p.qty
+                p.unrealized = (q.price - avg) * p.qty
+                p.unrealizedPct = p.unrealized.map { $0 / abs(cb) * 100 }
+                let prevClose = q.changePct > -100 ? q.price / (1 + q.changePct / 100) : q.price
+                p.dayPnl = (q.price - prevClose) * p.qty
+            }
+            let frozenColor: NSColor = (stale && !live) ? .secondaryLabelColor : .labelColor
+            let left = textLabel(p.label, 12, .semibold, frozenColor)
+            let pnlColor = (stale && !live) ? frozenColor : tint(p.unrealized)
             let right = textLabel(money(p.unrealized, sign: true) + "  " + Self.pct(p.unrealizedPct),
-                                  12, .semibold, tint(p.unrealized))
+                                  12, .semibold, pnlColor)
             func avgPerShare(divisor: Double) -> Double? {
                 guard let cb = p.costBasis, p.qty != 0 else { return nil }
                 return abs(cb / p.qty / divisor)
@@ -205,7 +238,8 @@ final class PortfolioWindow: NSPanel, NSWindowDelegate {
                     + L("avg") + " " + money(avgPerShare(divisor: 1))
             }
             let rightSub = p.dayPnl.map {
-                subLabel(L("Today") + " " + money($0, sign: true), 10.5, tint($0))
+                subLabel(L("Today") + " " + money($0, sign: true), 10.5,
+                         (stale && !live) ? .secondaryLabelColor : tint($0))
             }
             lines.append(Line(left: left, right: right, leftSub: subLabel(subText), rightSub: rightSub, h1: 16))
         }
@@ -292,14 +326,15 @@ final class PortfolioWindow: NSPanel, NSWindowDelegate {
         // 页脚照报价卡的写法:开盘状态 + 最后一次数据时间,不放别的
         let footerText: String
         var footerColor = NSColor.secondaryLabelColor
+        let updated = snap?.time.flatMap { $0.count >= 19 ? String($0.suffix(8)) : nil }
         if let err = lastError {
             footerText = err
             footerColor = .systemOrange
         } else if snap?.connected == false {
-            footerText = L("IB Gateway not connected")
+            // 网关不在:正股走自选池行情源照常更新,期权/账户冻结在快照(灰显行)
+            footerText = String(format: L("Stock live · options frozen at %@"), updated ?? "—")
             footerColor = .systemOrange
         } else {
-            let updated = snap?.time.flatMap { $0.count >= 19 ? String($0.suffix(8)) : nil }
             footerText = Self.usMarketState() + (updated.map { " · " + String(format: L("Updated %@"), $0) } ?? "")
         }
         place(subLabel(footerText, 9.5, footerColor), left: inset, cy: 11)

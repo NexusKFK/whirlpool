@@ -1026,6 +1026,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             panel.menuProvider = { [weak self] in self?.buildMenu() ?? NSMenu() }
             panel.onOriginChange = { [weak self] origin in self?.config.positionsOrigin = origin }
             panel.onTogglePrivacy = { [weak self] in self?.togglePositionsPrivacy() }
+            panel.quoteProvider = { [weak self] symbols, done in
+                // 网关离线 fallback:正股现价走 App 自己的行情链(东财/腾讯,与自选池同源)
+                guard let self else { return done([:]) }
+                let entries = symbols.map { WatchEntry(symbol: $0, market: "us") }
+                self.quoteService.quotes(for: entries) { done($0) }
+            }
             panel.referenceFrame = { [weak self] in self?.board?.frame ?? .zero }
             positionsWindow = panel
         } else {
