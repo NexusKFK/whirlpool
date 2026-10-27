@@ -26,6 +26,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var board: BoardWindow?
     private var boardTimer: Timer?
     private var barWindow: BarWindow?
+    private var positionsWindow: PortfolioWindow?
+    private var positionsTimer: Timer?
+    private var feederProcess: Process?     // 持仓板自带的 IB 喂料子进程(app 退出即带走)
     private var configWindow: ConfigWindowController?
     private let engine = MarqueeEngine()
     private var userPaused = false
@@ -128,6 +131,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         configureQuoteService()
         applyDisplayMode()
+        applyPositionsPanel()
         configureUpdater()
         if let error = configReadError {
             let alert = NSAlert()
@@ -157,6 +161,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         appLog.notice("terminate: \(self.quitReason, privacy: .public)")
+        stopFeeder()
         unlink(socketPath)
     }
 
@@ -375,6 +380,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func screensChanged() {
         board?.config = config; barWindow?.config = config
         board?.reposition(); barWindow?.reposition()
+        positionsWindow?.config = config
+        positionsWindow?.reposition()
         scheduleArtRefresh()
     }
 
@@ -387,6 +394,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         appLog.notice("suspend (screens asleep or session inactive)")
         engine.clearKeepingFrame()
         boardTimer?.invalidate(); boardTimer = nil
+        positionsTimer?.invalidate(); positionsTimer = nil
     }
 
     @objc private func systemAwake(_ notification: Notification) {
@@ -399,6 +407,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         quoteService.requestRefresh()
         if marqueeOn || barOn { fetchNextQuoteCycle() }
         if boardOn { refreshBoard() }
+        if config.positionsEnabled { applyPositionsPanel() }
     }
 
     // ── Menü ───────────────────────────────────────────────────────────────────
@@ -431,9 +440,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             engine.stop()
             barWindow?.orderOut(nil)
             board?.orderOut(nil)
+            positionsWindow?.orderOut(nil)
         } else {
             if barOn { barWindow?.orderFrontRegardless() }
             if boardOn { board?.orderFrontRegardless(); refreshBoard() }
+            if config.positionsEnabled { applyPositionsPanel() }
             restartMarquee()
         }
     }
@@ -492,6 +503,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         item("Settings…", #selector(openConfigWindow), ",")
         let display = NSMenuItem(title: L("Display"), action: nil, keyEquivalent: "")
         display.submenu = buildModeMenu(); menu.addItem(display)
+        let portfolio = NSMenuItem(title: L("Portfolio Panel"), action: nil, keyEquivalent: "")
+        portfolio.submenu = buildPositionsMenu(); menu.addItem(portfolio)
         if barOn || boardOn {
             let lock = NSMenuItem(title: L("Lock Floating Windows"), action: #selector(toggleLock), keyEquivalent: "")
             lock.target = self; lock.state = config.lockPosition ? .on : .off
@@ -684,6 +697,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 self.quoteService.interval = c.boardRefresh
                 self.applyCadence()
                 self.applyDisplayMode()
+                self.applyPositionsPanel()
                 self.configureUpdater()
             }
         }
@@ -938,6 +952,159 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 alert.runModal()
             }
         }
+    }
+
+    // ── 持仓板(IBKR 只读看板,数据来自本机喂料服务) ─────────────────────────────
+
+    @objc private func togglePositionsPanel() {
+        config.positionsEnabled.toggle()
+        saveConfig(config)
+        applyPositionsPanel()
+    }
+
+    @objc private func togglePositionsPrivacy() {
+        config.positionsPrivacy.toggle()
+        saveConfig(config)
+        positionsWindow?.config = config
+    }
+
+    @objc private func setPositionsRefresh(_ sender: NSMenuItem) {
+        guard let seconds = sender.representedObject as? Double else { return }
+        config.positionsRefresh = seconds
+        saveConfig(config)
+        schedulePositionsRefresh(in: 1)
+    }
+
+    @objc private func setPositionsFont(_ sender: NSMenuItem) {
+        guard let key = sender.representedObject as? String else { return }
+        config.positionsFont = key
+        saveConfig(config)
+        positionsWindow?.config = config
+    }
+
+    private func buildPositionsMenu() -> NSMenu {
+        let menu = NSMenu()
+        let toggle = NSMenuItem(title: L("Enable Portfolio Panel"), action: #selector(togglePositionsPanel), keyEquivalent: "")
+        toggle.target = self; toggle.state = config.positionsEnabled ? .on : .off
+        menu.addItem(toggle)
+        let privacy = NSMenuItem(title: L("Hide Cash Amounts"), action: #selector(togglePositionsPrivacy), keyEquivalent: "")
+        privacy.target = self; privacy.state = config.positionsPrivacy ? .on : .off
+        menu.addItem(privacy)
+        let interval = NSMenuItem(title: L("Refresh Interval"), action: nil, keyEquivalent: "")
+        let sub = NSMenu()
+        for (seconds, title) in [(30.0, "Every 30 Seconds"), (60.0, "Every Minute"), (300.0, "Every 5 Minutes")] {
+            let entry = NSMenuItem(title: L(title), action: #selector(setPositionsRefresh(_:)), keyEquivalent: "")
+            entry.target = self; entry.representedObject = seconds
+            entry.state = config.positionsRefresh == seconds ? .on : .off
+            sub.addItem(entry)
+        }
+        interval.submenu = sub; menu.addItem(interval)
+        let font = NSMenuItem(title: L("Panel Font"), action: nil, keyEquivalent: "")
+        let fontMenu = NSMenu()
+        for (key, title) in [("mono", "Monospaced"), ("system", "System Font")] {
+            let entry = NSMenuItem(title: L(title), action: #selector(setPositionsFont(_:)), keyEquivalent: "")
+            entry.target = self; entry.representedObject = key
+            entry.state = config.positionsFont == key ? .on : .off
+            fontMenu.addItem(entry)
+        }
+        font.submenu = fontMenu; menu.addItem(font)
+        let now = NSMenuItem(title: L("Refresh Portfolio"), action: #selector(refreshPositionsNow), keyEquivalent: "")
+        now.target = self
+        menu.addItem(now)
+        return menu
+    }
+
+    private func applyPositionsPanel() {
+        guard config.positionsEnabled else {
+            positionsWindow?.orderOut(nil)
+            positionsTimer?.invalidate(); positionsTimer = nil
+            stopFeeder()
+            return
+        }
+        if positionsWindow == nil {
+            let panel = PortfolioWindow(config: config)
+            panel.menuProvider = { [weak self] in self?.buildMenu() ?? NSMenu() }
+            panel.onOriginChange = { [weak self] origin in self?.config.positionsOrigin = origin }
+            panel.onTogglePrivacy = { [weak self] in self?.togglePositionsPrivacy() }
+            panel.referenceFrame = { [weak self] in self?.board?.frame ?? .zero }
+            positionsWindow = panel
+        } else {
+            positionsWindow?.config = config
+        }
+        if !userPaused, !suspended {
+            positionsWindow?.orderFrontRegardless()
+            refreshPositionsNow()
+        }
+    }
+
+    private func schedulePositionsRefresh(in delay: TimeInterval? = nil) {
+        positionsTimer?.invalidate(); positionsTimer = nil
+        guard config.positionsEnabled, !userPaused, !suspended else { return }
+        let wait = max(2, delay ?? config.positionsRefresh)
+        let t = Timer(timeInterval: wait, repeats: false) { [weak self] _ in self?.refreshPositionsNow() }
+        t.tolerance = min(2, wait * 0.1)
+        RunLoop.main.add(t, forMode: .common)
+        positionsTimer = t
+    }
+
+    @objc private func refreshPositionsNow() {
+        positionsTimer?.invalidate(); positionsTimer = nil
+        guard config.positionsEnabled, !userPaused, !suspended else { return }
+        guard let panel = positionsWindow else { return }
+        if !panel.isVisible { panel.orderFrontRegardless() }
+        panel.fetch { [weak self] in
+            guard let self else { return }
+            // 喂料进程不在(连接被拒):由本 app 拉起子进程,几秒后快试一次
+            if panel.feederDown {
+                self.spawnFeederIfNeeded()
+                self.schedulePositionsRefresh(in: 4)
+            } else {
+                self.schedulePositionsRefresh()
+            }
+        }
+    }
+
+    // ── IB 喂料子进程(app 自己管,不依赖 launchd) ───────────────────────────────
+    // 网关断开时喂料进程仍活着(内部每 10s 重试),这里只在进程缺失时拉起。
+
+    private func spawnFeederIfNeeded() {
+        if let p = feederProcess, p.isRunning { return }
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        // 优先独立安装位;没有则用仓库里随附的脚本(克隆即用)
+        let candidates = [home.appendingPathComponent("tools/ib_live/server.py").path,
+                          home.appendingPathComponent("workspace/Whirlpool/tools/ib-live/server.py").path]
+        guard let script = candidates.first(where: { FileManager.default.fileExists(atPath: $0) }) else {
+            appLog.error("IB feeder script missing at \(candidates.first ?? "?", privacy: .public)")
+            return
+        }
+        // GUI 进程不继承 shell 的 PATH,解释器按已知位置找(框架 Python 带 ib_insync)
+        let interpreters = ["/Library/Frameworks/Python.framework/Versions/3.14/bin/python3",
+                            "/opt/homebrew/bin/python3", "/usr/local/bin/python3"]
+        guard let py = interpreters.first(where: { FileManager.default.fileExists(atPath: $0) }) else {
+            appLog.error("no python3 interpreter found for IB feeder")
+            return
+        }
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: py)
+        p.arguments = [script]
+        var env = ProcessInfo.processInfo.environment
+        env["WHIRLPOOL_FEEDER_CHILD"] = "1"   // 喂料据此自杀:父进程没了(PPID→1)就退出
+        p.environment = env
+        p.standardOutput = FileHandle.nullDevice
+        p.standardError = FileHandle.nullDevice
+        p.qualityOfService = .background
+        do {
+            try p.run()
+            feederProcess = p
+            appLog.notice("spawned IB feeder pid \(p.processIdentifier)")
+        } catch {
+            appLog.error("IB feeder spawn failed: \(error.localizedDescription)")
+        }
+    }
+
+    private func stopFeeder() {
+        if let p = feederProcess, p.isRunning { p.terminate() }
+        feederProcess = nil
     }
 
     // ── Display-Mode ─────────────────────────────────────────────────────────────

@@ -72,6 +72,11 @@ struct TickerConfig: Codable {
     var lockPosition:      Bool              = false     // 锁定浮动条/报价卡位置(不能拖动,右键与悬停照常)
     var barClickThrough:   Bool              = false     // 浮动条点击穿透:鼠标直接落到下面的窗口(从菜单栏图标关闭)
     var displayScreen:     String            = "auto"    // 显示器 UUID:跑马灯只在该屏菜单栏滚动,浮窗落在该屏;auto=不指定
+    var positionsEnabled:  Bool              = false     // 持仓板:IBKR 账户悬浮小板(数据来自本机喂料服务)
+    var positionsRefresh:  Double            = 30        // 持仓板刷新间隔(秒)
+    var positionsOrigin:   [Double]?         = nil       // 持仓板手动拖动后记忆 [x, y]
+    var positionsPrivacy:  Bool              = true      // 持仓板遮住净资产/可用/现金金额(今日盈亏与持仓浮盈亏仍显示)
+    var positionsFont:     String            = "mono"    // 持仓板字体:mono=等宽数字 system=系统字体(点阵对数字墙不适用,不提供)
     var language: String = "system"
 
     init() {}
@@ -80,6 +85,7 @@ struct TickerConfig: Codable {
         case tickerEnabled, defaultColor, defaultWidth, ledDotSize, marqueeFont, showDockIcon, scrollSpeed, defaultPause, customChars, transparent, transparentColor, marqueeSeparator, changeArrows, quoteLoop, watchlist, pausePerSymbol, redUpMarkets, provider, usQuoteSource, displayMode, boardCorner, boardOrigin, boardRefresh, barOrigin, boardPixelFont, marqueeBlink, barBackground, hoverPause, smartRefresh, language
         case watchlists, activeWatchlist, checkUpdates, displayScreen, lockPosition, barClickThrough
         case barPlacement, barWidthFraction, menuWidthPoints
+        case positionsEnabled, positionsRefresh, positionsOrigin, positionsPrivacy, positionsFont
     }
 
     init(from decoder: Decoder) throws {
@@ -128,6 +134,10 @@ struct TickerConfig: Codable {
         displayScreen = try values.decodeIfPresent(type(of: displayScreen), forKey: .displayScreen) ?? displayScreen
         lockPosition = try values.decodeIfPresent(type(of: lockPosition), forKey: .lockPosition) ?? lockPosition
         barClickThrough = try values.decodeIfPresent(type(of: barClickThrough), forKey: .barClickThrough) ?? barClickThrough
+        positionsEnabled = try values.decodeIfPresent(type(of: positionsEnabled), forKey: .positionsEnabled) ?? positionsEnabled
+        positionsRefresh = try values.decodeIfPresent(type(of: positionsRefresh), forKey: .positionsRefresh) ?? positionsRefresh
+        positionsPrivacy = try values.decodeIfPresent(type(of: positionsPrivacy), forKey: .positionsPrivacy) ?? positionsPrivacy
+        positionsFont = try values.decodeIfPresent(type(of: positionsFont), forKey: .positionsFont) ?? positionsFont
         language = try values.decodeIfPresent(type(of: language), forKey: .language) ?? language
         boardOrigin = try values.decodeIfPresent([Double].self, forKey: .boardOrigin)
         barOrigin = try values.decodeIfPresent([Double].self, forKey: .barOrigin)
@@ -180,6 +190,11 @@ struct TickerConfig: Codable {
         try c.encode(displayScreen, forKey: .displayScreen)
         try c.encode(lockPosition, forKey: .lockPosition)
         try c.encode(barClickThrough, forKey: .barClickThrough)
+        try c.encode(positionsEnabled, forKey: .positionsEnabled)
+        try c.encode(positionsRefresh, forKey: .positionsRefresh)
+        try c.encodeIfPresent(positionsOrigin, forKey: .positionsOrigin)
+        try c.encode(positionsPrivacy, forKey: .positionsPrivacy)
+        try c.encode(positionsFont, forKey: .positionsFont)
         try c.encode(language, forKey: .language)
     }
 
@@ -192,11 +207,13 @@ struct TickerConfig: Codable {
         if !["led", "system", "mono"].contains(marqueeFont) { marqueeFont = "led" }
         scrollSpeed = scrollSpeed.isFinite ? min(0.1, max(0.02, scrollSpeed)) : 0.0333
         boardRefresh = boardRefresh.isFinite ? min(3600, max(5, boardRefresh)) : 30
+        positionsRefresh = positionsRefresh.isFinite ? min(3600, max(5, positionsRefresh)) : 30
         defaultPause = defaultPause.isFinite ? min(60, max(0, defaultPause)) : 0
         pausePerSymbol = pausePerSymbol.isFinite ? min(60, max(0, pausePerSymbol)) : 0
         if !["system", "en", "zh-Hans"].contains(language) { language = "system" }
         if !["real", "demo"].contains(provider) { provider = "real" }
         if !["eastmoney", "tencent", "yahoo"].contains(usQuoteSource) { usQuoteSource = "eastmoney" }
+        if !["mono", "system"].contains(positionsFont) { positionsFont = "mono" }
         transparentColor = ColorScheme(configKey: transparentColor).rawValue
         if !["glass", "none"].contains(barBackground) { barBackground = "glass" }
         displayScreen = displayScreen.trimmingCharacters(in: .whitespaces)
@@ -232,6 +249,7 @@ struct TickerConfig: Codable {
         }
         if boardOrigin?.count != 2 || boardOrigin?.allSatisfy({ $0.isFinite }) != true { boardOrigin = nil }
         if barOrigin?.count != 2 || barOrigin?.allSatisfy({ $0.isFinite }) != true { barOrigin = nil }
+        if positionsOrigin?.count != 2 || positionsOrigin?.allSatisfy({ $0.isFinite }) != true { positionsOrigin = nil }
     }
 
     var colorScheme: ColorScheme { ColorScheme(configKey: transparentColor) }

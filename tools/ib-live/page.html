@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IBKR 实时持仓</title>
+<style>
+  :root {
+    --bg: #0b0e11; --card: #161b22; --line: #232b36; --txt: #e8ecf1;
+    --sub: #8b96a5; --up: #2ebd85; --dn: #f6465d; --amber: #e8b64c;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--txt);
+         font-family: -apple-system, "PingFang SC", "Helvetica Neue", sans-serif; }
+  .wrap { max-width: 620px; margin: 0 auto; padding: 16px 14px 48px; }
+  header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px; }
+  header h1 { font-size: 17px; margin: 0; font-weight: 700; }
+  .status { font-size: 12px; color: var(--sub); }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; }
+  .dot.ok { background: var(--up); } .dot.bad { background: var(--dn); }
+  .mkt { font-size: 12px; color: var(--sub); margin-bottom: 12px; }
+  .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; }
+  .card.wide { grid-column: 1 / -1; }
+  .k { font-size: 12px; color: var(--sub); }
+  .v { font-size: 21px; font-weight: 650; margin-top: 3px; font-variant-numeric: tabular-nums; }
+  .v.small { font-size: 17px; }
+  .sub { font-size: 12px; color: var(--sub); margin-top: 3px; }
+  .up { color: var(--up); } .dn { color: var(--dn); }
+  .sect { display: flex; justify-content: space-between; align-items: baseline;
+          margin: 18px 2px 8px; font-size: 13px; color: var(--sub); }
+  .pos { background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+         padding: 11px 14px; margin-top: 8px; }
+  .r1 { display: flex; justify-content: space-between; gap: 10px; }
+  .sym { font-weight: 650; font-size: 15px; }
+  .tag { display: inline-block; font-size: 10px; color: var(--sub); border: 1px solid var(--line);
+         border-radius: 5px; padding: 0 5px; margin-left: 6px; vertical-align: 1px; }
+  .r1 .num { font-variant-numeric: tabular-nums; text-align: right; font-size: 14px; }
+  .r2 { display: flex; justify-content: space-between; gap: 10px; margin-top: 4px;
+        font-size: 12.5px; color: var(--sub); font-variant-numeric: tabular-nums; }
+  .r2 b { font-weight: 600; }
+  footer { margin-top: 22px; font-size: 11.5px; color: var(--sub); line-height: 1.7; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>IBKR 实时持仓 <span id="acct" class="status"></span></h1>
+    <div class="status"><span id="dot" class="dot"></span><span id="conn">连接中…</span></div>
+  </header>
+  <div class="mkt" id="mkt"></div>
+
+  <div class="cards">
+    <div class="card wide">
+      <div class="k">今日盈亏</div>
+      <div class="v" id="dayPnl">—</div>
+      <div class="sub" id="dayPnlSub"></div>
+    </div>
+    <div class="card"><div class="k">净资产</div><div class="v small" id="netLiq">—</div></div>
+    <div class="card"><div class="k">持仓浮盈亏（按成本）</div><div class="v small" id="unreal">—</div></div>
+    <div class="card"><div class="k">可用资金</div><div class="v small" id="avail">—</div></div>
+    <div class="card"><div class="k">现金合计</div><div class="v small" id="cash">—</div></div>
+  </div>
+
+  <div class="sect"><span id="posCount">持仓</span><span>期权现价可能为延迟报价</span></div>
+  <div id="positions"></div>
+
+  <footer>
+    只读连接本机 IB Gateway 4001（clientId 93），不下单、不改状态。<br>
+    每 5 秒自动刷新 · 启动：<code>python3 ~/tools/ib_live/server.py</code>
+  </footer>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const money = (n, sign) => {
+  if (n === null || n === undefined) return '—';
+  const s = n < 0 ? '−' : (sign ? '+' : '');
+  return s + '$' + Math.abs(n).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+};
+const pct = n => n === null || n === undefined ? '—' : (n > 0 ? '+' : n < 0 ? '−' : '') + Math.abs(n).toFixed(1) + '%';
+const cls = n => (n === null || n === undefined || n === 0) ? '' : (n > 0 ? 'up' : 'dn');
+const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+
+function usMarketNote() {
+  try {
+    const p = new Intl.DateTimeFormat('en-US', {timeZone: 'America/New_York', weekday: 'short',
+                 hour: '2-digit', minute: '2-digit', hour12: false}).formatToParts(new Date());
+    const get = t => p.find(x => x.type === t).value;
+    const mins = parseInt(get('hour')) * 60 + parseInt(get('minute'));
+    const wd = get('weekday');
+    const open = wd !== 'Sat' && wd !== 'Sun' && mins >= 570 && mins < 960;
+    return `美东 ${get('hour')}:${get('minute')} · ${open ? '美股开盘中' : '美股休市（价格为最近成交）'}`;
+  } catch (e) { return ''; }
+}
+
+function maskAcct(a) {
+  if (!a) return '';
+  return a.slice(0, 1) + '···' + a.slice(-4);
+}
+
+function render(d) {
+  $('dot').className = 'dot ' + (d.connected ? 'ok' : 'bad');
+  $('conn').textContent = d.connected
+    ? '已连接 · ' + (d.time || '').slice(11)
+    : '断开重连中' + (d.error ? ' · ' + d.error : '');
+  $('acct').textContent = maskAcct(d.account);
+  $('mkt').textContent = usMarketNote() + (d.time ? ' · 数据时间 ' + d.time.slice(5) : '');
+
+  const p = d.pnl || {};
+  $('dayPnl').textContent = money(p.daily, true);
+  $('dayPnl').className = 'v ' + cls(p.daily);
+  $('dayPnlSub').textContent = '已实现 ' + money(p.realized) + ' · 未实现（今日变动）' + money(p.unrealized);
+
+  const s = d.summary || {};
+  $('netLiq').textContent = money(s.NetLiquidation);
+  $('avail').textContent = money(s.AvailableFunds);
+  $('cash').textContent = money(s.TotalCashValue);
+
+  const rows = d.positions || [];
+  const unSum = rows.reduce((a, r) => a + (r.unrealized || 0), 0);
+  $('unreal').textContent = money(unSum, true);
+  $('unreal').className = 'v small ' + cls(unSum);
+  $('posCount').textContent = '持仓 ' + rows.length + ' 个';
+
+  const net = s.NetLiquidation || 0;
+  $('positions').innerHTML = rows.map(r => {
+    const weight = net ? Math.abs(r.mktValue || 0) / net * 100 : null;
+    const qty = r.secType === 'OPT' ? (r.qty > 0 ? '买 ' : '卖 ') + Math.abs(r.qty) + ' 张'
+                                    : Math.abs(r.qty) + ' 股';
+    return `<div class="pos">
+      <div class="r1">
+        <div><span class="sym">${esc(r.label)}</span><span class="tag">${r.secType === 'OPT' ? '期权' : '股票'}</span></div>
+        <div class="num"><span class="${cls(r.dayPnl)}">${r.dayPnl === null ? '' : '今日 ' + money(r.dayPnl, true)}</span></div>
+      </div>
+      <div class="r1">
+        <div class="r2" style="margin:0"><span>${qty} · 现价 ${r.last === null ? '—' : r.last.toFixed(2)}</span></div>
+        <div class="num r2" style="margin:0"><span class="${cls(r.unrealized)}"><b>${money(r.unrealized, true)}</b> (${pct(r.unrealizedPct)})</span></div>
+      </div>
+      <div class="r2"><span>市值 ${money(r.mktValue)} · 占净值 ${pct(weight)}</span>
+        <span>成本 ${r.avgUnit === null ? '—' : r.avgUnit.toFixed(2)}</span></div>
+    </div>`;
+  }).join('');
+}
+
+const SEED = window.__SEED__ ?? null;
+if (SEED) { render(SEED); }
+else {
+  async function poll() {
+    try {
+      const r = await fetch('/api/snapshot.json', {cache: 'no-store', headers: {'X-Whirlpool': '1'}});
+      render(await r.json());
+    } catch (e) { $('conn').textContent = '本页无法连到看板服务'; }
+    setTimeout(poll, 5000);
+  }
+  poll();
+}
+</script>
+</body>
+</html>

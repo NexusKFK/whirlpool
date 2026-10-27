@@ -72,6 +72,12 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
     private let login = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let smart = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let updates = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    // 持仓板(IBKR 只读看板)——布局页末尾的附属分组,默认不开
+    private let portfolioEnabled = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    private let portfolioFont = NSPopUpButton()
+    private let portfolioInterval = NSPopUpButton()
+    private let portfolioPrivacy = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    static let portfolioIntervals: [Double] = [30, 60, 300]
     private let resetNote = NSTextField(labelWithString: "")
     private var resetPositions = false
     private var lastLanguage = ""
@@ -156,6 +162,10 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
         hover.state = config.hoverPause ? .on : .off
         smart.state = config.smartRefresh ? .on : .off
         updates.state = config.checkUpdates ? .on : .off
+        portfolioEnabled.state = config.positionsEnabled ? .on : .off
+        portfolioFont.selectItem(at: config.positionsFont == "system" ? 1 : 0)
+        portfolioInterval.selectItem(at: Self.portfolioIntervals.firstIndex(of: config.positionsRefresh) ?? 0)
+        portfolioPrivacy.state = config.positionsPrivacy ? .on : .off
         login.state = SMAppService.mainApp.status == .enabled ? .on : .off
         resetPositions = false
         resetNote.stringValue = ""
@@ -467,8 +477,21 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
         let displays = column([heading("Display areas"), cards, note("Select one or more displays.")], spacing: 8)
         let desktop = column([formRow("Screen", [screenPicker]), preview,
                               note("Preview only. Drag the strip or its edges; positions stay clear of the Dock.")], spacing: 8)
+        portfolioEnabled.title = L("Enable Portfolio Panel")
+        portfolioFont.removeAllItems()
+        portfolioFont.addItems(withTitles: [L("Monospaced"), L("System Font")])
+        portfolioFont.setAccessibilityLabel(L("Panel Font"))
+        portfolioInterval.removeAllItems()
+        portfolioInterval.addItems(withTitles: [L("Every 30 Seconds"), L("Every Minute"), L("Every 5 Minutes")])
+        portfolioInterval.setAccessibilityLabel(L("Refresh Interval"))
+        portfolioPrivacy.title = L("Hide Cash Amounts")
+        let portfolio = panel([heading("Portfolio Panel"), portfolioEnabled,
+                               formRow("Panel Font", [portfolioFont]),
+                               formRow("Refresh Interval", [portfolioInterval]),
+                               portfolioPrivacy,
+                               note("Read-only IB Gateway feed (localhost only). Positions and P&L never leave this device; the account number is masked on the panel.")])
         return stack([pageTitle("Layout", "Choose where quotes appear, then shape each display."), displays,
-                      desktop, floatingGroup, menuGroup, options])
+                      desktop, floatingGroup, menuGroup, options, portfolio])
     }
 
     private func appearanceTab() -> NSView {
@@ -832,6 +855,10 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
         draft.hoverPause = hover.state == .on
         draft.smartRefresh = smart.state == .on
         draft.checkUpdates = updates.state == .on
+        draft.positionsEnabled = portfolioEnabled.state == .on
+        draft.positionsFont = portfolioFont.indexOfSelectedItem == 1 ? "system" : "mono"
+        draft.positionsRefresh = Self.portfolioIntervals[max(0, min(2, portfolioInterval.indexOfSelectedItem))]
+        draft.positionsPrivacy = portfolioPrivacy.state == .on
         draft.lockPosition = lock.state == .on
         draft.barClickThrough = clickThrough.state == .on
         let screenKey = screenKeys.indices.contains(screenPicker.indexOfSelectedItem) ? screenKeys[screenPicker.indexOfSelectedItem] : "auto"
