@@ -103,6 +103,18 @@ macOS 還支援 `--settings`、`--status`、`--send`、`--urgent`、`--very-urge
 
 `--mode` 支援三個顯示區域的全部非空組合，例如 `whirlpool --mode marquee,bar,board`。相容舊腳本的 `--width N` 仍按基準字元單位臨時修改兩個跑馬燈的寬度；獨立調整浮動視窗和選單列寬度請使用設定頁。
 
+## 持倉看板（IBKR，僅 macOS）
+
+一個可選的懸浮小卡，疊在報價卡上方，口徑對齊 IBKR 手機 App 預設頁：今日損益，淨值 / 未實現損益 / 可用 / 現金（可用小眼睛按鈕一键遮罩為 `****`），以及逐持倉行——每行含今日損益、開倉成本，同到期垂直價差自動合併為一行。面板使用獨立字型設定，預設關閉。
+
+設定步驟：
+
+1. 在這台 Mac 上執行 IB Gateway（或 TWS）並開啟 API：**Configure → Settings → API → Settings**，啟用 socket client、連接埠 4001，並允許唯讀 API 連線。注意 IBKR 一個帳號同時只允許一個作用中工作階段——閘道開著時手機 App 和網頁 Client Portal 登不進來，這塊板就是本機的替代品。
+2. `pip3 install ib_insync`（Python 3.9+）。餵料腳本在本儲存庫 `tools/ib-live/`；複製到 `~/tools/ib_live/`（`mkdir -p ~/tools/ib_live && cp tools/ib-live/* ~/tools/ib_live/`）或保留儲存庫 checkout 均可，Whirlpool 兩處都會找，並自行將它作為子程序啟動與回收，無需 launchd。
+3. 在 **設定 → 版面配置 → 持倉看板** 開啟，或用選單列右鍵選單。
+
+行為與隱私：餵料唯讀（用戶端 ID 93，絕不碰下單介面），只綁定 `127.0.0.1`，拒絕非回環 Host 的請求，資料介面要求 `X-Whirlpool` 自訂標頭，瀏覽器裡其他網頁的跨站請求讀不到。面板上帳號遮罩顯示，資料不上傳任何地方。閘道關閉時，股票行用東財/騰訊行情加上最後已知成本繼續即時更新，選擇權行凍結並變灰；頁尾標明哪些行是即時的、凍結數字取自幾點。
+
 ## 開發與釋出
 
 [更新記錄](CHANGELOG.md) · [貢獻與翻譯](CONTRIBUTING.md) · [安全說明](SECURITY.md) · [架構](docs/ARCHITECTURE.md) · [授權](LICENSE) · [致謝](ATTRIBUTION.md)

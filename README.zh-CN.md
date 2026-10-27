@@ -103,6 +103,18 @@ macOS 还支持 `--settings`、`--status`、`--send`、`--urgent`、`--very-urge
 
 `--mode` 支持三个显示区域的全部非空组合，例如 `whirlpool --mode marquee,bar,board`。兼容旧脚本的 `--width N` 仍按基准字符单位临时修改两个跑马灯的宽度；独立调节浮窗和菜单栏宽度请使用设置页。
 
+## 持仓看板（IBKR，仅 macOS）
+
+一个可选的悬浮小板，叠在报价卡上方，口径对齐 IBKR 手机端默认页：今日盈亏，净资产 / 浮盈亏 / 可用 / 现金（可用小眼睛按钮一键打码为 `****`），以及逐持仓行——每行含今日盈亏、开仓成本，同到期垂直价差自动合并为一行。面板使用独立字体设置，默认关闭。
+
+配置步骤：
+
+1. 在这台 Mac 上运行 IB Gateway（或 TWS）并开启 API：**Configure → Settings → API → Settings**，启用 socket client、端口 4001，并允许只读 API 连接。注意 IBKR 一个用户名同时只允许一个活跃会话——网关开着时手机 App 和网页 Client Portal 登不上，这块板就是本地的替代品。
+2. `pip3 install ib_insync`（Python 3.9+）。喂料脚本在本仓库 `tools/ib-live/`；复制到 `~/tools/ib_live/`（`mkdir -p ~/tools/ib_live && cp tools/ib-live/* ~/tools/ib_live/`）或保留仓库检出均可，Whirlpool 两处都会找，并自行把它作为子进程启动和回收，无需 launchd。
+3. 在 **设置 → 布局 → 持仓看板** 打开，或用状态栏右键菜单。
+
+行为与隐私：喂料只读（客户端 ID 93，绝不触碰订单接口），只绑定 `127.0.0.1`，拒绝非回环 Host 的请求，数据接口要求 `X-Whirlpool` 自定义头，浏览器里其他网页的跨站请求读不到。面板上账户号打码，数据不上传任何地方。网关关闭时，正股行用东财/腾讯行情加上最后已知成本继续实时更新，期权行冻结并灰显；页脚标明哪些行是实时的、冻结数字取自几点。
+
 ## 开发与发布
 
 [更新记录](CHANGELOG.md) · [贡献与翻译](CONTRIBUTING.md) · [安全说明](SECURITY.md) · [架构](docs/ARCHITECTURE.md) · [许可证](LICENSE) · [致谢](ATTRIBUTION.md)

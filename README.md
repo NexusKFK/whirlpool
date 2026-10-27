@@ -120,6 +120,18 @@ On Windows, `Whirlpool.exe --smoke-test` builds every window in both languages a
 - Saving is atomic. Missing fields receive defaults; malformed files are not silently replaced on startup. No private watchlist/configuration is included in this repository.
 - Use **Advanced → Show Configuration File…** on macOS  for the file location.
 
+## Portfolio panel (IBKR, macOS only)
+
+An optional floating card over the quote board mirrors the IBKR mobile app's default page: today's P&L, net liquidation / unrealized / available / cash (maskable as `****` with the eye button), and one line per position with daily P&L, open cost and same-expiry vertical spreads merged into a single line. It uses its own font setting and is off by default.
+
+Setup:
+
+1. Run IB Gateway (or TWS) on this Mac with its API enabled: **Configure → Settings → API → Settings**, enable the socket client on port 4001 and allow read-only API connections. Note IBKR allows only one active session per username — while the gateway runs you cannot be signed in to the mobile app or Client Portal; this panel is the local replacement.
+2. `pip3 install ib_insync` (Python 3.9+). The feeder script ships at `tools/ib-live/` in this repository; either copy it to `~/tools/ib_live/` (`mkdir -p ~/tools/ib_live && cp tools/ib-live/* ~/tools/ib_live/`) or keep the repo checked out — Whirlpool looks in both places and runs it as a child process by itself. No launchd or agent setup.
+3. Enable it in **Settings → Layout → Portfolio Panel**, or from the status-bar right-click menu.
+
+Behavior and privacy: the feeder is read-only (client ID 93, never any order API), binds to `127.0.0.1` only, refuses non-loopback `Host` headers and serves data only behind an `X-Whirlpool` header, so cross-site pages in your browser cannot read it. The account number is masked on the panel and nothing is uploaded anywhere. With the gateway closed, stock rows keep updating from EastMoney/Tencent using the last known cost basis while option rows freeze and dim; the footer states which rows are live and when the frozen numbers were taken.
+
 ## macOS CLI
 
 The application binary is also a local client:
