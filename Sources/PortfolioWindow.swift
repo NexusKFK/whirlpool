@@ -246,8 +246,8 @@ final class PortfolioWindow: NSPanel, NSWindowDelegate {
 
         // ── 量宽定板:主行与小字行都参与测宽,放不下就加宽(有上限);再放不下宁可裁小字 ──
         // 组内距小于组间距:小字紧贴自己的主行,两行明显成组,不会看丢归属
-        let intraGap: CGFloat = 2
-        let interGap: CGFloat = 12
+        let intraGap: CGFloat = 1
+        let interGap: CGFloat = 13
         let rowGap = intraGap + interGap
         func pairWidth(_ line: Line) -> CGFloat {
             let mainW = line.left.frame.width + gap + (line.right?.frame.width ?? 0)
@@ -323,7 +323,8 @@ final class PortfolioWindow: NSPanel, NSWindowDelegate {
             cy -= subH + interGap
         }
 
-        // 页脚照报价卡的写法:开盘状态 + 最后一次数据时间,不放别的
+        // 页脚学报价卡的写法:状态 + Last quote。盘中/盘前行情在动,标最新行情时间;
+        // 收盘后净值不是重点(期权 mark 不更新),直接写明数据就是收盘价,不再滚刷新时间。
         let footerText: String
         var footerColor = NSColor.secondaryLabelColor
         let updated = snap?.time.flatMap { $0.count >= 19 ? String($0.suffix(8)) : nil }
@@ -335,19 +336,30 @@ final class PortfolioWindow: NSPanel, NSWindowDelegate {
             footerText = String(format: L("Stock live · options frozen at %@"), updated ?? "—")
             footerColor = .systemOrange
         } else {
-            footerText = Self.usMarketState() + (updated.map { " · " + String(format: L("Updated %@"), $0) } ?? "")
+            switch Self.usPhase() {
+            case .open:
+                footerText = L("Market open") + " · " + L("Last quote") + " " + (updated ?? "—")
+            case .pre:
+                footerText = L("Pre-market") + " · " + L("Last quote") + " " + (updated ?? "—")
+            case .closed:
+                footerText = L("Market closed") + " · " + L("Quotes at close")
+            }
         }
         place(subLabel(footerText, 9.5, footerColor), left: inset, cy: 11)
     }
 
-    /// 美股盘中状态(美东 9:30–16:00、周一至周五)。仅供页脚提示,不是交易日历,节假日照常显示开盘。
-    private static func usMarketState() -> String {
+    /// 美股时段(美东,周一至五):盘中 9:30–16:00,盘前 4:00–9:30,其余收盘。仅供页脚与节流,非交易日历。
+    private enum USPhase { case open, pre, closed }
+    private static func usPhase() -> USPhase {
         var cal = Calendar(identifier: .gregorian)
         cal.timeZone = TimeZone(identifier: "America/New_York") ?? .current
         let c = cal.dateComponents([.weekday, .hour, .minute], from: Date())
-        guard let wd = c.weekday, let h = c.hour, let m = c.minute else { return L("Market closed") }
-        let open = wd != 1 && wd != 7 && (h > 9 || (h == 9 && m >= 30)) && h < 16
-        return open ? L("Market open") : L("Market closed")
+        guard let wd = c.weekday, let h = c.hour, let m = c.minute else { return .closed }
+        if wd == 1 || wd == 7 { return .closed }
+        let mins = h * 60 + m
+        if (570..<960).contains(mins) { return .open }
+        if (240..<570).contains(mins) { return .pre }
+        return .closed
     }
 
     // ── 位置 ───────────────────────────────────────────────────────────────────

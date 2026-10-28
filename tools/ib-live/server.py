@@ -23,8 +23,23 @@ PORT = int(os.environ.get('IB_HTTP_PORT', '8899'))
 GW_HOST = os.environ.get('IB_GW_HOST', '127.0.0.1')
 GW_PORT = int(os.environ.get('IB_GW_PORT', '4001'))
 CLIENT_ID = 93
-REFRESH_SECONDS = 30   # 与 Whirlpool 持仓板的默认档位一致
 RETRY_SECONDS = 10
+
+
+def refresh_seconds():
+    """按美东市场时钟节流:盘中 30s,盘前(4:00–9:30)120s,盘后与隔夜 300s。
+    盘后净值不是重点、期权 mark 不更新,慢拉即可;面板页脚同口径标注。"""
+    import zoneinfo
+    tz = zoneinfo.ZoneInfo('America/New_York')
+    now = datetime.datetime.now(tz)
+    mins = now.hour * 60 + now.minute
+    if now.weekday() >= 5:
+        return 300
+    if 570 <= mins < 960:
+        return 30
+    if 240 <= mins < 570:
+        return 120
+    return 300
 PAGE = Path(__file__).with_name('page.html')
 LAST_SNAPSHOT = Path(__file__).with_name('last_snapshot.json')   # 网关不在时的最后快照
 ALLOWED_HOSTS = {f'127.0.0.1:{PORT}', f'localhost:{PORT}', f'[::1]:{PORT}'}
@@ -208,7 +223,7 @@ def run_ib():
             while ib.isConnected():
                 collect(ib, acct, pnl, subs)
                 persist_last()
-                ib.sleep(REFRESH_SECONDS)
+                ib.sleep(refresh_seconds())
             put(connected=False, error='网关连接断开')
         except Exception as e:
             put(connected=False, error=f'{type(e).__name__}: {e}')

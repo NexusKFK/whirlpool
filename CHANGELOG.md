@@ -10,6 +10,8 @@ The portfolio panel release: a read-only IBKR account card over the quote board 
 
 - Portfolio feeder: a gateway reconnect may deliver account P&L before the portfolio itself arrives; that empty-portfolio frame no longer wipes the in-memory positions or overwrites the last-snapshot fallback (the panel could briefly collapse to "no positions" and resize over its own rows). Empty portfolios are simply not persisted.
 
+- Portfolio panel: the footer follows the quote board's "Last quote" wording — "Market open / Pre-market · Last quote HH:MM:SS" while quotes move, and "Market closed · quotes at close" after hours (an "Updated" timestamp kept ticking after the close and read ambiguously). The feeder throttles by the US market clock: 30s intraday, 2 minutes pre-market, 5 minutes after hours and overnight. Position rows tightened to a 1pt gap above their sub-line.
+
 - US class-share tickers (`BRK.B`, `BF.B`) now follow the NYSE calendar for smart refresh and closed-market display; previously they had no calendar, never slowed down overnight and never showed as closed. Both platforms.
 - Dotted overseas symbols (`7203.T`, `VOD.L`) open Yahoo instead of a TradingView link TradingView cannot resolve; US class shares keep their TradingView chart. Both platforms.
 - Windows: the refresh cadence is anchored at the moment the request is sent, like macOS; a 15-second setting no longer drifts to 16–17 seconds.

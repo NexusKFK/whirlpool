@@ -265,6 +265,8 @@ enum L10n {
         "Read-only IB Gateway feed (localhost only). Positions and P&L never leave this device; the account number is masked on the panel.": "只读连接本机 IB Gateway（仅 localhost，绑 127.0.0.1，数据不外发）。持仓与盈亏只留在本机；面板上账户号打码显示。",
         "Last update %@": "数据截至 %@",
         "Stock live · options frozen at %@": "正股实时 · 期权与账户冻结于 %@",
+        "Pre-market": "盘前",
+        "Quotes at close": "数据为收盘价",
     ]
 }
 
