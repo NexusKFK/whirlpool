@@ -45,8 +45,8 @@ def persist_last():
     """网关在线时把完整状态原子落盘;下次启动连不上就用它回填展示。"""
     with _lock:
         snap = json.loads(json.dumps(_state, ensure_ascii=False))
-    if not snap.get('positions') and snap.get('pnl') is None:
-        return   # 空状态不值得覆盖上一份好数据
+    if not snap.get('positions'):
+        return   # 空持仓不落盘:Gateway 重连后组合事件会晚到,别让空帧毁掉 fallback 好数据
     try:
         tmp = LAST_SNAPSHOT.with_suffix('.tmp')
         tmp.write_text(json.dumps(snap, ensure_ascii=False))
@@ -186,7 +186,13 @@ def collect(ib, acct, pnl, subs):
             'unrealized': pnl.unrealizedPnL if finite(pnl.unrealizedPnL) else None,
             'realized': pnl.realizedPnL if finite(pnl.realizedPnL) else None,
         }
-    put(connected=True, error=None, account=acct, time=datetime.datetime.now().isoformat(timespec='seconds'),
+    now = datetime.datetime.now().isoformat(timespec='seconds')
+    if not rows and _state.get('positions'):
+        # Gateway 重连后组合事件晚到:这轮只有空组合。保留旧持仓,只刷新时间与盈亏,
+        # 否则面板会闪成"无持仓"并把空快照当作好数据传播。
+        put(connected=True, error=None, account=acct, time=now, pnl=pnl_data, summary=summary)
+        return
+    put(connected=True, error=None, account=acct, time=now,
         pnl=pnl_data, summary=summary, positions=rows)
 
 

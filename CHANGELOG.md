@@ -8,6 +8,8 @@ The portfolio panel release: a read-only IBKR account card over the quote board 
 
 中文：新增持仓板——叠在报价卡上方的小悬浮卡，按 IBKR 手机端默认页的口径显示今日盈亏、净资产、可用资金、现金、浮盈亏和逐持仓行（含每行今日盈亏）。入口在设置 → 布局 → 持仓看板（默认关闭，状态栏右键菜单也可开关），可配字体、刷新档位与隐私。数据来自只读本机喂料服务（脚本随仓库附带于 `tools/ib-live/server.py`，从 `~/tools/ib_live/` 或仓库检出处运行；只读连 IB Gateway 4001、客户端 ID 93、绝不触碰订单接口），该进程由 Whirlpool 作为子进程自行拉起与回收，并持久化最后一份良好快照。网关关掉时面板优雅降级：正股行用快照成本加自选池行情源（东财/腾讯）现价实时重算，期权与价差行冻结并整行灰显，页脚标"正股实时 · 期权与账户冻结于 HH:MM"。喂料只绑回环地址，Host 非回环的请求一律拒绝（防 DNS 重绑定），数据接口还要求 `X-Whirlpool` 自定义头，浏览器里其他网页的跨站请求读不到；面板上账户号打码，数据不向任何外部地址发送。小字一律用开仓成本（股票均价、期权每张成本、价差净成本），现价盯盘交给报价卡；同到期垂直价差合并为一行（如 `XLK 250/260C 26-12-18 · 2 legs · 净成本`），页脚照报价卡格式显示开盘状态与最后更新时间，长行自动加宽板宽，净资产/浮盈亏/可用/现金四格金额可打码为 `****`——面板右上角的小眼睛按钮或右键菜单都能切换；面板使用独立字体设置（默认等宽数字），不跟随跑马灯字体。仅 macOS。
 
+- Portfolio feeder: a gateway reconnect may deliver account P&L before the portfolio itself arrives; that empty-portfolio frame no longer wipes the in-memory positions or overwrites the last-snapshot fallback (the panel could briefly collapse to "no positions" and resize over its own rows). Empty portfolios are simply not persisted.
+
 - US class-share tickers (`BRK.B`, `BF.B`) now follow the NYSE calendar for smart refresh and closed-market display; previously they had no calendar, never slowed down overnight and never showed as closed. Both platforms.
 - Dotted overseas symbols (`7203.T`, `VOD.L`) open Yahoo instead of a TradingView link TradingView cannot resolve; US class shares keep their TradingView chart. Both platforms.
 - Windows: the refresh cadence is anchored at the moment the request is sent, like macOS; a 15-second setting no longer drifts to 16–17 seconds.
