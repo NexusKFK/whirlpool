@@ -28,18 +28,23 @@ RETRY_SECONDS = 10
 
 def refresh_seconds():
     """按美东市场时钟节流:盘中 30s,盘前(4:00–9:30)120s,盘后与隔夜 300s。
-    盘后净值不是重点、期权 mark 不更新,慢拉即可;面板页脚同口径标注。"""
+    盘后净值不是重点、期权 mark 不更新,慢拉即可;面板页脚同口径标注。
+    面板的"盘后行情"月亮开着时(最近 90s 内带 extended=1 的请求),盘前/盘后也按 30s 拉。"""
     import zoneinfo
     tz = zoneinfo.ZoneInfo('America/New_York')
     now = datetime.datetime.now(tz)
     mins = now.hour * 60 + now.minute
+    with _lock:
+        extended = time.time() - _state.get('extended_seen', 0.0) < 90
     if now.weekday() >= 5:
-        return 300
-    if 570 <= mins < 960:
-        return 30
-    if 240 <= mins < 570:
-        return 120
-    return 300
+        base = 300
+    elif 570 <= mins < 960:
+        base = 30
+    elif 240 <= mins < 570:
+        base = 120
+    else:
+        base = 300
+    return 30 if extended else base
 PAGE = Path(__file__).with_name('page.html')
 LAST_SNAPSHOT = Path(__file__).with_name('last_snapshot.json')   # 网关不在时的最后快照
 ALLOWED_HOSTS = {f'127.0.0.1:{PORT}', f'localhost:{PORT}', f'[::1]:{PORT}'}
@@ -47,7 +52,7 @@ ALLOWED_HOSTS = {f'127.0.0.1:{PORT}', f'localhost:{PORT}', f'[::1]:{PORT}'}
 SUMMARY_TAGS = ('NetLiquidation', 'TotalCashValue', 'SettledCash', 'AvailableFunds')
 
 _state = {'connected': False, 'time': None, 'error': None, 'account': None,
-          'pnl': None, 'summary': {}, 'positions': []}
+          'pnl': None, 'summary': {}, 'positions': [], 'extended_seen': 0.0}
 _lock = threading.Lock()
 
 
@@ -211,6 +216,18 @@ def collect(ib, acct, pnl, subs):
         pnl=pnl_data, summary=summary, positions=rows)
 
 
+def throttled_sleep(ib, seconds):
+    """分片睡:月亮开关改变节流档位时,最多 1 秒就醒来按新节奏走,不用等满旧档。"""
+    deadline = time.time() + seconds
+    while True:
+        remaining = deadline - time.time()
+        if remaining <= 0:
+            return
+        ib.sleep(min(1.0, remaining))
+        if refresh_seconds() != seconds:
+            return
+
+
 def run_ib():
     restored = False
     while True:
@@ -223,7 +240,7 @@ def run_ib():
             while ib.isConnected():
                 collect(ib, acct, pnl, subs)
                 persist_last()
-                ib.sleep(refresh_seconds())
+                throttled_sleep(ib, refresh_seconds())
             put(connected=False, error='网关连接断开')
         except Exception as e:
             put(connected=False, error=f'{type(e).__name__}: {e}')
@@ -253,13 +270,18 @@ class Handler(BaseHTTPRequestHandler):
         if host not in ALLOWED_HOSTS:
             self._send(403, 'text/plain; charset=utf-8', b'forbidden')
             return
-        if self.path == '/api/snapshot.json':
+        path, _, query = self.path.partition('?')
+        if path == '/api/snapshot.json':
             if self.headers.get('X-Whirlpool') != '1':
                 self._send(403, 'text/plain; charset=utf-8', b'forbidden')
                 return
+            if query == 'extended=1':
+                # 面板月亮开关开着:喂料盘后/盘前也按盘中节奏向网关拉
+                with _lock:
+                    _state['extended_seen'] = time.time()
             body = json.dumps(snapshot(), ensure_ascii=False).encode()
             self._send(200, 'application/json; charset=utf-8', body)
-        elif self.path == '/':
+        elif path == '/':
             try:
                 self._send(200, 'text/html; charset=utf-8', PAGE.read_bytes())
             except Exception as e:

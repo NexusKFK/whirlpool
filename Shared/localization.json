@@ -241,16 +241,12 @@
   "IB Gateway not connected": "IB Gateway 未连接",
   "Loading IBKR snapshot…": "正在拉取 IBKR 数据…",
   "No positions": "暂无持仓",
-  "%d shares": "%d 股",
   "%d long": "买 %d 张",
   "%d short": "卖 %d 张",
   "Today": "今日",
   "Hide Cash Amounts": "隐藏资金金额",
-  "Spread · %d legs": "%d 腿价差",
   "Feeder starting…": "喂料服务启动中…",
   "Panel Font": "面板字体",
-  "Net cost %@": "净成本 %@",
-  "avg": "均价",
   "Market open": "美股开盘中",
   "Market closed": "美股已收盘",
   "Updated %@": "更新于 %@",
@@ -258,5 +254,8 @@
   "Last update %@": "数据截至 %@",
   "Stock live · options frozen at %@": "正股实时 · 期权与账户冻结于 %@",
   "Pre-market": "盘前",
-  "Quotes at close": "数据为收盘价"
+  "Quotes at close": "数据为收盘价",
+  "After hours": "盘后",
+  "After-Hours Snapshot": "盘后行情",
+  "%d legs": "%d 腿"
 }

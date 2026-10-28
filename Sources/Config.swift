@@ -76,6 +76,7 @@ struct TickerConfig: Codable {
     var positionsRefresh:  Double            = 30        // 持仓板刷新间隔(秒)
     var positionsOrigin:   [Double]?         = nil       // 持仓板手动拖动后记忆 [x, y]
     var positionsPrivacy:  Bool              = true      // 持仓板遮住净资产/可用/现金金额(今日盈亏与持仓浮盈亏仍显示)
+    var positionsExtendedHours: Bool         = false     // 持仓板盘后行情:月亮开关,开时盘后也拉最新价(默认收盘价+慢节流)
     var positionsFont:     String            = "mono"    // 持仓板字体:mono=等宽数字 system=系统字体(点阵对数字墙不适用,不提供)
     var language: String = "system"
 
@@ -85,7 +86,7 @@ struct TickerConfig: Codable {
         case tickerEnabled, defaultColor, defaultWidth, ledDotSize, marqueeFont, showDockIcon, scrollSpeed, defaultPause, customChars, transparent, transparentColor, marqueeSeparator, changeArrows, quoteLoop, watchlist, pausePerSymbol, redUpMarkets, provider, usQuoteSource, displayMode, boardCorner, boardOrigin, boardRefresh, barOrigin, boardPixelFont, marqueeBlink, barBackground, hoverPause, smartRefresh, language
         case watchlists, activeWatchlist, checkUpdates, displayScreen, lockPosition, barClickThrough
         case barPlacement, barWidthFraction, menuWidthPoints
-        case positionsEnabled, positionsRefresh, positionsOrigin, positionsPrivacy, positionsFont
+        case positionsEnabled, positionsRefresh, positionsOrigin, positionsPrivacy, positionsFont, positionsExtendedHours
     }
 
     init(from decoder: Decoder) throws {
@@ -137,6 +138,7 @@ struct TickerConfig: Codable {
         positionsEnabled = try values.decodeIfPresent(type(of: positionsEnabled), forKey: .positionsEnabled) ?? positionsEnabled
         positionsRefresh = try values.decodeIfPresent(type(of: positionsRefresh), forKey: .positionsRefresh) ?? positionsRefresh
         positionsPrivacy = try values.decodeIfPresent(type(of: positionsPrivacy), forKey: .positionsPrivacy) ?? positionsPrivacy
+        positionsExtendedHours = try values.decodeIfPresent(type(of: positionsExtendedHours), forKey: .positionsExtendedHours) ?? positionsExtendedHours
         positionsFont = try values.decodeIfPresent(type(of: positionsFont), forKey: .positionsFont) ?? positionsFont
         language = try values.decodeIfPresent(type(of: language), forKey: .language) ?? language
         boardOrigin = try values.decodeIfPresent([Double].self, forKey: .boardOrigin)
@@ -194,6 +196,7 @@ struct TickerConfig: Codable {
         try c.encode(positionsRefresh, forKey: .positionsRefresh)
         try c.encodeIfPresent(positionsOrigin, forKey: .positionsOrigin)
         try c.encode(positionsPrivacy, forKey: .positionsPrivacy)
+        try c.encode(positionsExtendedHours, forKey: .positionsExtendedHours)
         try c.encode(positionsFont, forKey: .positionsFont)
         try c.encode(language, forKey: .language)
     }

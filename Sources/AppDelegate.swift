@@ -968,6 +968,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         positionsWindow?.config = config
     }
 
+    @objc private func togglePositionsExtendedHours() {
+        config.positionsExtendedHours.toggle()
+        saveConfig(config)
+        positionsWindow?.config = config
+        // 开关变了立刻拉一次,月亮开时喂料尽快进入盘后快节奏
+        schedulePositionsRefresh(in: 1)
+    }
+
     @objc private func setPositionsRefresh(_ sender: NSMenuItem) {
         guard let seconds = sender.representedObject as? Double else { return }
         config.positionsRefresh = seconds
@@ -990,6 +998,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let privacy = NSMenuItem(title: L("Hide Cash Amounts"), action: #selector(togglePositionsPrivacy), keyEquivalent: "")
         privacy.target = self; privacy.state = config.positionsPrivacy ? .on : .off
         menu.addItem(privacy)
+        let ext = NSMenuItem(title: L("After-Hours Snapshot"), action: #selector(togglePositionsExtendedHours), keyEquivalent: "")
+        ext.target = self; ext.state = config.positionsExtendedHours ? .on : .off
+        menu.addItem(ext)
         let interval = NSMenuItem(title: L("Refresh Interval"), action: nil, keyEquivalent: "")
         let sub = NSMenu()
         for (seconds, title) in [(30.0, "Every 30 Seconds"), (60.0, "Every Minute"), (300.0, "Every 5 Minutes")] {
@@ -1026,6 +1037,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             panel.menuProvider = { [weak self] in self?.buildMenu() ?? NSMenu() }
             panel.onOriginChange = { [weak self] origin in self?.config.positionsOrigin = origin }
             panel.onTogglePrivacy = { [weak self] in self?.togglePositionsPrivacy() }
+            panel.onToggleExtendedHours = { [weak self] in self?.togglePositionsExtendedHours() }
             panel.quoteProvider = { [weak self] symbols, done in
                 // 网关离线 fallback:正股现价走 App 自己的行情链(东财/腾讯,与自选池同源)
                 guard let self else { return done([:]) }

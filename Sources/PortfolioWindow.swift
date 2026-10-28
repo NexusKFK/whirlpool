@@ -55,6 +55,7 @@ final class PortfolioWindow: NSPanel, NSWindowDelegate {
             if oldValue.positionsOrigin != config.positionsOrigin { saveWork?.cancel() }
             isMovableByWindowBackground = !config.lockPosition
             if oldValue.positionsPrivacy != config.positionsPrivacy
+                || oldValue.positionsExtendedHours != config.positionsExtendedHours
                 || oldValue.positionsFont != config.positionsFont
                 || oldValue.transparentColor != config.transparentColor
                 || oldValue.positionsRefresh != config.positionsRefresh {
@@ -64,7 +65,8 @@ final class PortfolioWindow: NSPanel, NSWindowDelegate {
     }
     var menuProvider: (() -> NSMenu)?
     var onOriginChange: (([Double]) -> Void)?
-    var onTogglePrivacy: (() -> Void)?   // 小眼睛按钮:切换资金金额打码
+    var onTogglePrivacy: (() -> Void)?          // 小眼睛按钮:切换资金金额打码
+    var onToggleExtendedHours: (() -> Void)?    // 月亮按钮:切换盘后行情快照
     /// 网关离线时取正股现价:AppDelegate 注入,内部走 quoteService(东财/腾讯)
     var quoteProvider: (([String], @escaping ([String: Quote]) -> Void) -> Void)?
     /// 默认落点参照(通常是报价卡的 frame):持仓板默认叠在它上方,不重叠
@@ -98,7 +100,12 @@ final class PortfolioWindow: NSPanel, NSWindowDelegate {
     // ── 数据入口(AppDelegate 定时调用) ─────────────────────────────────────────
 
     func fetch(completion: @escaping () -> Void) {
-        var request = URLRequest(url: Self.feederURL.appendingPathComponent("api/snapshot.json"))
+        // 月亮开着时带 extended=1:喂料据此在盘前/盘后也按盘中节奏向网关拉
+        var url = Self.feederURL.appendingPathComponent("api/snapshot.json")
+        if config.positionsExtendedHours {
+            url = URL(string: url.absoluteString + "?extended=1") ?? url
+        }
+        var request = URLRequest(url: url)
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.timeoutInterval = 5
         request.setValue("1", forHTTPHeaderField: "X-Whirlpool")   // 喂料服务的本机探针头
@@ -218,7 +225,8 @@ final class PortfolioWindow: NSPanel, NSWindowDelegate {
             let frozenColor: NSColor = (stale && !live) ? .secondaryLabelColor : .labelColor
             let left = textLabel(p.label, 12, .semibold, frozenColor)
             let pnlColor = (stale && !live) ? frozenColor : tint(p.unrealized)
-            let right = textLabel(money(p.unrealized, sign: true) + "  " + Self.pct(p.unrealizedPct),
+            // %在前、金额在后,读起来先看幅度再看绝对数
+            let right = textLabel(Self.pct(p.unrealizedPct) + " " + money(p.unrealized, sign: true),
                                   12, .semibold, pnlColor)
             func avgPerShare(divisor: Double) -> Double? {
                 guard let cb = p.costBasis, p.qty != 0 else { return nil }
@@ -227,15 +235,13 @@ final class PortfolioWindow: NSPanel, NSWindowDelegate {
             var subText: String
             switch kind {
             case "SPREAD":
-                subText = String(format: L("Spread · %d legs"), p.legCount ?? 2) + " · "
-                    + String(format: L("Net cost %@"), Self.money(p.netCost.map { $0 / 100 }))
+                subText = String(format: L("%d legs"), p.legCount ?? 2) + " @ "
+                    + Self.money(p.netCost.map { $0 / 100 })
             case "OPT":
                 let tmpl = p.qty > 0 ? L("%d long") : L("%d short")
-                subText = String(format: tmpl, Int(abs(p.qty))) + " · "
-                    + L("avg") + " " + money(avgPerShare(divisor: 100))
+                subText = String(format: tmpl, Int(abs(p.qty))) + " @ " + money(avgPerShare(divisor: 100))
             default:
-                subText = String(format: L("%d shares"), Int(abs(p.qty))) + " · "
-                    + L("avg") + " " + money(avgPerShare(divisor: 1))
+                subText = String(format: "%.0f", abs(p.qty)) + " @ " + money(avgPerShare(divisor: 1))
             }
             let rightSub = p.dayPnl.map {
                 subLabel(L("Today") + " " + money($0, sign: true), 10.5,
@@ -279,7 +285,18 @@ final class PortfolioWindow: NSPanel, NSWindowDelegate {
         var cy = H - 12
         place(subLabel("IBKR " + (snap?.account.map { Self.maskAcct($0) } ?? "…"), 11, .labelColor),
               left: inset, cy: cy - 6)
-        // 右上角小眼睛:当前打码时显示划线眼,点击切换;与右键菜单同一开关
+        // 右上角按钮(最多两个):月亮=盘后行情快照,眼睛=资金打码
+        let extOn = config.positionsExtendedHours
+        if let icon = NSImage(systemSymbolName: extOn ? "moon.fill" : "moon",
+                              accessibilityDescription: L("After-Hours Snapshot")) {
+            let moon = NSButton(image: icon, target: self, action: #selector(moonTapped))
+            moon.isBordered = false
+            moon.imageScaling = .scaleProportionallyDown
+            moon.contentTintColor = extOn ? .systemYellow : .secondaryLabelColor
+            moon.toolTip = L("After-Hours Snapshot")
+            moon.frame = NSRect(x: W - inset - 54, y: cy - 14, width: 26, height: 17)
+            container.addSubview(moon)
+        }
         let eyeSymbol = config.positionsPrivacy ? "eye.slash" : "eye"
         if let icon = NSImage(systemSymbolName: eyeSymbol, accessibilityDescription: L("Hide Cash Amounts")) {
             let eye = NSButton(image: icon, target: self, action: #selector(eyeTapped))
@@ -342,7 +359,10 @@ final class PortfolioWindow: NSPanel, NSWindowDelegate {
             case .pre:
                 footerText = L("Pre-market") + " · " + L("Last quote") + " " + (updated ?? "—")
             case .closed:
-                footerText = L("Market closed") + " · " + L("Quotes at close")
+                // 月亮开着:盘后照常拉最新价(extended hours),页脚标盘后;默认收盘价
+                footerText = config.positionsExtendedHours
+                    ? L("After hours") + " · " + L("Last quote") + " " + (updated ?? "—")
+                    : L("Market closed") + " · " + L("Quotes at close")
             }
         }
         place(subLabel(footerText, 9.5, footerColor), left: inset, cy: 11)
@@ -413,6 +433,7 @@ final class PortfolioWindow: NSPanel, NSWindowDelegate {
     }
 
     @objc private func eyeTapped() { onTogglePrivacy?() }
+    @objc private func moonTapped() { onToggleExtendedHours?() }
 
     // ── 文本工具 ───────────────────────────────────────────────────────────────
 
