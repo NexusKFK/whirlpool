@@ -179,6 +179,38 @@ func runFeatureTests() throws {
     check(checker.shouldAnnounce(r) && !checker.shouldAnnounce(r), "announce once per version")
     check(!checker.isSkipped(r), "not skipped yet"); checker.skip(r); check(checker.isSkipped(r), "skip this version")
     print("PASS: update checker version logic and release parsing")
+
+    // 持仓板:盈亏符号跟随 ▲/▼ 开关;多头省略 +,空头写 −;期权小字压成 1@4.25
+    check(PortfolioWindow.money(1234.5, sign: true, arrows: true) == "▲$1,234.50", "arrow gain")
+    check(PortfolioWindow.money(-1234.5, sign: true, arrows: true) == "▼$1,234.50", "arrow loss")
+    check(PortfolioWindow.money(1234.5, sign: true) == "+$1,234.50", "plus gain")
+    check(PortfolioWindow.money(-1234.5, sign: true) == "−$1,234.50", "minus loss")
+    check(PortfolioWindow.money(0, sign: true, arrows: true) == "$0.00", "zero has no sign")
+    check(PortfolioWindow.pct(2.34, arrows: true) == "▲2.3%", "arrow pct gain")
+    check(PortfolioWindow.pct(-2.34, arrows: true) == "▼2.3%", "arrow pct loss")
+    check(PortfolioWindow.pct(2.34) == "+2.3%", "plus pct")
+    check(PortfolioWindow.pct(0, arrows: true) == "0.0%", "flat pct")
+    check(PortfolioWindow.quantity(300) == "300" && PortfolioWindow.quantity(-2) == "−2", "quantity signs")
+    let firstMouse = FirstMouseButton(title: "", target: nil, action: nil)
+    check(firstMouse.acceptsFirstMouse(for: nil), "portfolio buttons accept the first click while the app is inactive")
+    func position(_ label: String, kind: String, qty: Double, cost: Double?, legs: Int? = nil,
+                  net: Double? = nil, spreads: Int? = nil) -> PortfolioWindow.Snapshot.Position {
+        PortfolioWindow.Snapshot.Position(label: label, kind: kind, secType: kind, qty: qty, last: nil,
+                                          mktValue: nil, costBasis: cost, unrealized: nil, unrealizedPct: nil,
+                                          dayPnl: nil, legCount: legs, netCost: net, netMark: nil, spreadCount: spreads)
+    }
+    check(PortfolioWindow.detail(position("BIL", kind: "STK", qty: 250, cost: 22090)) == "250 @ $88.36", "long stock sub-line")
+    check(PortfolioWindow.detail(position("BIL", kind: "STK", qty: -250, cost: -22090)) == "−250 @ $88.36", "short stock sub-line")
+    check(PortfolioWindow.detail(position("KO 26-12-18 60P", kind: "OPT", qty: 1, cost: 425)) == "1 @ $4.25", "long option sub-line")
+    check(PortfolioWindow.detail(position("KO 26-12-18 60P", kind: "OPT", qty: -2, cost: -170)) == "−2 @ $0.85", "short option sub-line")
+    check(PortfolioWindow.detail(position("XLK 250/260C 26DEC18", kind: "SPREAD", qty: 1, cost: 340,
+                                          legs: 2, net: 340, spreads: 1)) == "1 @ $3.40", "single spread sub-line")
+    check(PortfolioWindow.detail(position("XLK 250/260C 26DEC18", kind: "SPREAD", qty: 2, cost: 680,
+                                          legs: 2, net: 680, spreads: 2)) == "2 @ $3.40", "multiple spreads sub-line")
+    let closeSnap = try JSONDecoder().decode(PortfolioWindow.Snapshot.self,
+                                             from: Data("{\"connected\":true,\"mode\":\"close\"}".utf8))
+    check(closeSnap.mode == "close" && closeSnap.provisional == nil, "close snapshot mode decodes")
+    print("PASS: portfolio sign style and compact position sub-lines")
 }
 
 private func unwrap<T>(_ value: T?, line: UInt = #line) throws -> T {

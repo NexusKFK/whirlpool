@@ -8,3 +8,7 @@ dist/
 .vs/
 *.user
 *.suo
+__pycache__/
+*.py[cod]
+tools/ib-live/last_snapshot.json
+tools/ib-live/last_close.json

@@ -1,5 +1,10 @@
 import AppKit
 
+/// 悬浮板不在前台时，第一次点击也要直接落到按钮上；默认 NSButton 会把它让给窗口激活。
+final class FirstMouseButton: NSButton {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
 // 持仓板(positions):贴在屏幕角落的 IBKR 账户悬浮小板,内容对齐 IBKR 手机端默认页。
 // 数据来自本机喂料服务(~/tools/ib_live/server.py,只读连 IB Gateway 4001,客户端 ID 93),
 // 这里只拉 JSON 画卡片,绝不下单。交互与报价卡一致:整卡拖动(位置落配置)、右键弹菜单。
@@ -12,6 +17,8 @@ final class PortfolioWindow: NSPanel, NSWindowDelegate {
         let connected: Bool
         let time: String?
         let error: String?
+        let mode: String?          // live=实时/盘前盘后, close=最近常规收盘快照
+        let provisional: Bool?     // close 快照是否由昨收价临时重建
         let account: String?
         let pnl: PnL?
         let summary: [String: Double]?
@@ -35,6 +42,7 @@ final class PortfolioWindow: NSPanel, NSWindowDelegate {
             let legCount: Int?
             let netCost: Double?       // SPREAD:两腿成本basis合计(含乘数,借方为正)
             let netMark: Double?       // SPREAD:两腿市值合计
+            let spreadCount: Int?      // SPREAD:合约对数(两腿张数相同;旧快照没有此字段)
         }
     }
 
@@ -48,14 +56,24 @@ final class PortfolioWindow: NSPanel, NSWindowDelegate {
     private var saveWork: DispatchWorkItem?
     private var lastSnapshot: Snapshot?
     private var lastError: String?
+    private var fetchGeneration = 0                 // 月亮快速切换时丢弃旧请求与旧补价响应
     private var liveQuotes: [String: Quote] = [:]   // 网关离线时:正股现价(东财/腾讯)
+    private var modeSwitchPending = false           // 切换月亮后等首份新快照,月亮左边转圈
+    private var modeSwitchStartedAt: Date?
+    private var modeSwitchTimeout: DispatchWorkItem?
 
     var config: TickerConfig {
         didSet {
             if oldValue.positionsOrigin != config.positionsOrigin { saveWork?.cancel() }
+            if oldValue.positionsExtendedHours != config.positionsExtendedHours {
+                fetchGeneration += 1
+                liveQuotes = [:]
+                beginModeSwitch()
+            }
             isMovableByWindowBackground = !config.lockPosition
             if oldValue.positionsPrivacy != config.positionsPrivacy
                 || oldValue.positionsExtendedHours != config.positionsExtendedHours
+                || oldValue.changeArrows != config.changeArrows
                 || oldValue.positionsFont != config.positionsFont
                 || oldValue.transparentColor != config.transparentColor
                 || oldValue.positionsRefresh != config.positionsRefresh {
@@ -100,11 +118,13 @@ final class PortfolioWindow: NSPanel, NSWindowDelegate {
     // ── 数据入口(AppDelegate 定时调用) ─────────────────────────────────────────
 
     func fetch(completion: @escaping () -> Void) {
-        // 月亮开着时带 extended=1:喂料据此在盘前/盘后也按盘中节奏向网关拉
+        // 月亮开:extended=1,喂料返回实时/盘前盘后价并加快节流;
+        // 月亮关:extended=0,喂料返回最近常规收盘快照。
         var url = Self.feederURL.appendingPathComponent("api/snapshot.json")
-        if config.positionsExtendedHours {
-            url = URL(string: url.absoluteString + "?extended=1") ?? url
-        }
+        let extended = config.positionsExtendedHours
+        fetchGeneration += 1
+        let generation = fetchGeneration
+        url = URL(string: url.absoluteString + "?extended=" + (extended ? "1" : "0")) ?? url
         var request = URLRequest(url: url)
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.timeoutInterval = 5
@@ -112,19 +132,22 @@ final class PortfolioWindow: NSPanel, NSWindowDelegate {
         URLSession.shared.dataTask(with: request) { [weak self] data, _, error in
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return completion() }
+                guard generation == self.fetchGeneration else { return completion() }
                 if let data, let snap = try? Self.decoder.decode(Snapshot.self, from: data) {
                     lastSnapshot = snap
                     lastError = nil
                     liveQuotes = [:]   // 新快照到了,离线补算的行情作废
-                    rebuild()
+                    finishModeSwitch { [weak self] in self?.rebuild() }
                     completion()      // 刷新节拍先排上;下面的行情回来只是补一次重画
-                    // 网关离线 fallback:正股用自选池行情源的现价 + 快照成本重算盈亏
-                    if snap.connected == false, let provider = quoteProvider {
+                    // 只有实时模式允许离线补价；收盘快照不能被外部实时行情改写。
+                    if extended && snap.connected == false, let provider = quoteProvider {
                         let symbols = (snap.positions ?? []).filter { ($0.kind ?? "STK") == "STK" }.map(\.label)
                         guard !symbols.isEmpty else { return }
                         provider(symbols) { [weak self] qs in
                             DispatchQueue.main.async { [weak self] in
-                                guard let self, !qs.isEmpty else { return }
+                                guard let self, !qs.isEmpty,
+                                      generation == self.fetchGeneration,
+                                      self.lastSnapshot?.mode != "close" else { return }
                                 self.liveQuotes = qs
                                 self.rebuild()
                             }
@@ -133,11 +156,51 @@ final class PortfolioWindow: NSPanel, NSWindowDelegate {
                 } else {
                     lastError = L("Feeder starting…")
                         + (error.map { "\n\($0.localizedDescription)" } ?? "")
-                    rebuild()
+                    finishModeSwitch { [weak self] in self?.rebuild() }
                     completion()
                 }
             }
         }.resume()
+    }
+
+    private func beginModeSwitch() {
+        modeSwitchPending = true
+        modeSwitchStartedAt = Date()
+        modeSwitchTimeout?.cancel()
+        // 暂停、掉线等情况下不会回来新快照;超时收圈，避免一直转。
+        let timeout = DispatchWorkItem { [weak self] in
+            guard let self, self.modeSwitchPending else { return }
+            self.modeSwitchPending = false
+            self.modeSwitchTimeout = nil
+            self.modeSwitchStartedAt = nil
+            self.rebuild()
+        }
+        modeSwitchTimeout = timeout
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8, execute: timeout)
+    }
+
+    /// 收到新快照后再让转圈至少显示 0.4 秒，避免本地响应太快时只闪一下。
+    private func finishModeSwitch(_ apply: @escaping () -> Void) {
+        guard modeSwitchPending else { return apply() }
+        modeSwitchTimeout?.cancel()
+        let elapsed = Date().timeIntervalSince(modeSwitchStartedAt ?? Date())
+        let remaining = max(0, 0.4 - elapsed)
+        let finish = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.modeSwitchPending = false
+            self.modeSwitchTimeout = nil
+            self.modeSwitchStartedAt = nil
+            apply()
+        }
+        if remaining > 0 {
+            modeSwitchTimeout = finish
+            DispatchQueue.main.asyncAfter(deadline: .now() + remaining, execute: finish)
+        } else {
+            modeSwitchPending = false
+            modeSwitchTimeout = nil
+            modeSwitchStartedAt = nil
+            apply()
+        }
     }
 
     /// 喂料服务不可达(连接被拒/超时)——区别于网关断开,这表示该把进程拉起来了
@@ -170,16 +233,40 @@ final class PortfolioWindow: NSPanel, NSWindowDelegate {
         func subLabel(_ text: String, _ size: CGFloat = 10.5, _ color: NSColor = .secondaryLabelColor) -> NSTextField {
             textLabel(text, size, .regular, color, mono: false)
         }
+        // 正股行末尾的小月亮:只在月亮开着、且盘前/盘后显示夜盘价时出现。
+        func tickerLabel(_ text: String, _ color: NSColor) -> NSTextField {
+            let font = (config.positionsFont == "mono")
+                ? NSFont.monospacedSystemFont(ofSize: 12, weight: .semibold)
+                : NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
+            let attr = NSMutableAttributedString(string: text, attributes: [
+                .font: font, .foregroundColor: color,
+            ])
+            attr.append(NSAttributedString(string: " ☾", attributes: [
+                .font: NSFont.systemFont(ofSize: 9, weight: .regular),
+                .foregroundColor: NSColor.secondaryLabelColor,
+            ]))
+            let tf = NSTextField(labelWithAttributedString: attr)
+            tf.maximumNumberOfLines = 1
+            tf.lineBreakMode = .byClipping
+            tf.sizeToFit()
+            return tf
+        }
         func tint(_ v: Double?) -> NSColor {
             guard let v, v != 0 else { return .labelColor }
             return v > 0 ? .systemGreen : .systemRed
         }
         let hidden = config.positionsPrivacy
-        func money(_ v: Double?, sign: Bool = false) -> String { Self.money(v, sign: sign) }
-        func maskIfHidden(_ v: Double?) -> String {
-            guard hidden else { return money(v) }
-            return "****"
+        let arrows = config.changeArrows
+        let mode = snap?.mode ?? (config.positionsExtendedHours ? "live" : "close")
+        let staticMode = mode == "close"
+        let showExtendedBadge = config.positionsExtendedHours && !staticMode && Self.usPhase() != .open
+        func valueColor(_ v: Double?) -> NSColor {
+            staticMode ? .secondaryLabelColor : tint(v)
         }
+        func money(_ v: Double?, sign: Bool = false) -> String {
+            Self.money(v, sign: sign, arrows: arrows && sign)
+        }
+        func pct(_ v: Double?) -> String { Self.pct(v, arrows: arrows) }
 
         let inset: CGFloat = 14
         let gap: CGFloat = 10
@@ -189,18 +276,21 @@ final class PortfolioWindow: NSPanel, NSWindowDelegate {
         var lines: [Line] = []
 
         let positions = snap?.positions ?? []
-        let unSum = positions.reduce(0.0) { $0 + ($1.unrealized ?? 0) }
+        let unSum = positions.reduce(Optional(0.0)) { partial, position in
+            guard let partial, let value = position.unrealized else { return nil }
+            return partial + value
+        }
 
-        let todayValue = textLabel(money(snap?.pnl?.daily, sign: true), 17, .semibold, tint(snap?.pnl?.daily))
+        let todayValue = textLabel(money(snap?.pnl?.daily, sign: true), 17, .semibold, valueColor(snap?.pnl?.daily))
         let todayLine = Line(left: subLabel(L("Today's P&L"), 11), right: todayValue, leftSub: nil, rightSub: nil, h1: 20)
 
         // 账户区 2×2:净资产/浮盈亏 一行,可用/现金 一行;隐私开启时四格金额全部打码
-        func cell(_ title: String, _ value: Double?, mask: Bool) -> (label: NSView, value: NSView) {
-            let text = mask ? maskIfHidden(value) : money(value)
+        func cell(_ title: String, _ value: Double?, mask: Bool, sign: Bool = false) -> (label: NSView, value: NSView) {
+            let text = mask && hidden ? "****" : money(value, sign: sign)
             return (subLabel(title), textLabel(text, 11.5, .medium))
         }
         let cNet = cell(L("Net Liq"), snap?.summary?["NetLiquidation"], mask: true)
-        let cUn = cell(L("Unrealized"), unSum, mask: true)
+        let cUn = cell(L("Unrealized"), unSum, mask: true, sign: true)
         let cAv = cell(L("Available"), snap?.summary?["AvailableFunds"], mask: true)
         let cCa = cell(L("Cash"), snap?.summary?["TotalCashValue"], mask: true)
         func cellW(_ c: (label: NSView, value: NSView)) -> CGFloat { c.label.frame.width + 6 + c.value.frame.width }
@@ -213,7 +303,7 @@ final class PortfolioWindow: NSPanel, NSWindowDelegate {
         let stale = snap?.connected == false
         for var p in positions {
             let kind = p.kind ?? p.secType ?? "STK"
-            let live = stale && kind == "STK" && liveQuotes[p.label] != nil
+            let live = !staticMode && stale && kind == "STK" && liveQuotes[p.label] != nil
             if live, let q = liveQuotes[p.label], q.price.isFinite, q.price > 0,
                let cb = p.costBasis, p.qty != 0 {
                 let avg = cb / p.qty
@@ -223,29 +313,17 @@ final class PortfolioWindow: NSPanel, NSWindowDelegate {
                 p.dayPnl = (q.price - prevClose) * p.qty
             }
             let frozenColor: NSColor = (stale && !live) ? .secondaryLabelColor : .labelColor
-            let left = textLabel(p.label, 12, .semibold, frozenColor)
-            let pnlColor = (stale && !live) ? frozenColor : tint(p.unrealized)
+            let left = (kind == "STK" && showExtendedBadge)
+                ? tickerLabel(p.label, frozenColor)
+                : textLabel(p.label, 12, .semibold, frozenColor)
+            let pnlColor = (stale && !live) ? frozenColor : valueColor(p.unrealized)
             // %在前、金额在后,读起来先看幅度再看绝对数
-            let right = textLabel(Self.pct(p.unrealizedPct) + " " + money(p.unrealized, sign: true),
+            let right = textLabel(pct(p.unrealizedPct) + " " + money(p.unrealized, sign: true),
                                   12, .semibold, pnlColor)
-            func avgPerShare(divisor: Double) -> Double? {
-                guard let cb = p.costBasis, p.qty != 0 else { return nil }
-                return abs(cb / p.qty / divisor)
-            }
-            var subText: String
-            switch kind {
-            case "SPREAD":
-                subText = String(format: L("%d legs"), p.legCount ?? 2) + " @ "
-                    + Self.money(p.netCost.map { $0 / 100 })
-            case "OPT":
-                let tmpl = p.qty > 0 ? L("%d long") : L("%d short")
-                subText = String(format: tmpl, Int(abs(p.qty))) + " @ " + money(avgPerShare(divisor: 100))
-            default:
-                subText = String(format: "%.0f", abs(p.qty)) + " @ " + money(avgPerShare(divisor: 1))
-            }
+            let subText = Self.detail(p)
             let rightSub = p.dayPnl.map {
                 subLabel(L("Today") + " " + money($0, sign: true), 10.5,
-                         (stale && !live) ? .secondaryLabelColor : tint($0))
+                         (stale && !live) ? .secondaryLabelColor : valueColor($0))
             }
             lines.append(Line(left: left, right: right, leftSub: subLabel(subText), rightSub: rightSub, h1: 16))
         }
@@ -285,11 +363,23 @@ final class PortfolioWindow: NSPanel, NSWindowDelegate {
         var cy = H - 12
         place(subLabel("IBKR " + (snap?.account.map { Self.maskAcct($0) } ?? "…"), 11, .labelColor),
               left: inset, cy: cy - 6)
+        // 月亮切换后先转圈,提示正在等新口径的数据;收到响应就消失。
+        if modeSwitchPending {
+            let spinner = NSProgressIndicator()
+            spinner.style = .spinning
+            spinner.controlSize = .small
+            spinner.isIndeterminate = true
+            spinner.isDisplayedWhenStopped = false
+            spinner.toolTip = L("Loading IBKR snapshot…")
+            spinner.frame = NSRect(x: W - inset - 76, y: cy - 11.5, width: 12, height: 12)
+            container.addSubview(spinner)
+            spinner.startAnimation(nil)
+        }
         // 右上角按钮(最多两个):月亮=盘后行情快照,眼睛=资金打码
         let extOn = config.positionsExtendedHours
         if let icon = NSImage(systemSymbolName: extOn ? "moon.fill" : "moon",
                               accessibilityDescription: L("After-Hours Snapshot")) {
-            let moon = NSButton(image: icon, target: self, action: #selector(moonTapped))
+            let moon = FirstMouseButton(image: icon, target: self, action: #selector(moonTapped))
             moon.isBordered = false
             moon.imageScaling = .scaleProportionallyDown
             moon.contentTintColor = extOn ? .systemYellow : .secondaryLabelColor
@@ -299,7 +389,7 @@ final class PortfolioWindow: NSPanel, NSWindowDelegate {
         }
         let eyeSymbol = config.positionsPrivacy ? "eye.slash" : "eye"
         if let icon = NSImage(systemSymbolName: eyeSymbol, accessibilityDescription: L("Hide Cash Amounts")) {
-            let eye = NSButton(image: icon, target: self, action: #selector(eyeTapped))
+            let eye = FirstMouseButton(image: icon, target: self, action: #selector(eyeTapped))
             eye.isBordered = false
             eye.imageScaling = .scaleProportionallyDown
             eye.contentTintColor = .secondaryLabelColor
@@ -328,7 +418,8 @@ final class PortfolioWindow: NSPanel, NSWindowDelegate {
         cy -= 10
 
         if lines.isEmpty {
-            let placeholder = lastError != nil ? "" : (snap == nil ? L("Loading IBKR snapshot…") : L("No positions"))
+            let placeholder = lastError != nil ? "" : (snap == nil ? L("Loading IBKR snapshot…")
+                : (snap?.error == "close snapshot unavailable" ? L("Close snapshot unavailable") : L("No positions")))
             if !placeholder.isEmpty { place(subLabel(placeholder, 11), left: inset, cy: cy - 8) }
         }
         for line in lines {
@@ -344,10 +435,18 @@ final class PortfolioWindow: NSPanel, NSWindowDelegate {
         // 收盘后净值不是重点(期权 mark 不更新),直接写明数据就是收盘价,不再滚刷新时间。
         let footerText: String
         var footerColor = NSColor.secondaryLabelColor
-        let updated = snap?.time.flatMap { $0.count >= 19 ? String($0.suffix(8)) : nil }
+        let updated = snap?.time.flatMap(Self.clockLabel)
         if let err = lastError {
             footerText = err
             footerColor = .systemOrange
+        } else if mode == "close" && snap?.error == "close snapshot unavailable" {
+            footerText = L("Close snapshot unavailable")
+            footerColor = .systemOrange
+        } else if mode == "close" {
+            // 月亮关:整板冻结在最近一次常规收盘,写明日期与时间,避免旧快照被误读。
+            footerText = L("Quotes at close")
+                + (snap?.time.flatMap(Self.closeLabel).map { " · " + $0 } ?? "")
+            footerColor = .secondaryLabelColor
         } else if snap?.connected == false {
             // 网关不在:正股走自选池行情源照常更新,期权/账户冻结在快照(灰显行)
             footerText = String(format: L("Stock live · options frozen at %@"), updated ?? "—")
@@ -359,25 +458,45 @@ final class PortfolioWindow: NSPanel, NSWindowDelegate {
             case .pre:
                 footerText = L("Pre-market") + " · " + L("Last quote") + " " + (updated ?? "—")
             case .closed:
-                // 月亮开着:盘后照常拉最新价(extended hours),页脚标盘后;默认收盘价
-                footerText = config.positionsExtendedHours
-                    ? L("After hours") + " · " + L("Last quote") + " " + (updated ?? "—")
-                    : L("Market closed") + " · " + L("Quotes at close")
+                // 月亮开着:盘前/盘后照常拉最新价(extended hours)
+                footerText = L("After hours") + " · " + L("Last quote") + " " + (updated ?? "—")
             }
         }
         place(subLabel(footerText, 9.5, footerColor), left: inset, cy: 11)
     }
 
-    /// 美股时段(美东,周一至五):盘中 9:30–16:00,盘前 4:00–9:30,其余收盘。仅供页脚与节流,非交易日历。
+    /// 收盘快照页脚:2026-10-27T16:00:00-04:00 -> 10/27 16:00
+    private static func closeLabel(_ iso: String) -> String? {
+        let parts = iso.split(separator: "T", maxSplits: 1)
+        guard parts.count == 2 else { return clockLabel(iso) }
+        let day = parts[0].split(separator: "-")
+        guard day.count == 3 else { return clockLabel(iso) }
+        let time = parts[1].prefix(5)
+        return "\(day[1])/\(day[2]) \(time)"
+    }
+
+    private static func clockLabel(_ iso: String) -> String? {
+        guard let t = iso.firstIndex(of: "T") else {
+            return iso.count >= 8 ? String(iso.suffix(8)) : nil
+        }
+        let clock = iso[iso.index(after: t)...].prefix(8)
+        return clock.count >= 5 ? String(clock) : nil
+    }
+
+    /// 美股时段与喂料共用 NYSE 日历，覆盖节假日和 13:00 提前收盘。
     private enum USPhase { case open, pre, closed }
     private static func usPhase() -> USPhase {
         var cal = Calendar(identifier: .gregorian)
         cal.timeZone = TimeZone(identifier: "America/New_York") ?? .current
-        let c = cal.dateComponents([.weekday, .hour, .minute], from: Date())
-        guard let wd = c.weekday, let h = c.hour, let m = c.minute else { return .closed }
+        let c = cal.dateComponents([.year, .month, .day, .weekday, .hour, .minute], from: Date())
+        guard let year = c.year, let month = c.month, let day = c.day,
+              let wd = c.weekday, let h = c.hour, let m = c.minute else { return .closed }
         if wd == 1 || wd == 7 { return .closed }
+        let key = String(format: "%04d-%02d-%02d", year, month, day)
+        if MarketClock.nyseHolidays(year).contains(key) { return .closed }
+        let close = MarketClock.nyseEarlyClose(year).contains(key) ? 780 : 960
         let mins = h * 60 + m
-        if (570..<960).contains(mins) { return .open }
+        if (570..<close).contains(mins) { return .open }
         if (240..<570).contains(mins) { return .pre }
         return .closed
     }
@@ -437,8 +556,29 @@ final class PortfolioWindow: NSPanel, NSWindowDelegate {
 
     // ── 文本工具 ───────────────────────────────────────────────────────────────
 
+    /// 持仓小字行:数量带正负(多头不写 +,空头写 −),价格带空格与 $;
+    /// 期权不再写 long/short,直接 `1 @ $4.25` / `−2 @ $0.85`。
+    static func detail(_ p: Snapshot.Position) -> String {
+        let kind = p.kind ?? p.secType ?? "STK"
+        func avgPerShare(divisor: Double) -> Double? {
+            guard let cb = p.costBasis, p.qty != 0 else { return nil }
+            return abs(cb / p.qty / divisor)
+        }
+        switch kind {
+        case "SPREAD":
+            let count = max(1, p.spreadCount ?? 1)
+            let perSpread = p.netCost.map { $0 / 100 / Double(count) }
+            return quantity(Double(count)) + " @ " + money(perSpread)
+        case "OPT":
+            return quantity(p.qty) + " @ " + money(avgPerShare(divisor: 100))
+        default:
+            return quantity(p.qty) + " @ " + money(avgPerShare(divisor: 1))
+        }
+    }
+
     private static let grouping: NumberFormatter = {
         let f = NumberFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
         f.numberStyle = .decimal
         f.minimumFractionDigits = 2
         f.maximumFractionDigits = 2
@@ -446,17 +586,50 @@ final class PortfolioWindow: NSPanel, NSWindowDelegate {
         return f
     }()
 
-    static func money(_ v: Double?, sign: Bool = false, plain: Bool = false) -> String {
+    private static let quantityFormat: NumberFormatter = {
+        let f = NumberFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.numberStyle = .decimal
+        f.minimumFractionDigits = 0
+        f.maximumFractionDigits = 4
+        f.usesGroupingSeparator = false
+        return f
+    }()
+
+    static func money(_ v: Double?, sign: Bool = false, arrows: Bool = false) -> String {
         guard let v, v.isFinite else { return "—" }
         let body = grouping.string(from: NSNumber(value: abs(v))) ?? String(format: "%.2f", abs(v))
-        let neg = v < 0 ? (plain ? "-" : "−") : (sign ? "+" : "")
-        return neg + (plain ? "" : "$") + body
+        let mark: String
+        if sign, arrows, v != 0 {
+            mark = v > 0 ? "▲" : "▼"
+        } else if v < 0 {
+            mark = "−"
+        } else if sign, v > 0 {
+            mark = "+"
+        } else {
+            mark = ""
+        }
+        return mark + "$" + body
     }
 
-    static func pct(_ v: Double?, plain: Bool = false) -> String {
+    static func pct(_ v: Double?, arrows: Bool = false) -> String {
         guard let v, v.isFinite else { return "—" }
-        let sign = v > 0 ? "+" : v < 0 ? (plain ? "-" : "−") : ""
-        return sign + String(format: "%.1f", abs(v)) + "%"
+        let mark: String
+        if arrows, v != 0 {
+            mark = v > 0 ? "▲" : "▼"
+        } else if v > 0 {
+            mark = "+"
+        } else if v < 0 {
+            mark = "−"
+        } else {
+            mark = ""
+        }
+        return mark + String(format: "%.1f", abs(v)) + "%"
+    }
+
+    static func quantity(_ q: Double) -> String {
+        let body = quantityFormat.string(from: NSNumber(value: abs(q))) ?? String(format: "%.4f", abs(q))
+        return (q < 0 ? "−" : "") + body
     }
 
     private static func maskAcct(_ a: String) -> String {

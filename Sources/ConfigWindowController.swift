@@ -489,6 +489,7 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
                                formRow("Panel Font", [portfolioFont]),
                                formRow("Refresh Interval", [portfolioInterval]),
                                portfolioPrivacy,
+                               note("P&L signs follow the ▲ / ▼ option on the Appearance page."),
                                note("Read-only IB Gateway feed (localhost only). Positions and P&L never leave this device; the account number is masked on the panel.")])
         return stack([pageTitle("Layout", "Choose where quotes appear, then shape each display."), displays,
                       desktop, floatingGroup, menuGroup, options, portfolio])

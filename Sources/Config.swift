@@ -29,7 +29,7 @@ struct TickerConfig: Codable {
     // mono=单色随明暗;amber/green=固定底色。旧值 auto→mono,white/black→adaptive。
     var transparentColor:  String            = "adaptive"
     var marqueeSeparator:  String            = "   "   // 标的间空隙(3 空格)
-    var changeArrows:      Bool              = true   // 涨跌用 ▲/▼(关=+/-号)
+    var changeArrows:      Bool              = true   // 涨跌与持仓板盈亏用 ▲/▼(关=+/-号)
 
     // Quote loop — 一轮滚完自动拉新行情再入队,循环不息
     var quoteLoop:         Bool              = true

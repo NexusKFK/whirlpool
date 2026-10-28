@@ -249,8 +249,6 @@ enum L10n {
         "IB Gateway not connected": "IB Gateway 未连接",
         "Loading IBKR snapshot…": "正在拉取 IBKR 数据…",
         "No positions": "暂无持仓",
-        "%d long": "买 %d 张",
-        "%d short": "卖 %d 张",
         "Today": "今日",
         "Hide Cash Amounts": "隐藏资金金额",
         "Feeder starting…": "喂料服务启动中…",
@@ -259,13 +257,14 @@ enum L10n {
         "Market closed": "美股已收盘",
         "Updated %@": "更新于 %@",
         "Read-only IB Gateway feed (localhost only). Positions and P&L never leave this device; the account number is masked on the panel.": "只读连接本机 IB Gateway（仅 localhost，绑 127.0.0.1，数据不外发）。持仓与盈亏只留在本机；面板上账户号打码显示。",
+        "P&L signs follow the ▲ / ▼ option on the Appearance page.": "盈亏符号跟随「外观」页的「使用 ▲ / ▼ 显示涨跌幅」开关。",
         "Last update %@": "数据截至 %@",
         "Stock live · options frozen at %@": "正股实时 · 期权与账户冻结于 %@",
         "Pre-market": "盘前",
         "Quotes at close": "数据为收盘价",
+        "Close snapshot unavailable": "收盘快照尚未就绪",
         "After hours": "盘后",
         "After-Hours Snapshot": "盘后行情",
-        "%d legs": "%d 腿",
     ]
 }
 

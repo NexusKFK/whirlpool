@@ -972,8 +972,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         config.positionsExtendedHours.toggle()
         saveConfig(config)
         positionsWindow?.config = config
-        // 开关变了立刻拉一次,月亮开时喂料尽快进入盘后快节奏
-        schedulePositionsRefresh(in: 1)
+        // 不等下一拍,立即按新口径拉一次;面板同时显示切换中的转圈。
+        refreshPositionsNow()
     }
 
     @objc private func setPositionsRefresh(_ sender: NSMenuItem) {
