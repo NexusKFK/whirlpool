@@ -140,7 +140,7 @@ final class PortfolioWindow: NSPanel, NSWindowDelegate {
                     finishModeSwitch { [weak self] in self?.rebuild() }
                     completion()      // 刷新节拍先排上;下面的行情回来只是补一次重画
                     // 只有实时模式允许离线补价；收盘快照不能被外部实时行情改写。
-                    if extended && snap.connected == false, let provider = quoteProvider {
+                    if snap.mode == "live", snap.connected == false, let provider = quoteProvider {
                         let symbols = (snap.positions ?? []).filter { ($0.kind ?? "STK") == "STK" }.map(\.label)
                         guard !symbols.isEmpty else { return }
                         provider(symbols) { [weak self] qs in
@@ -257,7 +257,8 @@ final class PortfolioWindow: NSPanel, NSWindowDelegate {
         }
         let hidden = config.positionsPrivacy
         let arrows = config.changeArrows
-        let mode = snap?.mode ?? (config.positionsExtendedHours ? "live" : "close")
+        // 盘中永远实时(喂料已保证);快照缺 mode 字段时按当前时段兜底
+        let mode = snap?.mode ?? ((config.positionsExtendedHours || Self.usPhase() == .open) ? "live" : "close")
         let staticMode = mode == "close"
         let showExtendedBadge = config.positionsExtendedHours && !staticMode && Self.usPhase() != .open
         func valueColor(_ v: Double?) -> NSColor {

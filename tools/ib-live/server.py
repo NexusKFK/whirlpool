@@ -218,8 +218,12 @@ def set_close_state(snap):
 
 
 def snapshot(extended=False):
+    """月亮只管盘前盘后。盘中(9:30–常规收盘)无论月亮开关一律返回实时;
+    月亮关时非盘中才返回最近常规收盘快照。"""
     with _lock:
-        if extended:
+        now = datetime.datetime.now(ET)
+        live = extended or us_phase(now) == 'open'
+        if live:
             src = _state
         elif _close_state is not None:
             src = _close_state
@@ -230,7 +234,7 @@ def snapshot(extended=False):
                    'pnl': None, 'summary': {}, 'positions': []}
         data = json.loads(json.dumps(src, ensure_ascii=False))
     data.pop('extended_seen', None)
-    data['mode'] = 'live' if extended else 'close'
+    data['mode'] = 'live' if live else 'close'
     return data
 
 
