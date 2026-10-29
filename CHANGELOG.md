@@ -1,12 +1,6 @@
 # Changelog
 
-## Unreleased
-
-- Portfolio panel: the card now matches the quote board's width when both are on (the board is the reference; the panel still widens itself for long rows and keeps its 500pt cap unless the board is wider), and the gap between position lines tightened from 13pt to 8pt to mirror the board's row rhythm.
-
-  中文：持仓板与报价卡同开时宽度对齐报价卡（长行仍会自行加宽，500 上限为报价卡让位），持仓行间距从 13pt 收紧到 8pt，跟随报价卡的行节奏。
-
-## 2.1.0 (2026-10-28)
+## 2.1.0 (2026-10-29)
 
 The portfolio panel release: a read-only IBKR account card over the quote board — today's P&L, masked cash amounts, per-position daily P&L with merged vertical spreads, an offline fallback (live stock rows via the watchlist quote source, frozen option rows) and loopback-only, header-guarded serving.
 
@@ -27,6 +21,10 @@ The portfolio panel release: a read-only IBKR account card over the quote board 
 - Portfolio panel: option labels use broker-style dates (`26DEC18`, `27JAN15`) instead of `26-12-18`; the two hyphens read like a second separator. Only same-expiry, equal-size two-leg verticals merge. Zebras, condors and other multi-leg structures stay as individual option legs, so no strategy name is guessed. A merged vertical shows only its spread count and net cost (`1 @ $3.40`).
 
   中文：持仓板的期权日期改成 `26DEC18` 这种券商写法。只有同到期、两腿张数相同的垂直价差才合并；Zebra、Condor 等多腿结构按单腿显示，不再猜策略名。合并行只写对数和净成本，如 `1 @ $3.40`。
+
+- Portfolio panel: the card now matches the quote board's width when both are on (the board is the reference; the panel still widens itself for long rows and keeps its 500pt cap unless the board is wider), and the gap between position lines tightened from 13pt to 8pt to mirror the board's row rhythm.
+
+  中文：持仓板与报价卡同开时宽度对齐报价卡（长行仍会自行加宽，500 上限为报价卡让位），持仓行间距从 13pt 收紧到 8pt，跟随报价卡的行节奏。
 
 - US class-share tickers (`BRK.B`, `BF.B`) now follow the NYSE calendar for smart refresh and closed-market display; previously they had no calendar, never slowed down overnight and never showed as closed. Both platforms.
 - Dotted overseas symbols (`7203.T`, `VOD.L`) open Yahoo instead of a TradingView link TradingView cannot resolve; US class shares keep their TradingView chart. Both platforms.
