@@ -1045,6 +1045,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 self.quoteService.quotes(for: entries) { done($0) }
             }
             panel.referenceFrame = { [weak self] in self?.board?.frame ?? .zero }
+            panel.widthReference = { [weak self] in
+                guard let board = self?.board, board.isVisible else { return 0 }
+                return board.frame.width
+            }
             positionsWindow = panel
         } else {
             positionsWindow?.config = config

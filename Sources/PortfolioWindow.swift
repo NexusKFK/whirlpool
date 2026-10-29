@@ -89,6 +89,8 @@ final class PortfolioWindow: NSPanel, NSWindowDelegate {
     var quoteProvider: (([String], @escaping ([String: Quote]) -> Void) -> Void)?
     /// 默认落点参照(通常是报价卡的 frame):持仓板默认叠在它上方,不重叠
     var referenceFrame: (() -> NSRect)?
+    /// 宽度参照(报价卡的实际宽度):同为角落小板,一个宽一个窄不成套
+    var widthReference: (() -> CGFloat)?
 
     init(config: TickerConfig) {
         self.config = config
@@ -332,7 +334,7 @@ final class PortfolioWindow: NSPanel, NSWindowDelegate {
         // ── 量宽定板:主行与小字行都参与测宽,放不下就加宽(有上限);再放不下宁可裁小字 ──
         // 组内距小于组间距:小字紧贴自己的主行,两行明显成组,不会看丢归属
         let intraGap: CGFloat = 1
-        let interGap: CGFloat = 13
+        let interGap: CGFloat = 8    // 对齐报价卡的行间空隙(单行小板一行约留 8pt)
         let rowGap = intraGap + interGap
         func pairWidth(_ line: Line) -> CGFloat {
             let mainW = line.left.frame.width + gap + (line.right?.frame.width ?? 0)
@@ -342,7 +344,9 @@ final class PortfolioWindow: NSPanel, NSWindowDelegate {
         let maxPairWidth = lines.map(pairWidth).max() ?? 0
         let todayWidth = todayLine.left.frame.width + gap + (todayLine.right?.frame.width ?? 0)
         let gridWidth = inset * 2 + col1W + cellGap + col2W + 2
-        let W = min(500, max(310, max(maxPairWidth, todayWidth, gridWidth)))
+        // 宽度先对齐报价卡(widthReference);自己的内容放不下再自行加宽,500 上限随报价卡让位
+        let boardW = widthReference?() ?? 0
+        let W = min(max(500, boardW), max(300, boardW, maxPairWidth, todayWidth, gridWidth))
         let subH: CGFloat = 13.5
         var H: CGFloat = 0
         H += 24                          // 头部:账户名
