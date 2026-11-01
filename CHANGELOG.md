@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.1.1 (2026-11-01)
 
 - Portfolio panel: the card width now includes its side insets when it sizes itself to its rows. A narrow card (no quote board to match, amounts masked) could let a long option label such as `AMZN 230/260C 27JAN15` run into the P&L on its right.
 - README: a portfolio panel demo image (`docs/img/portfolio-panel.png`, Chinese UI in `portfolio-panel.zh.png`), rendered by `tools/make-demo-portfolio.sh` from the app's own panel code with a made-up snapshot. No gateway, network or screen recording is involved. The panel section is rewritten as a short list.
