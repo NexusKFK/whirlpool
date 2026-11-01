@@ -341,8 +341,9 @@ final class PortfolioWindow: NSPanel, NSWindowDelegate {
             let subW = (line.leftSub?.frame.width ?? 0) + gap + (line.rightSub?.frame.width ?? 0)
             return max(mainW, subW)
         }
-        let maxPairWidth = lines.map(pairWidth).max() ?? 0
-        let todayWidth = todayLine.left.frame.width + gap + (todayLine.right?.frame.width ?? 0)
+        // 板宽要算上左右内边距,否则长期权代码会顶到右侧盈亏(板比报价卡窄时才暴露)
+        let maxPairWidth = inset * 2 + (lines.map(pairWidth).max() ?? 0)
+        let todayWidth = inset * 2 + todayLine.left.frame.width + gap + (todayLine.right?.frame.width ?? 0)
         let gridWidth = inset * 2 + col1W + cellGap + col2W + 2
         // 宽度先对齐报价卡(widthReference);自己的内容放不下再自行加宽,500 上限随报价卡让位
         let boardW = widthReference?() ?? 0

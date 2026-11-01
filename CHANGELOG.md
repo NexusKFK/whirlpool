@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Portfolio panel: the card width now includes its side insets when it sizes itself to its rows. A narrow card (no quote board to match, amounts masked) could let a long option label such as `AMZN 230/260C 27JAN15` run into the P&L on its right.
+- README: a portfolio panel demo image (`docs/img/portfolio-panel.png`, Chinese UI in `portfolio-panel.zh.png`), rendered by `tools/make-demo-portfolio.sh` from the app's own panel code with a made-up snapshot. No gateway, network or screen recording is involved. The panel section is rewritten as a short list.
+
+  中文：持仓板自适应宽度时把左右内边距算进去，窄卡上长期权代码不再顶到右边的盈亏。README 新增持仓板演示图（虚构持仓，由 app 自己的看板代码离屏画出），并把看板说明改成短列表。
+
 ## 2.1.0 (2026-10-29)
 
 The portfolio panel release: a read-only IBKR account card over the quote board — today's P&L, masked cash amounts, per-position daily P&L with merged vertical spreads, an offline fallback (live stock rows via the watchlist quote source, frozen option rows) and loopback-only, header-guarded serving.

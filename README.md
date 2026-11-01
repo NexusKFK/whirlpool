@@ -122,7 +122,19 @@ On Windows, `Whirlpool.exe --smoke-test` builds every window in both languages a
 
 ## Portfolio panel (IBKR, macOS only)
 
-An optional floating card over the quote board mirrors the IBKR mobile app's default page: today's P&L, net liquidation / unrealized / available / cash (maskable as `****` with the eye button), and one line per position with daily P&L, open cost and same-expiry vertical spreads merged into a single line. It uses its own font setting and is off by default. The moon button beside the eye switches the price mode (also available from the status-bar menu). Outside regular hours, turned off shows the last regular-session close snapshot (during the regular session the card is always live): the feeder captures one after the regular-session close (including early-close days), or rebuilds it from close prices after a restart, the footer reads "Quotes at close · MM/DD HH:MM", and P&L numbers stay gray because the arrows already carry direction. Turned on, the card follows live quotes, including pre-market and after-hours, the footer reads "After hours · Last quote HH:MM" outside regular hours, P&L numbers use green/red, and each stock ticker gets a small moon badge while an extended-hours price is shown. The feeder only uses the intraday cadence while the moon is on; with it off it stays on the five-minute close cadence. P&L percentages and amounts follow the ▲ / ▼ option on the Appearance page and use plus/minus when it is off. Long quantities omit the plus sign, shorts carry a minus, and position sub-lines stay compact: `250 @ $88.36`, `−2 @ $0.85`; a merged vertical shows the number of spreads as `1 @ $3.40`. Option dates use the broker style, `26DEC18` and `27JAN15`.
+An optional card above the quote board that replaces the IBKR mobile app's home page while IB Gateway holds your session. It is off by default and has its own font setting.
+
+<p align="center">
+  <img src="docs/img/portfolio-panel.png" width="800" alt="Portfolio panel with made-up demo positions: live after-hours view in dark mode, close snapshot with hidden balances in light mode">
+</p>
+<p align="center"><sub>Demo data. Rendered by <code>tools/make-demo-portfolio.sh</code> from the app's own panel code.</sub></p>
+
+- **What it shows:** today's P&L; net liquidation, unrealized, available funds and cash; then one line per position with its total P&L, today's P&L and average cost. Vertical spreads with the same expiry are merged into one line.
+- **Moon button – price mode.** During the regular session the card is always live. Outside it:
+  - **Off (default):** the card shows the last regular-session close (early-close days included). The footer reads "Quotes at close · MM/DD HH:MM", P&L numbers turn gray, and the feeder refreshes every five minutes.
+  - **On:** the card follows pre-market and after-hours quotes. The footer reads "After hours · Last quote HH:MM", P&L numbers keep their green/red, and each stock gets a small moon badge.
+- **Eye button:** shows the four account amounts as `****`. The moon can also be toggled from the status-bar menu.
+- **Formats:** ▲ / ▼ follow the arrow option on the Appearance page (plus/minus when it is off). Shorts carry a minus, e.g. `−2 @ $0.85`; a merged spread shows the number of spreads and the net cost per spread. Option dates use the broker style, e.g. `26DEC18`.
 
 Setup:
 
