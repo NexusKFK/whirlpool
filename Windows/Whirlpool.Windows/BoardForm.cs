@@ -51,7 +51,7 @@ internal sealed class BoardForm : Form
 
     public void Configure(Settings value)
     {
-        if (value.Provider != settings.Provider || !value.Watchlist.SequenceEqual(settings.Watchlist))
+        if (value.Provider != settings.Provider || value.SymbolNames != settings.SymbolNames || !value.Watchlist.SequenceEqual(settings.Watchlist))
         {
             grid.Rows.Clear(); previous.Clear(); pulses.Clear(); animation.Stop();
             SetStatus(T("Loading quotes…"), null);
@@ -82,14 +82,14 @@ internal sealed class BoardForm : Form
 
     public void SetStatus(string text, DateTimeOffset? time) => status.Text = text + (time is null ? "" : "\n" + T("Updated at") + " " + time.Value.ToLocalTime().ToString("T"));
 
-    private Color Up(bool redUp) => WinTheme.C(redUp ? Palette.Red(tone) : Palette.Green(tone));
-    private Color Down(bool redUp) => WinTheme.C(redUp ? Palette.Green(tone) : Palette.Red(tone));
+    private Color Up(bool redUp) => WinTheme.C(redUp ? Palette.UiRed(tone) : Palette.UiGreen(tone));
+    private Color Down(bool redUp) => WinTheme.C(redUp ? Palette.UiGreen(tone) : Palette.UiRed(tone));
 
     public void SetQuotes(Settings value, IReadOnlyDictionary<string, Quote> quotes)
     {
         settings = value.Clone();
         var symbols = settings.Watchlist.Where(e => quotes.ContainsKey(e.Symbol)).ToList();
-        if (grid.Rows.Count != symbols.Count || symbols.Where((entry, i) => grid.Rows[i].Cells[0].Value?.ToString() != entry.Symbol).Any())
+        if (grid.Rows.Count != symbols.Count || symbols.Where((entry, i) => (grid.Rows[i].Tag as WatchEntry)?.Symbol != entry.Symbol).Any())
         {
             grid.Rows.Clear();
             foreach (var entry in symbols) { var row = grid.Rows[grid.Rows.Add(entry.Symbol, "", "")]; row.Tag = entry; }
@@ -104,7 +104,8 @@ internal sealed class BoardForm : Form
             previous[entry.Symbol] = quote.Price;
             var row = grid.Rows[i];
             row.Tag = entry;
-            row.Cells[0].ToolTipText = T("Double-click to open chart");
+            row.Cells[0].Value = SymbolLabel.For(entry, quote, settings.SymbolNames);
+            row.Cells[0].ToolTipText = (row.Cells[0].Value as string == entry.Symbol ? "" : entry.Symbol + " · ") + T("Double-click to open chart");
             row.Cells[1].Value = PriceFlash.Format(quote.Price, places);
             bool flat = Math.Abs(quote.ChangePct) < 0.005, up = quote.ChangePct >= 0;
             var mark = flat ? "−" : settings.ChangeArrows ? up ? "▲" : "▼" : up ? "+" : "−";
@@ -129,7 +130,7 @@ internal sealed class BoardForm : Form
     private void PaintPrice(object? sender, DataGridViewCellPaintingEventArgs e)
     {
         if (e.ColumnIndex != 1 || e.RowIndex < 0) return;
-        var symbol = grid.Rows[e.RowIndex].Cells[0].Value?.ToString() ?? "";
+        var symbol = (grid.Rows[e.RowIndex].Tag as WatchEntry)?.Symbol ?? "";
         if (!pulses.TryGetValue(symbol, out var pulse)) return;
         if (clock.Elapsed.TotalSeconds - pulse.since >= PriceFlash.Duration) { pulses.Remove(symbol); return; }
         e.PaintBackground(e.ClipBounds, true); e.Paint(e.ClipBounds, DataGridViewPaintParts.Border);
@@ -139,7 +140,7 @@ internal sealed class BoardForm : Form
         var allWidth = TextRenderer.MeasureText(pulse.flash.Prefix + pulse.flash.Suffix, font, Size.Empty, flags).Width;
         var normal = (e.State & DataGridViewElementStates.Selected) != 0 ? e.CellStyle.SelectionForeColor : e.CellStyle.ForeColor;
         TextRenderer.DrawText(e.Graphics!, pulse.flash.Prefix, font, new Rectangle(e.CellBounds.Right - allWidth - 4, e.CellBounds.Top, allWidth - suffixWidth, e.CellBounds.Height), normal, flags);
-        var flashColor = WinTheme.C(pulse.flash.Red ? Palette.Red(tone) : Palette.Green(tone));
+        var flashColor = WinTheme.C(pulse.flash.Red ? Palette.UiRed(tone) : Palette.UiGreen(tone));
         TextRenderer.DrawText(e.Graphics!, pulse.flash.Suffix, font, new Rectangle(e.CellBounds.Right - suffixWidth - 4, e.CellBounds.Top, suffixWidth, e.CellBounds.Height), flashColor, flags);
         e.Handled = true;
     }

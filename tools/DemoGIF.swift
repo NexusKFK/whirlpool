@@ -101,13 +101,13 @@ struct DemoGIF {
         appearance.performAsCurrentDrawingAppearance {
             for (i, r) in rows.enumerated() {
                 let y = origin.y + h - inset - CGFloat(i + 1) * rowH
-                let color: NSColor = r.flat ? .labelColor : (r.up ? style.nsColor(.green) : style.nsColor(.red))
+                let color: NSColor = r.flat ? .labelColor : (r.up ? style.uiColor(.green) : style.uiColor(.red))
                 let base = style.nsColor(.white)
                 let sym = renderPixelText([(text: r.symbol, color: base)])
                 var priceSegs: [(text: String, color: NSColor)] = [(r.price, base)]
                 if t >= 0, t < PriceFlash.duration, let q = quotes[r.symbol],
                    let f = PriceFlash.between(previousPrices[r.symbol], and: q.price, redUp: false, decimals: r.decimals) {
-                    priceSegs = [(f.prefix, base), (f.suffix, style.nsColor(f.color))]
+                    priceSegs = [(f.prefix, base), (f.suffix, style.uiColor(f.color))]
                 }
                 let price = renderPixelText(priceSegs), change = renderPixelText([(r.change, color)])
                 let cy = y + (rowH - sym.size.height) / 2

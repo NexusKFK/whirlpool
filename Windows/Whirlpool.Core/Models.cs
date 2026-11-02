@@ -14,7 +14,25 @@ public sealed class Watchlist
 }
 
 public sealed record Quote(double Price, double ChangePct, DateTimeOffset ReceivedAt, double[]? Series = null,
-                           int? Decimals = null, DateTimeOffset? MarketTime = null);
+                           int? Decimals = null, DateTimeOffset? MarketTime = null, string? Name = null);
+
+/// <summary>What the board shows for a row: the code, or the Tencent short name for China / Hong Kong when enabled.</summary>
+public static class SymbolLabel
+{
+    public static string For(WatchEntry entry, Quote? quote, bool names) =>
+        names && entry.Market is "cn" or "hk" && quote?.Name is { Length: > 0 } name ? name : entry.Symbol;
+
+    /// <summary>Drops the ex-dividend/ex-rights prefixes (XD/XR/DR) and the Hong Kong -W/-SW/-S suffixes.</summary>
+    public static string? CleanName(string raw)
+    {
+        var s = raw.Trim();
+        foreach (var prefix in new[] { "XD", "XR", "DR" })
+            if (s.StartsWith(prefix, StringComparison.Ordinal) && s.Length > prefix.Length && s[prefix.Length] > 127) { s = s[prefix.Length..]; break; }
+        foreach (var suffix in new[] { "-SW", "-W", "-S" })
+            if (s.EndsWith(suffix, StringComparison.Ordinal) && s.Length > suffix.Length) { s = s[..^suffix.Length]; break; }
+        return s.Length == 0 ? null : s;
+    }
+}
 
 public sealed record PriceFlash(string Prefix, string Suffix, bool Red)
 {
@@ -52,6 +70,9 @@ public static class Palette
     public static (byte R, byte G, byte B) Neutral(Tone t) => t == Tone.Dark ? ((byte)255, (byte)255, (byte)255) : ((byte)20, (byte)20, (byte)23);
     public static (byte R, byte G, byte B) Green(Tone t) => t == Tone.Dark ? ((byte)0, (byte)255, (byte)64) : ((byte)0, (byte)143, (byte)51);
     public static (byte R, byte G, byte B) Red(Tone t) => t == Tone.Dark ? ((byte)255, (byte)26, (byte)0) : ((byte)214, (byte)20, (byte)10);
+    /// <summary>Softer system green/red for the quote board (macOS systemGreen/systemRed in sRGB); the LED ticker keeps the neon pair.</summary>
+    public static (byte R, byte G, byte B) UiGreen(Tone t) => t == Tone.Dark ? ((byte)48, (byte)209, (byte)88) : ((byte)52, (byte)199, (byte)89);
+    public static (byte R, byte G, byte B) UiRed(Tone t) => t == Tone.Dark ? ((byte)255, (byte)66, (byte)69) : ((byte)255, (byte)56, (byte)60);
     public static (byte R, byte G, byte B) Background(Tone t) => t == Tone.Dark ? ((byte)20, (byte)22, (byte)27) : ((byte)246, (byte)246, (byte)248);
 }
 

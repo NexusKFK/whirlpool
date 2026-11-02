@@ -37,6 +37,7 @@ Version: **2.0.5 preview**. Cross-compilation and core checks can run on macOS. 
 - [ ] Set a symbol's Decimals to 3 (e.g. `510300`); verify the ticker and board show three places and that `4.580 → 4.582` flashes the last digit.
 - [ ] Hover over the ticker; verify scrolling pauses and resumes on leave.
 - [ ] Double-click a board row and use Open Chart; verify TradingView/Yahoo opens.
+- [ ] Add `600519` (A-share) and `00700` (Hong Kong); set Settings → General → China / Hong Kong symbols to Name. Verify the board shows the Chinese short names (hover shows the code), the ticker keeps codes, and switching back to Code restores codes. Board up/down colors should be the softer system green/red, not the ticker's neon.
 - [ ] Enable Launch at login, sign out and in; disable it again.
 - [ ] Lock the session or sleep; verify polling stops (no network traffic) and resumes after unlock/wake.
 - [ ] Run Check for Updates… (newer release → Download/Later/Skip; otherwise "up to date"); verify the automatic check shows one notification per version.

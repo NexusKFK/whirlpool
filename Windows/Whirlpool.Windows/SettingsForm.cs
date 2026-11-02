@@ -37,6 +37,7 @@ internal sealed class SettingsForm : Form
     private readonly CheckBox locked = Check("Lock floating windows in place");
     private readonly CheckBox through = Check("Let clicks pass through the floating ticker (turn off from the tray menu)");
     private readonly CheckBox redUp = Check("Red means up in China / Hong Kong");
+    private readonly ComboBox symbolStyle = Combo([T("Code"), T("Name")]);
     private readonly CheckBox smart = Check("Refresh slowly while all watched markets are closed");
     private readonly CheckBox login = Check("Launch at login");
     private readonly CheckBox updates = Check("Check for updates automatically");
@@ -76,6 +77,7 @@ internal sealed class SettingsForm : Form
         locked.Checked = draft.LockPosition; through.Checked = draft.ClickThrough;
         login.Checked = LoginItem.Enabled;
         redUp.Checked = draft.RedUpMarkets.Contains("cn") && draft.RedUpMarkets.Contains("hk");
+        symbolStyle.SelectedIndex = draft.SymbolNames ? 1 : 0;
         initializing = false; UpdatePreview();
         ReloadPicker(); LoadGrid();
         HandleCreated += (_, _) => WinTheme.TitleBar(this, WinTheme.SystemTone());
@@ -312,7 +314,10 @@ internal sealed class SettingsForm : Form
         Wide(form, Note("30 seconds is recommended. Short intervals may be rate-limited. All displays share one request cycle."));
         Wide(form, smart);
         Wide(form, Note("Uses exchange calendars with holidays and half days (NYSE, SSE/SZSE, HKEX); crypto, futures and FX count as always open. Refreshing resumes at the next open."));
-        Wide(form, redUp); Wide(form, login); Wide(form, updates);
+        Wide(form, redUp);
+        Row(form, "China / Hong Kong symbols", symbolStyle);
+        Wide(form, Note("Names are Tencent's short names, e.g. 600519 shows as 贵州茅台, on the quote board. The scrolling ticker's LED dot font has no Chinese glyphs, so it keeps showing codes."));
+        Wide(form, login); Wide(form, updates);
         Wide(form, Note("Once a day Whirlpool asks GitHub for the latest release (no identifiers sent). New versions appear in the menu and as a notification."));
         Wide(form, Note("Your watchlist stays on this device. Symbols are sent only to the selected quote provider."));
         var page = Page("General"); page.AutoScroll = true; page.Controls.Add(form); return page;
@@ -372,6 +377,7 @@ internal sealed class SettingsForm : Form
         }
         draft.DisplayScreen = screenKey;
         draft.RedUpMarkets.RemoveAll(m => m is "cn" or "hk"); if (redUp.Checked) draft.RedUpMarkets.AddRange(["cn", "hk"]);
+        draft.SymbolNames = symbolStyle.SelectedIndex == 1;
         draft.Normalize();
         try
         {

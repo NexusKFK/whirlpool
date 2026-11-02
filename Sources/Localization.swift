@@ -271,6 +271,8 @@ enum L10n {
         "Code": "代码",
         "Name": "名称",
         "Names are the short names from Tencent quotes, e.g. 600519 shows as 贵州茅台. The LED dot font has no Chinese glyphs, so it keeps showing codes.": "名称取自腾讯行情的简称，例如 600519 显示为「贵州茅台」。点阵字体没有中文字形，选点阵时仍显示代码。",
+        "Names are Tencent's short names, e.g. 600519 shows as 贵州茅台, on the quote board. The scrolling ticker's LED dot font has no Chinese glyphs, so it keeps showing codes.": "报价板上的名称取自腾讯行情的简称，例如 600519 显示为「贵州茅台」。滚动字幕用点阵字体，没有中文字形，仍显示代码。",
+        "IB Gateway offline · account figures are from the last snapshot": "IB 网关未连接 · 账户数字来自最后一次快照",
     ]
 }
 

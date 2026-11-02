@@ -44,6 +44,18 @@ Check(cn?.Code == "sh510300" && cn.Value.Quote.Decimals == 3 && cn.Value.Quote.M
 fields[3] = "419.000"; fields[30] = "2026/09/18 16:08:32";
 var hk = QuoteFeed.ParseTencentLine("v_hk00700=\"" + string.Join('~', fields) + "\"", default);
 Check(hk is { } h && h.Quote.Decimals is null && h.Quote.MarketTime == At("2026-09-18 16:08", "Asia/Hong_Kong").AddSeconds(32), "Tencent Hong Kong");
+Check(hk?.Quote.Name == "0", "Tencent field 1 is the short name");
+fields[1] = "XD示例银行"; fields[3] = "4.582"; fields[30] = "20260918161452";
+var named = QuoteFeed.ParseTencentLine("v_sh600000=\"" + string.Join('~', fields) + "\"", default);
+Check(named?.Quote.Name == "示例银行", "ex-dividend prefix dropped from the name");
+Check(SymbolLabel.CleanName("示例科技-W") == "示例科技" && SymbolLabel.CleanName("示例-SW") == "示例" && SymbolLabel.CleanName("XDA") == "XDA"
+      && SymbolLabel.CleanName("DR示例") == "示例" && SymbolLabel.CleanName("  ") is null, "Tencent name cleanup");
+var nameQuote = new Quote(17.35, 0, default, Name: "示例银行");
+Check(SymbolLabel.For(new("600000", "cn"), nameQuote, true) == "示例银行" && SymbolLabel.For(new("600000", "cn"), nameQuote, false) == "600000"
+      && SymbolLabel.For(new("EXMP", "us"), nameQuote, true) == "EXMP" && SymbolLabel.For(new("00700", "hk"), new Quote(1, 0, default), true) == "00700",
+      "board label: names only for China / Hong Kong when enabled, else the code");
+Check(Palette.UiRed(Tone.Dark) != Palette.Red(Tone.Dark) && Palette.UiGreen(Tone.Light) != Palette.Green(Tone.Light), "board uses the softer system pair, not the LED neon");
+fields[1] = "0";
 var yahoo = QuoteFeed.ParseYahoo(Encoding.UTF8.GetBytes("{\"chart\":{\"result\":[{\"meta\":{\"regularMarketPrice\":1.1489,\"chartPreviousClose\":1.15,\"priceHint\":4,\"regularMarketTime\":1789761600}}]}}"), default);
 Check(yahoo?.Decimals == 4 && yahoo.MarketTime == DateTimeOffset.FromUnixTimeSeconds(1789761600), "Yahoo precision hint and time");
 foreach (var metadata in new[] { "\"priceHint\":null,\"regularMarketTime\":null", "\"priceHint\":99,\"regularMarketTime\":9223372036854775807", "\"priceHint\":\"bad\",\"regularMarketTime\":\"bad\"" })
@@ -93,6 +105,9 @@ var path = Path.Combine(dir, "config.json");
 try
 {
     var settings = new Settings { RefreshSeconds = 15, Language = "zh-Hans" }; settings.Save(path);
+    Check(!Settings.Load(path).SymbolNames && File.ReadAllText(path).Contains("\"symbolNames\": false"), "names default off and are written");
+    new Settings { SymbolNames = true }.Save(path); Check(Settings.Load(path).SymbolNames, "names round-trip");
+    settings.Save(path);
     Check(Settings.Load(path).RefreshSeconds == 15 && Settings.Load(path).Language == "zh-Hans", "configuration round-trip");
     Check(Settings.Load(path).TickerWidthFraction == .6 && Settings.Load(path).TickerPlacement == "bottom-center", "2.0 layout configuration round-trip");
     File.WriteAllText(path, "{\"widthCharacters\":37,\"tickerOrigin\":[-1100,280]}");

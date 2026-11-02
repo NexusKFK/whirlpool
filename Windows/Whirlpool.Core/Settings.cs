@@ -39,6 +39,8 @@ public sealed class Settings
     /// <summary>Screen device name for the floating windows; "auto" = primary screen.</summary>
     public string DisplayScreen { get; set; } = "auto";
     public List<string> RedUpMarkets { get; set; } = ["cn", "hk"];
+    /// <summary>The board shows China / Hong Kong rows by their Tencent short name instead of the code.</summary>
+    public bool SymbolNames { get; set; }
     public int[]? TickerOrigin { get; set; }
     public int[]? BoardOrigin { get; set; }
 

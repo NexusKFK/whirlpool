@@ -206,7 +206,7 @@ public sealed class QuoteFeed : IDisposable
 
     /// <summary>
     /// <c>v_sh510300="1~name~code~4.582~…"</c>: field 3 price (A-share strings carry the precision; Hong Kong
-    /// always writes three places, so its precision comes from the tick table), 30 time, 32 change %.
+    /// always writes three places, so its precision comes from the tick table), 1 short name, 30 time, 32 change %.
     /// </summary>
     public static (string Code, Quote Quote)? ParseTencentLine(string line, DateTimeOffset now)
     {
@@ -219,7 +219,7 @@ public sealed class QuoteFeed : IDisposable
             || !double.IsFinite(price) || price <= 0 || !double.IsFinite(change)) return null;
         var hongKong = code.StartsWith("hk");
         int? places = !hongKong && parts[3].IndexOf('.') is int dot and >= 0 ? parts[3].Length - dot - 1 : null;
-        return (code, new Quote(price, change, now, null, places, TencentTime(parts[30], hongKong)));
+        return (code, new Quote(price, change, now, null, places, TencentTime(parts[30], hongKong), SymbolLabel.CleanName(parts[1])));
     }
 
     /// <summary>A-shares "20260918150003" (Beijing), Hong Kong "2026/09/18 16:08:32" (Hong Kong); both UTC+8.</summary>

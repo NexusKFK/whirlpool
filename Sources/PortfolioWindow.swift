@@ -397,8 +397,22 @@ final class PortfolioWindow: NSPanel, NSWindowDelegate {
         }
 
         var cy = H - 12
-        place(subLabel("IBKR " + (snap?.account.map { Self.maskAcct($0) } ?? "…"), 11, .labelColor),
-              left: inset, cy: cy - 6)
+        let accountLabel = subLabel("IBKR " + (snap?.account.map { Self.maskAcct($0) } ?? "…"), 11, .labelColor)
+        place(accountLabel, left: inset, cy: cy - 6)
+        // 网关断开:账户名后挂一个橙色断联图标,账户数字(净值/可用/现金)是最后一次快照里的
+        if offline {
+            let tip = L("IB Gateway offline · account figures are from the last snapshot")
+            let symbol = NSImage(systemSymbolName: "network.slash", accessibilityDescription: tip)
+                ?? NSImage(systemSymbolName: "exclamationmark.triangle", accessibilityDescription: tip)
+            if let symbol {
+                let badge = NSImageView(image: symbol.withSymbolConfiguration(.init(pointSize: 11, weight: .medium)) ?? symbol)
+                badge.contentTintColor = .systemOrange
+                badge.toolTip = tip
+                badge.setAccessibilityLabel(tip)
+                badge.frame.size = NSSize(width: 15, height: 14)
+                place(badge, left: inset + accountLabel.frame.width + 5, cy: cy - 6)
+            }
+        }
         // 月亮切换后先转圈,提示正在等新口径的数据;收到响应就消失。
         if modeSwitchPending {
             let spinner = NSProgressIndicator()

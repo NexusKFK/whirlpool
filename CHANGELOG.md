@@ -7,8 +7,10 @@
 - Quote board: up/down colors, sparklines and tick flashes use the system green and red, the same colors as the portfolio panel, instead of the LED neon. The menu-bar marquee keeps its LED colors.
 - Settings → General → China / Hong Kong symbols: show codes (default) or the short names from Tencent quotes, on the quote board and the marquee. Ex-dividend prefixes (XD/XR/DR) and HK `-W`/`-SW`/`-S` suffixes are removed. The LED dot font has no Chinese glyphs and keeps showing codes. US symbols always show tickers.
 - Quote board sparklines skip the lunch break: A-shares 11:30–13:00, Hong Kong 12:00–13:00 (only when no trade falls inside it). When the board holds both A-shares and Hong Kong stocks, both use one 9:30–16:00 axis without the shared 12:00–13:00 hour, so the same moment sits at the same x; the A-share line stops at about 82% after its 15:00 close.
+- Portfolio panel, gateway offline: an orange disconnected icon after the account name marks Net Liq, Available and Cash as figures from the last snapshot (hover for the reason).
+- Windows preview: the quote board uses the same softer system green/red, and Settings → General gets the China / Hong Kong symbols choice (codes or Tencent short names on the board; the LED ticker keeps codes).
 
-  中文：持仓板正股行在代码后写现价，期权不写；小月亮只表示「这是 IB 的盘前、盘后或夜盘价」，网关断开时不再出现。网关断开时，备用行情源只有常规时段，盘外显示最近收盘价（灰色），「今日」不是当天交易日就写「—」，页头今日盈亏变灰、断开超过 15 分钟写「—」，页脚写明正股价是哪天的收盘价。报价卡涨跌、分时线、跳价闪色改用与持仓板相同的系统红绿，菜单栏跑马灯保留 LED 色。设置 → 通用新增「A 股/港股显示」：代码（默认）或腾讯行情的中文简称，去掉 XD/XR/DR 前缀和港股 -W/-SW/-S 后缀；点阵字体没有中文字形，仍显示代码。报价卡分时线挤掉午休（A 股 11:30–13:00、港股 12:00–13:00，窗口内无成交才挤）；A 股和港股同卡时共用 9:30–16:00 时间轴、只扣共同的 12:00–13:00，同一时刻停在同一位置，A 股 15:00 收盘后线停在约 82% 处。
+  中文：持仓板正股行在代码后写现价，期权不写；小月亮只表示「这是 IB 的盘前、盘后或夜盘价」，网关断开时不再出现。网关断开时，备用行情源只有常规时段，盘外显示最近收盘价（灰色），「今日」不是当天交易日就写「—」，页头今日盈亏变灰、断开超过 15 分钟写「—」，页脚写明正股价是哪天的收盘价。报价卡涨跌、分时线、跳价闪色改用与持仓板相同的系统红绿，菜单栏跑马灯保留 LED 色。设置 → 通用新增「A 股/港股显示」：代码（默认）或腾讯行情的中文简称，去掉 XD/XR/DR 前缀和港股 -W/-SW/-S 后缀；点阵字体没有中文字形，仍显示代码。报价卡分时线挤掉午休（A 股 11:30–13:00、港股 12:00–13:00，窗口内无成交才挤）；A 股和港股同卡时共用 9:30–16:00 时间轴、只扣共同的 12:00–13:00，同一时刻停在同一位置，A 股 15:00 收盘后线停在约 82% 处。网关断开时，持仓板账户名后加一个橙色断联图标，表示净资产、可用资金和现金来自最后一次快照。Windows 预览版的报价卡同步改用系统红绿，并新增「A 股/港股显示」选项（滚动字幕仍显示代码）。
 
 ## 2.1.1 (2026-11-01)
 
