@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.2.0 (2026-11-02)
 
 - Portfolio panel: stock rows show the current price after the ticker (`ABC 51.10`); option and spread rows do not. The small moon now follows the price and means one thing only: this price is an IB pre-market, after-hours or overnight quote. It no longer appears when the gateway is down.
 - Portfolio panel, gateway offline: the fallback quote sources (EastMoney/Tencent/Yahoo) only carry the regular session, so outside it their change is the previous session's move. Stock rows now show that last close in dim gray, and "Today" reads "—" unless the quote is from the current New York trading day. Today's account P&L turns gray, and reads "—" once the snapshot is more than 15 minutes old. The footer says "IB Gateway offline · stocks at MM/DD close" (or "stocks live · options frozen at …" during the session).
