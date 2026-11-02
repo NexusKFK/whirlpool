@@ -28,7 +28,8 @@ final class BoardWindow: NSPanel, NSWindowDelegate {
                        at: Date(), status: "Loading quotes…")
             } else if oldValue.marqueeFont != config.marqueeFont || oldValue.ledDotSize != config.ledDotSize
                 || oldValue.transparentColor != config.transparentColor || oldValue.marqueeBlink != config.marqueeBlink
-                || oldValue.changeArrows != config.changeArrows || oldValue.redUpMarkets != config.redUpMarkets {
+                || oldValue.changeArrows != config.changeArrows || oldValue.redUpMarkets != config.redUpMarkets
+                || oldValue.symbolNames != config.symbolNames {
                 lastUpdate?.arrows = config.changeArrows
                 lastUpdate?.redUp = config.redUpMarkets
                 redraw()
@@ -91,7 +92,8 @@ final class BoardWindow: NSPanel, NSWindowDelegate {
 
     private func build(entries: [WatchEntry], quotes: [String: Quote], redUpMarkets: [String],
                        at date: Date, changeArrows: Bool, status: String, flash: Bool, now: Date) {
-        let rowsData = QuoteEngine.boardRows(entries: entries, quotes: quotes, changeArrows: changeArrows)
+        let rowsData = QuoteEngine.boardRows(entries: entries, quotes: quotes, changeArrows: changeArrows,
+                                             symbolNames: config.symbolNames, asciiOnly: config.marqueeFont == "led")
         container.subviews.forEach { $0.removeFromSuperview() }
         let style = LEDStyle(tone: Tone.of(container.effectiveAppearance), mono: config.colorScheme == .mono)
         let base = style.nsColor(config.colorScheme.baseColor)
@@ -110,7 +112,7 @@ final class BoardWindow: NSPanel, NSWindowDelegate {
             return ceil(Self.textLabel(text, font: font, color: base, flash: nil, style: style, alignment: .right).frame.width)
         }
         // Measure columns independently: their longest values may be on different rows.
-        let symbolW = rowsData.map { measure($0.symbol) }.max() ?? 36
+        let symbolW = rowsData.map { measure($0.label.isEmpty ? $0.symbol : $0.label) }.max() ?? 36
         let priceW = rowsData.map { measure($0.price) }.max() ?? 60
         let changeW = rowsData.map { measure($0.change) }.max() ?? 60
         let inset: CGFloat = 12, gap: CGFloat = 12, sparkW: CGFloat = 64
@@ -124,7 +126,13 @@ final class BoardWindow: NSPanel, NSWindowDelegate {
         programmaticMove = false
 
         let rowW = W - inset * 2
+        let axis = SparklineView.sharedAxis(rowsData.compactMap { r in
+            guard let q = quotes[r.symbol], let st = q.sessionStart, let en = q.sessionEnd,
+                  let pts = r.series, pts.count > 1 else { return nil }
+            return (r.market, (st, en), pts)
+        })
         for (i, r) in rowsData.enumerated() {
+            let shown = r.label.isEmpty ? r.symbol : r.label
             let y = H - top - CGFloat(i + 1) * rowH
             let row = BoardRowView(frame: NSRect(x: inset, y: y, width: rowW, height: rowH))
             row.entry = entries.first { $0.symbol == r.symbol }
@@ -141,12 +149,12 @@ final class BoardWindow: NSPanel, NSWindowDelegate {
                                    redUp: redUpMarkets.contains(r.market), decimals: r.decimals)
             } : nil
             let red = r.up == redUpMarkets.contains(r.market)
-            let color = r.flat ? base : style.nsColor(red ? .red : .green)
+            let color = r.flat ? base : style.uiColor(red ? .red : .green)
             let changeX = rowW - sparkW - gap - changeW
             let priceX = changeX - gap - priceW
             let symbolWidth = priceX - gap
             if pixel {
-                let symIV = Self.pixelIV(r.symbol, base, dot: dot)
+                let symIV = Self.pixelIV(shown, base, dot: dot)
                 let pxIV = Self.pixelIV(r.price, base, flash: priceFlash, style: style, dot: dot)
                 let chgIV = Self.pixelIV(r.change, color, dot: dot)
                 let cy = (rowH - symIV.frame.height) / 2
@@ -154,11 +162,11 @@ final class BoardWindow: NSPanel, NSWindowDelegate {
                 pxIV.frame.origin = NSPoint(x: priceX + priceW - pxIV.frame.width, y: cy)
                 symIV.frame.origin = NSPoint(x: 0, y: cy)
                 symIV.identifier = .init("board-symbol"); pxIV.identifier = .init("board-price"); chgIV.identifier = .init("board-change")
-                symIV.setAccessibilityLabel(r.symbol); pxIV.setAccessibilityLabel(r.price); chgIV.setAccessibilityLabel(r.change)
+                symIV.setAccessibilityLabel(shown); pxIV.setAccessibilityLabel(r.price); chgIV.setAccessibilityLabel(r.change)
                 row.addSubview(symIV); row.addSubview(pxIV); row.addSubview(chgIV)
             } else {
                 for (key, text, x, width, tint, pulse) in [
-                    ("symbol", r.symbol, CGFloat(0), symbolWidth, base, nil as PriceFlash?),
+                    ("symbol", shown, CGFloat(0), symbolWidth, base, nil as PriceFlash?),
                     ("price", r.price, priceX, priceW, base, priceFlash),
                     ("change", r.change, changeX, changeW, color, nil as PriceFlash?)
                 ] {
@@ -176,7 +184,15 @@ final class BoardWindow: NSPanel, NSWindowDelegate {
                 spark.lineColor = color
                 if let q = quotes[r.symbol] {
                     if q.changePct > -99 { spark.baseline = q.price / (1 + q.changePct / 100) }
-                    if let st = q.sessionStart, let en = q.sessionEnd { spark.session = (st, en) }
+                    if let st = q.sessionStart, let en = q.sessionEnd {
+                        if let axis, ["cn", "hk"].contains(r.market), en <= 86_400 {
+                            spark.session = axis.session
+                            spark.breaks = axis.breaks
+                        } else {
+                            spark.session = (st, en)
+                            spark.breaks = SparklineView.lunchBreaks(market: r.market, session: (st, en), points: pts)
+                        }
+                    }
                 }
                 row.addSubview(spark)
             }
@@ -252,7 +268,7 @@ final class BoardWindow: NSPanel, NSWindowDelegate {
                                 style: LEDStyle = LEDStyle(), dot: Int) -> NSImageView {
         let normal = renderPixelText([(text: text, color: color)], dot: dot)
         let img = flash.map {
-            renderPixelText([(text: $0.prefix, color: color), (text: $0.suffix, color: style.nsColor($0.color))], dot: dot)
+            renderPixelText([(text: $0.prefix, color: color), (text: $0.suffix, color: style.uiColor($0.color))], dot: dot)
         } ?? normal
         let iv = NSImageView(image: img)
         iv.imageScaling = .scaleNone
@@ -272,7 +288,7 @@ final class BoardWindow: NSPanel, NSWindowDelegate {
         label.lineBreakMode = .byClipping
         if let flash {
             let highlighted = NSMutableAttributedString(attributedString: attr)
-            highlighted.addAttribute(.foregroundColor, value: style.nsColor(flash.color),
+            highlighted.addAttribute(.foregroundColor, value: style.uiColor(flash.color),
                                      range: NSRange(location: flash.prefix.utf16.count, length: flash.suffix.utf16.count))
             label.attributedStringValue = highlighted
             DispatchQueue.main.asyncAfter(deadline: .now() + PriceFlash.duration) { [weak label] in label?.attributedStringValue = attr }
@@ -327,6 +343,49 @@ final class SparklineView: NSView {
     var session: (start: Double, end: Double)? = nil   // 当天时段:x 按真实时间,刚开盘线只画开头一小段
     var lineColor: NSColor = .systemGreen
     var baseline: Double? = nil   // 昨收锚点:波动按真实比例画,平静的日子不夸大成满幅锯齿
+    var breaks: [(start: Double, end: Double)] = []   // 午休:这段时间从横轴上挤掉,上午和下午的线直接接上
+
+    /// 午休窗口(当日秒数)。A 股 11:30-13:00;港股 12:00-13:00。
+    /// 只在分时数据是"当日秒数"口径、且窗口里确实没有成交点时才挤掉——
+    /// 哪天港股午间照常交易,窗口里有点,就按真实时间画。
+    static func lunchBreaks(market: String, session: (start: Double, end: Double),
+                            points: [SeriesPt]) -> [(start: Double, end: Double)] {
+        guard session.end <= 86_400 else { return [] }   // epoch 口径(Yahoo)不处理
+        let candidates: [(start: Double, end: Double)]
+        switch market {
+        case "cn": candidates = [(11.5 * 3600, 13 * 3600)]
+        case "hk": candidates = [(12 * 3600, 13 * 3600)]
+        default: return []
+        }
+        return candidates.filter { b in
+            b.start > session.start && b.end < session.end && !points.contains { $0.t > b.start && $0.t < b.end }
+        }
+    }
+
+    /// A 股和港股同在一张卡上时共用一条时间轴:同一时刻两条线停在同一位置。
+    /// 轴取两者时段的并集(9:30-16:00),只扣掉两边都没成交的共同午休(12:00-13:00);
+    /// A 股 11:30-12:00 照真实时间留着,15:00 收盘后线停在约 82% 处。
+    /// 卡上只有一个市场时返回 nil,各画各的。
+    typealias Axis = (session: (start: Double, end: Double), breaks: [(start: Double, end: Double)])
+    static func sharedAxis(_ rows: [(market: String, session: (start: Double, end: Double), points: [SeriesPt])]) -> Axis? {
+        let local = rows.filter { ["cn", "hk"].contains($0.market) && $0.session.end <= 86_400 }
+        guard Set(local.map(\.market)) == ["cn", "hk"] else { return nil }
+        let session = (start: local.map(\.session.start).min()!, end: local.map(\.session.end).max()!)
+        var breaks = lunchBreaks(market: local[0].market, session: local[0].session, points: local[0].points)
+        for row in local.dropFirst() {
+            let other = lunchBreaks(market: row.market, session: row.session, points: row.points)
+            breaks = breaks.flatMap { a in other.compactMap { b in
+                let s = max(a.start, b.start), e = min(a.end, b.end)
+                return s < e ? (start: s, end: e) : nil
+            } }
+        }
+        return (session, breaks)
+    }
+
+    /// 时间 → 横轴位置:扣掉它之前经过的午休时长
+    static func compressed(_ t: Double, breaks: [(start: Double, end: Double)]) -> Double {
+        t - breaks.reduce(0) { $0 + max(0, min(t, $1.end) - $1.start) }
+    }
 
     override var isFlipped: Bool { true }
     override var isOpaque: Bool { false }
@@ -380,7 +439,8 @@ final class SparklineView: NSView {
         for (i, p) in points.enumerated() {
             let frac: CGFloat
             if let se = timeRange {
-                let f = (p.t - se.start) / (se.end - se.start)
+                let a = Self.compressed(se.start, breaks: breaks), b = Self.compressed(se.end, breaks: breaks)
+                let f = b > a ? (Self.compressed(p.t, breaks: breaks) - a) / (b - a) : 0
                 frac = CGFloat(min(1.0, max(0.0, f)))
             } else {
                 frac = n > 1 ? CGFloat(i) / CGFloat(n - 1) : 0

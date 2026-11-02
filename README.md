@@ -132,7 +132,7 @@ An optional card above the quote board that replaces the IBKR mobile app's home 
 - **What it shows:** today's P&L; net liquidation, unrealized, available funds and cash; then one line per position with its total P&L, today's P&L and average cost. Vertical spreads with the same expiry are merged into one line.
 - **Moon button – price mode.** During the regular session the card is always live. Outside it:
   - **Off (default):** the card shows the last regular-session close (early-close days included). The footer reads "Quotes at close · MM/DD HH:MM", P&L numbers turn gray, and the feeder refreshes every five minutes.
-  - **On:** the card follows pre-market and after-hours quotes. The footer reads "After hours · Last quote HH:MM", P&L numbers keep their green/red, and each stock gets a small moon badge.
+  - **On:** the card follows pre-market and after-hours quotes. The footer reads "After hours · Last quote HH:MM", P&L numbers keep their green/red, and a small moon follows the price of each stock whose price is an IB pre-market, after-hours or overnight quote. Stock rows always show the current price after the ticker; option rows do not.
 - **Eye button:** shows the four account amounts as `****`. The moon can also be toggled from the status-bar menu.
 - **Formats:** ▲ / ▼ follow the arrow option on the Appearance page (plus/minus when it is off). Shorts carry a minus, e.g. `−2 @ $0.85`; a merged spread shows the number of spreads and the net cost per spread. Option dates use the broker style, e.g. `26DEC18`.
 
@@ -142,7 +142,7 @@ Setup:
 2. `pip3 install ib_insync` (Python 3.9+). The feeder script ships at `tools/ib-live/` in this repository; either copy it to `~/tools/ib_live/` (`mkdir -p ~/tools/ib_live && cp tools/ib-live/* ~/tools/ib_live/`) or keep the repo checked out — Whirlpool looks in both places and runs it as a child process by itself. No launchd or agent setup.
 3. Enable it in **Settings → Layout → Portfolio Panel**, or from the status-bar right-click menu.
 
-Behavior and privacy: the feeder is read-only (client ID 93, never any order API), binds to `127.0.0.1` only, refuses non-loopback `Host` headers and serves data only behind an `X-Whirlpool` header, so cross-site pages in your browser cannot read it. The account number is masked on the panel and nothing is uploaded anywhere. With the gateway closed, stock rows keep updating from EastMoney/Tencent using the last known cost basis while option rows freeze and dim; the footer states which rows are live and when the frozen numbers were taken.
+Behavior and privacy: the feeder is read-only (client ID 93, never any order API), binds to `127.0.0.1` only, refuses non-loopback `Host` headers and serves data only behind an `X-Whirlpool` header, so cross-site pages in your browser cannot read it. The account number is masked on the panel and nothing is uploaded anywhere. With the gateway closed there is no IB extended-hours price: during the regular session stock rows keep updating from EastMoney/Tencent using the last known cost basis; outside it they show the last regular close in dim gray with no moon, and "Today" reads "—" instead of the previous session's move. Option rows freeze and dim, today's account P&L turns gray (and "—" after 15 minutes offline), and the orange footer says which close the stock prices come from.
 
 ## macOS CLI
 

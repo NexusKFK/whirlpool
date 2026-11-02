@@ -61,6 +61,7 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
     private let arrows = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let flashes = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let redUp = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    private let symbolStyle = NSPopUpButton()
     private let dock = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let scheme = SettingsChoiceGroup()
     private let barBackground = SettingsChoiceGroup()
@@ -154,6 +155,7 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
         arrows.state = config.changeArrows ? .on : .off
         flashes.state = config.marqueeBlink ? .on : .off
         redUp.state = config.redUpMarkets.contains("cn") && config.redUpMarkets.contains("hk") ? .on : .off
+        symbolStyle.selectItem(at: config.symbolNames ? 1 : 0)
         dock.state = config.showDockIcon ? .on : .off
         scheme.selectItem(at: ColorScheme.allCases.firstIndex(of: config.colorScheme) ?? 0)
         barBackground.selectItem(at: config.barBackground == "none" ? 1 : 0)
@@ -530,6 +532,8 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
         refresh.setAccessibilityLabel(L("Refresh interval"))
         source.setAccessibilityLabel(L("Data source")); language.setAccessibilityLabel(L("Language"))
         redUp.title = L("Red means up in China / Hong Kong")
+        symbolStyle.removeAllItems(); symbolStyle.addItems(withTitles: [L("Code"), L("Name")])
+        symbolStyle.setAccessibilityLabel(L("China / Hong Kong symbols"))
         dock.title = L("Show Dock icon")
         login.title = L("Launch at login")
         smart.title = L("Refresh slowly while all watched markets are closed")
@@ -541,7 +545,8 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
                              formRow("Refresh interval", [refresh, NSTextField(labelWithString: L("seconds"))]),
                       note("30 seconds is recommended. Short intervals may be rate-limited. All displays share one request cycle."),
                       smart, note("Uses exchange calendars with holidays and half days (NYSE, SSE/SZSE, HKEX); crypto, futures and FX count as always open. Refreshing resumes at the next open."),
-                      redUp]), panel([login, dock, note("The Dock icon gives a visible handle on the running app — right-click it to quit or relaunch."),
+                      redUp, formRow("China / Hong Kong symbols", [symbolStyle]),
+                      note("Names are the short names from Tencent quotes, e.g. 600519 shows as 贵州茅台. The LED dot font has no Chinese glyphs, so it keeps showing codes.")]), panel([login, dock, note("The Dock icon gives a visible handle on the running app — right-click it to quit or relaunch."),
                       updates, note("Once a day Whirlpool asks GitHub for the latest release (no identifiers sent). New versions appear in the menu and scroll by once."),
                       note("Your watchlist stays on this device. Symbols are sent only to the quote providers above.")])])
     }
@@ -850,6 +855,7 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
         draft.marqueeBlink = flashes.state == .on
         draft.redUpMarkets.removeAll { ["cn", "hk"].contains($0) }
         if redUp.state == .on { draft.redUpMarkets += ["cn", "hk"] }
+        draft.symbolNames = symbolStyle.indexOfSelectedItem == 1
         draft.showDockIcon = dock.state == .on
         draft.transparentColor = ColorScheme.allCases[max(0, scheme.indexOfSelectedItem)].rawValue
         draft.barBackground = barBackground.indexOfSelectedItem == 1 ? "none" : "glass"

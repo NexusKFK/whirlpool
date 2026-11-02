@@ -98,6 +98,33 @@ func runFeatureTests() throws {
     let (usCode, us) = try unwrap(RealProvider().parseTencentLine("v_usAAPL=\"" + fields.joined(separator: "~") + "\""))
     check(usCode == "usAAPL" && us.decimals == 2 && us.marketTime == date("2026-09-25 11:41", "America/New_York").addingTimeInterval(20),
           "tencent US precision and time")
+    // 简称:A 股/港股取腾讯第 2 段并清理,美股不取(示例名称与价格为虚构)
+    fields[1] = "XD示例银行"; fields[3] = "8.88"; fields[30] = "20260918150003"
+    let (_, named) = try unwrap(RealProvider().parseTencentLine("v_sh600000=\"" + fields.joined(separator: "~") + "\""))
+    check(named.name == "示例银行", "tencent CN short name, ex-dividend prefix removed: \(named.name ?? "nil")")
+    fields[1] = "示例科技-W"; fields[3] = "50.000"; fields[30] = "2026/09/18 16:08:32"
+    let (_, hkNamed) = try unwrap(RealProvider().parseTencentLine("v_hk09999=\"" + fields.joined(separator: "~") + "\""))
+    check(hkNamed.name == "示例科技", "tencent HK short name, -W suffix removed")
+    fields[1] = "Example Inc"; fields[3] = "17.35"; fields[30] = "2026-09-25 11:41:20"
+    let (_, usNamed) = try unwrap(RealProvider().parseTencentLine("v_usEXMP=\"" + fields.joined(separator: "~") + "\""))
+    check(usNamed.name == nil, "US names are not used")
+    check(QuoteEngine.cleanName("XDR") == "XDR" && QuoteEngine.cleanName("DR") == "DR", "ASCII-only names are kept as is")
+    let cnEntry = WatchEntry(symbol: "600000", market: "cn")
+    let usEntry = WatchEntry(symbol: "EXMP", market: "us")
+    check(QuoteEngine.label(for: cnEntry, quote: named, symbolNames: true, asciiOnly: false) == "示例银行", "name shown when chosen")
+    check(QuoteEngine.label(for: cnEntry, quote: named, symbolNames: false, asciiOnly: false) == "600000", "code shown by default")
+    check(QuoteEngine.label(for: cnEntry, quote: named, symbolNames: true, asciiOnly: true) == "600000", "LED dot font keeps the code")
+    check(QuoteEngine.label(for: cnEntry, quote: nil, symbolNames: true, asciiOnly: false) == "600000", "no quote, no name")
+    var usWithName = usNamed; usWithName.name = "Example Inc"
+    check(QuoteEngine.label(for: usEntry, quote: usWithName, symbolNames: true, asciiOnly: false) == "EXMP", "US keeps tickers")
+    let namedRows = QuoteEngine.boardRows(entries: [cnEntry], quotes: ["600000": named], symbolNames: true)
+    check(namedRows.first?.label == "示例银行" && namedRows.first?.symbol == "600000", "board shows the name, keeps the code as identity")
+    let namedText = QuoteEngine.marqueeText(entries: [cnEntry], quotes: ["600000": named], redUpMarkets: [],
+                                            pausePerSymbol: 0, symbolNames: true)
+    check(namedText.hasPrefix("示例银行 "), "marquee shows the name: \(namedText)")
+    var namedConfig = TickerConfig(); namedConfig.symbolNames = true
+    let roundTrip = try JSONDecoder().decode(TickerConfig.self, from: JSONEncoder().encode(namedConfig))
+    check(roundTrip.symbolNames && !TickerConfig().symbolNames, "symbol name choice saves; default is code")
     check(RealProvider.usCodeAllowed("AAPL") && RealProvider.usCodeAllowed("BRK.A") && RealProvider.usCodeAllowed("BF-B"),
           "plain US tickers allowed")
     check(!RealProvider.usCodeAllowed("^GSPC") && !RealProvider.usCodeAllowed("BTC USD") && !RealProvider.usCodeAllowed(""),
@@ -210,6 +237,83 @@ func runFeatureTests() throws {
     let closeSnap = try JSONDecoder().decode(PortfolioWindow.Snapshot.self,
                                              from: Data("{\"connected\":true,\"mode\":\"close\"}".utf8))
     check(closeSnap.mode == "close" && closeSnap.provisional == nil, "close snapshot mode decodes")
+
+    // 正股行价格口径(示例价格为虚构)
+    let mondayNight = date("2026-03-09 00:10", "America/New_York")     // 周一凌晨,夜盘时段
+    let mondayOpen = date("2026-03-09 11:00", "America/New_York")
+    let fridayClose = date("2026-03-06 16:00", "America/New_York")
+    let fridayQuote = Quote(price: 50.25, changePct: -3.8, series: nil, sessionStart: nil, sessionEnd: nil,
+                            marketTime: fridayClose)
+    let ibNight = PortfolioWindow.stockPriceView(mode: "live", connected: true, extendedOn: true,
+                                                 feederPrice: 51.10, fallback: nil, snapshotTime: mondayNight,
+                                                 now: mondayNight)
+    check(ibNight == .init(price: 51.10, moon: true, tone: .normal, dayValid: true),
+          "IB online outside the session shows its price with the moon")
+    let ibDay = PortfolioWindow.stockPriceView(mode: "live", connected: true, extendedOn: true,
+                                               feederPrice: 51.10, fallback: nil, snapshotTime: mondayOpen,
+                                               now: mondayOpen)
+    check(!ibDay.moon && ibDay.price == 51.10, "regular session never shows the moon")
+    let closeView = PortfolioWindow.stockPriceView(mode: "close", connected: true, extendedOn: false,
+                                                   feederPrice: 50.25, fallback: nil, snapshotTime: fridayClose,
+                                                   now: mondayNight)
+    check(!closeView.moon && closeView.price == 50.25, "close snapshot shows the close price without the moon")
+    let offlineNight = PortfolioWindow.stockPriceView(mode: "live", connected: false, extendedOn: true,
+                                                      feederPrice: 52.00, fallback: fridayQuote,
+                                                      snapshotTime: fridayClose, now: mondayNight)
+    check(offlineNight == .init(price: 50.25, moon: false, tone: .dim, dayValid: false),
+          "gateway offline at night: last regular close, no moon, Friday's move is not today's P&L")
+    let todayQuote = Quote(price: 50.25, changePct: 1.2, series: nil, sessionStart: nil, sessionEnd: nil,
+                           marketTime: mondayOpen)
+    let offlineOpen = PortfolioWindow.stockPriceView(mode: "live", connected: false, extendedOn: true,
+                                                     feederPrice: 52.00, fallback: todayQuote,
+                                                     snapshotTime: fridayClose, now: mondayOpen)
+    check(offlineOpen == .init(price: 50.25, moon: false, tone: .normal, dayValid: true),
+          "gateway offline in the session: fallback quote of today still counts as today")
+    let offlineBare = PortfolioWindow.stockPriceView(mode: "live", connected: false, extendedOn: true,
+                                                     feederPrice: 52.00, fallback: nil,
+                                                     snapshotTime: fridayClose, now: mondayNight)
+    check(offlineBare.price == 52.00 && !offlineBare.dayValid && offlineBare.tone == .dim,
+          "gateway offline without a fallback quote: frozen price, stale day P&L hidden")
+    let justDropped = PortfolioWindow.stockPriceView(mode: "live", connected: false, extendedOn: true,
+                                                     feederPrice: 52.00, fallback: nil,
+                                                     snapshotTime: mondayNight.addingTimeInterval(-60),
+                                                     now: mondayNight)
+    check(justDropped.dayValid, "a snapshot from a minute ago still shows its day P&L")
+    check(PortfolioWindow.stockPrice(123) == "123.00" && PortfolioWindow.stockPrice(0.5) == "0.5000"
+          && PortfolioWindow.stockPrice(nil) == "—", "stock price formatting")
+    check(PortfolioWindow.parseTime("2026-03-09T00:10:00-04:00") == mondayNight, "feeder time parses")
+    // 分时缩略图午休拼接
+    let cnPts = [SeriesPt(t: 9.5 * 3600, v: 1), SeriesPt(t: 11.5 * 3600, v: 2), SeriesPt(t: 13 * 3600, v: 2), SeriesPt(t: 14 * 3600, v: 3)]
+    let cnBreaks = SparklineView.lunchBreaks(market: "cn", session: (9.5 * 3600, 15 * 3600), points: cnPts)
+    check(cnBreaks.count == 1 && cnBreaks[0].start == 11.5 * 3600 && cnBreaks[0].end == 13 * 3600, "A-share lunch break found")
+    let c = { (t: Double) in SparklineView.compressed(t, breaks: cnBreaks) }
+    check(c(11.5 * 3600) == c(13 * 3600), "11:30 and 13:00 meet at the same x")
+    check((c(11.5 * 3600) - c(9.5 * 3600)) / (c(15 * 3600) - c(9.5 * 3600)) == 0.5, "the morning is half of the 4-hour day")
+    check(SparklineView.compressed(14 * 3600, breaks: []) == 14 * 3600, "no break, real time")
+    let hkMorning = [SeriesPt(t: 9.5 * 3600, v: 1), SeriesPt(t: 11 * 3600, v: 2)]
+    check(SparklineView.lunchBreaks(market: "hk", session: (9.5 * 3600, 16 * 3600), points: hkMorning).count == 1,
+          "HK lunch hour is squeezed when nothing traded in it")
+    let hkThrough = hkMorning + [SeriesPt(t: 12.5 * 3600, v: 2)]
+    check(SparklineView.lunchBreaks(market: "hk", session: (9.5 * 3600, 16 * 3600), points: hkThrough).isEmpty,
+          "HK lunch hour with trades stays on real time")
+    check(SparklineView.lunchBreaks(market: "us", session: (9.5 * 3600, 16 * 3600), points: cnPts).isEmpty
+          && SparklineView.lunchBreaks(market: "cn", session: (1.79e9, 1.79e9 + 19_800), points: cnPts).isEmpty,
+          "US and epoch-clock series are left alone")
+    // A 股和港股同卡:共用 9:30-16:00,只扣共同午休;同一时刻停在同一位置
+    let hkPts = [SeriesPt(t: 9.5 * 3600, v: 1), SeriesPt(t: 12 * 3600, v: 2), SeriesPt(t: 13 * 3600, v: 2), SeriesPt(t: 14 * 3600, v: 3)]
+    let axis = try unwrap(SparklineView.sharedAxis([("cn", (9.5 * 3600, 15 * 3600), cnPts), ("hk", (9.5 * 3600, 16 * 3600), hkPts)]))
+    check(axis.session.start == 9.5 * 3600 && axis.session.end == 16 * 3600, "shared axis spans 9:30-16:00")
+    check(axis.breaks.count == 1 && axis.breaks[0].start == 12 * 3600 && axis.breaks[0].end == 13 * 3600, "only the common lunch hour is removed")
+    let x = { (t: Double) in
+        (SparklineView.compressed(t, breaks: axis.breaks) - SparklineView.compressed(axis.session.start, breaks: axis.breaks))
+            / (SparklineView.compressed(axis.session.end, breaks: axis.breaks) - SparklineView.compressed(axis.session.start, breaks: axis.breaks))
+    }
+    check(abs(x(15 * 3600) - 4.5 / 5.5) < 1e-9, "the A-share close sits at about 82% on the shared axis")
+    check(SparklineView.sharedAxis([("cn", (9.5 * 3600, 15 * 3600), cnPts)]) == nil
+          && SparklineView.sharedAxis([("hk", (9.5 * 3600, 16 * 3600), hkPts), ("us", (9.5 * 3600, 16 * 3600), hkPts)]) == nil,
+          "one local market keeps its own axis")
+    check(SparklineView.sharedAxis([("cn", (9.5 * 3600, 15 * 3600), cnPts), ("hk", (9.5 * 3600, 16 * 3600), hkThrough)])?.breaks.isEmpty == true,
+          "if HK trades through lunch, nothing is removed")
     print("PASS: portfolio sign style and compact position sub-lines")
 }
 

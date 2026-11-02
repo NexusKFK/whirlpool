@@ -251,10 +251,16 @@
   "Read-only IB Gateway feed (localhost only). Positions and P&L never leave this device; the account number is masked on the panel.": "只读连接本机 IB Gateway（仅 localhost，绑 127.0.0.1，数据不外发）。持仓与盈亏只留在本机；面板上账户号打码显示。",
   "P&L signs follow the ▲ / ▼ option on the Appearance page.": "盈亏符号跟随「外观」页的「使用 ▲ / ▼ 显示涨跌幅」开关。",
   "Last update %@": "数据截至 %@",
-  "Stock live · options frozen at %@": "正股实时 · 期权与账户冻结于 %@",
   "Pre-market": "盘前",
   "Quotes at close": "数据为收盘价",
   "Close snapshot unavailable": "收盘快照尚未就绪",
   "After hours": "盘后",
-  "After-Hours Snapshot": "盘后行情"
+  "After-Hours Snapshot": "盘后行情",
+  "IB Gateway offline · frozen at %@": "IB 网关未连接 · 数据冻结于 %@",
+  "IB Gateway offline · stocks live · options frozen at %@": "IB 网关未连接 · 正股实时 · 期权与账户冻结于 %@",
+  "IB Gateway offline · stocks at %@ close": "IB 网关未连接 · 正股为 %@ 收盘价",
+  "China / Hong Kong symbols": "A 股/港股显示",
+  "Code": "代码",
+  "Name": "名称",
+  "Names are the short names from Tencent quotes, e.g. 600519 shows as 贵州茅台. The LED dot font has no Chinese glyphs, so it keeps showing codes.": "名称取自腾讯行情的简称，例如 600519 显示为「贵州茅台」。点阵字体没有中文字形，选点阵时仍显示代码。"
 }

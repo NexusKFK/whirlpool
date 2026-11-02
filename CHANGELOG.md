@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Portfolio panel: stock rows show the current price after the ticker (`ABC 51.10`); option and spread rows do not. The small moon now follows the price and means one thing only: this price is an IB pre-market, after-hours or overnight quote. It no longer appears when the gateway is down.
+- Portfolio panel, gateway offline: the fallback quote sources (EastMoney/Tencent/Yahoo) only carry the regular session, so outside it their change is the previous session's move. Stock rows now show that last close in dim gray, and "Today" reads "—" unless the quote is from the current New York trading day. Today's account P&L turns gray, and reads "—" once the snapshot is more than 15 minutes old. The footer says "IB Gateway offline · stocks at MM/DD close" (or "stocks live · options frozen at …" during the session).
+- Quote board: up/down colors, sparklines and tick flashes use the system green and red, the same colors as the portfolio panel, instead of the LED neon. The menu-bar marquee keeps its LED colors.
+- Settings → General → China / Hong Kong symbols: show codes (default) or the short names from Tencent quotes, on the quote board and the marquee. Ex-dividend prefixes (XD/XR/DR) and HK `-W`/`-SW`/`-S` suffixes are removed. The LED dot font has no Chinese glyphs and keeps showing codes. US symbols always show tickers.
+- Quote board sparklines skip the lunch break: A-shares 11:30–13:00, Hong Kong 12:00–13:00 (only when no trade falls inside it). When the board holds both A-shares and Hong Kong stocks, both use one 9:30–16:00 axis without the shared 12:00–13:00 hour, so the same moment sits at the same x; the A-share line stops at about 82% after its 15:00 close.
+
+  中文：持仓板正股行在代码后写现价，期权不写；小月亮只表示「这是 IB 的盘前、盘后或夜盘价」，网关断开时不再出现。网关断开时，备用行情源只有常规时段，盘外显示最近收盘价（灰色），「今日」不是当天交易日就写「—」，页头今日盈亏变灰、断开超过 15 分钟写「—」，页脚写明正股价是哪天的收盘价。报价卡涨跌、分时线、跳价闪色改用与持仓板相同的系统红绿，菜单栏跑马灯保留 LED 色。设置 → 通用新增「A 股/港股显示」：代码（默认）或腾讯行情的中文简称，去掉 XD/XR/DR 前缀和港股 -W/-SW/-S 后缀；点阵字体没有中文字形，仍显示代码。报价卡分时线挤掉午休（A 股 11:30–13:00、港股 12:00–13:00，窗口内无成交才挤）；A 股和港股同卡时共用 9:30–16:00 时间轴、只扣共同的 12:00–13:00，同一时刻停在同一位置，A 股 15:00 收盘后线停在约 82% 处。
+
 ## 2.1.1 (2026-11-01)
 
 - Portfolio panel: the card width now includes its side insets when it sizes itself to its rows. A narrow card (no quote board to match, amounts masked) could let a long option label such as `AMZN 230/260C 27JAN15` run into the P&L on its right.

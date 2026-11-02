@@ -828,7 +828,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                                                     separator: self.config.marqueeSeparator,
                                                     changeArrows: self.config.changeArrows,
                                                     blinkChanged: self.config.marqueeBlink,
-                                                    previousTicks: self.lastTicks)
+                                                    previousTicks: self.lastTicks,
+                                                    symbolNames: self.config.symbolNames,
+                                                    asciiOnly: self.config.marqueeFont == "led")
                 // A missing symbol in one response must not erase its last known tick.
                 self.lastTicks = self.lastTicks.filter { key, _ in entries.contains { $0.symbol == key } }
                 for e in entries {

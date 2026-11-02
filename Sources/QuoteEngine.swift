@@ -14,11 +14,13 @@ struct Quote {
     let sessionEnd: Double?
     var decimals: Int? = nil     // 行情源给的价格精度(Yahoo priceHint / A 股报价串位数)
     var marketTime: Date? = nil  // 最近一笔的交易所时间(智能刷新的实时兜底)
+    var name: String? = nil      // 行情源给的简称(目前只取腾讯的 A 股/港股中文名)
 }
 
 // Board 模式一行的展示数据(market 随行,配色习惯到渲染层再定)
 struct BoardRow {
     let symbol: String
+    var label: String = ""   // 屏幕上写的名字(代码或简称);空 = 用 symbol
     let decimals: Int
     let price: String
     let change: String   // 带符号带 %
@@ -38,6 +40,28 @@ protocol QuoteProvider {
 extension QuoteProvider { var cooldownUntil: Date? { nil } }
 
 enum QuoteEngine {
+
+    /// 屏幕上写代码还是简称:只有 A 股/港股、开了名称、行情源给了名字时才换成简称。
+    /// 点阵字体只有英文字母和数字的字形,画不出中文,这时仍写代码。
+    static func label(for entry: WatchEntry, quote: Quote?, symbolNames: Bool, asciiOnly: Bool) -> String {
+        guard symbolNames, ["cn", "hk"].contains(entry.market),
+              let name = quote?.name, !name.isEmpty else { return entry.symbol }
+        if asciiOnly && !name.allSatisfy({ $0.isASCII }) { return entry.symbol }
+        return name
+    }
+
+    /// 腾讯简称去掉除权除息前缀(XD/XR/DR)和港股同股不同权/二次上市后缀(-W/-SW/-S)
+    static func cleanName(_ raw: String) -> String? {
+        var s = raw.trimmingCharacters(in: .whitespaces)
+        for prefix in ["XD", "XR", "DR"] where s.hasPrefix(prefix) && s.count > prefix.count {
+            let rest = s.dropFirst(prefix.count)
+            if rest.first.map({ !$0.isASCII }) == true { s = String(rest); break }
+        }
+        for suffix in ["-SW", "-W", "-S"] where s.hasSuffix(suffix) && s.count > suffix.count {
+            s = String(s.dropLast(suffix.count)); break
+        }
+        return s.isEmpty ? nil : s
+    }
 
     static func provider(for key: String) -> QuoteProvider {
         key == "real" ? RealProvider() : DemoProvider()
@@ -59,7 +83,8 @@ enum QuoteEngine {
                             redUpMarkets: [String], pausePerSymbol: Double,
                             separator: String = "   ", changeArrows: Bool = true,
                             blinkChanged: Bool = true,
-                            previousTicks: [String: Double] = [:]) -> String {
+                            previousTicks: [String: Double] = [:],
+                            symbolNames: Bool = false, asciiOnly: Bool = false) -> String {
         var parts: [String] = []
         for e in entries {
             guard let q = quotes[e.symbol] else { continue }
@@ -80,14 +105,15 @@ enum QuoteEngine {
                     : "\(up ? "+" : "")\(String(format: "%.2f", q.changePct))%"
             let pause = pausePerSymbol > 0 ? "\\p[\(pausePerSymbol)]" : ""
             let core = "\(price) \(flat ? change : "\\c[\(color)]\(change)\\c[]")"   // 价格与涨跌段之间留一个空格
-            parts.append("\(pause)\(e.symbol) \(core)")
+            parts.append("\(pause)\(label(for: e, quote: q, symbolNames: symbolNames, asciiOnly: asciiOnly)) \(core)")
         }
         // 串尾补一份空隙:环绕接缝处同宽,否则 % 会粘住下一个 ticker
         return parts.joined(separator: separator) + separator
     }
 
     static func boardRows(entries: [WatchEntry], quotes: [String: Quote],
-                          changeArrows: Bool = true) -> [BoardRow] {
+                          changeArrows: Bool = true,
+                          symbolNames: Bool = false, asciiOnly: Bool = false) -> [BoardRow] {
         entries.compactMap { e in
             guard let q = quotes[e.symbol] else { return nil }
             let places = decimals(for: e, quote: q)
@@ -99,7 +125,8 @@ enum QuoteEngine {
                 : changeArrows
                     ? "\(up ? "▲" : "▼")\(String(format: "%.2f", abs(q.changePct)))%"
                     : "\(up ? "+" : "")\(String(format: "%.2f", q.changePct))%"
-            return BoardRow(symbol: e.symbol, decimals: places, price: price, change: change,
+            return BoardRow(symbol: e.symbol, label: label(for: e, quote: q, symbolNames: symbolNames, asciiOnly: asciiOnly),
+                            decimals: places, price: price, change: change,
                             up: up, flat: flat, market: e.market, series: q.series)
         }
     }

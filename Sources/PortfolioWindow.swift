@@ -235,18 +235,28 @@ final class PortfolioWindow: NSPanel, NSWindowDelegate {
         func subLabel(_ text: String, _ size: CGFloat = 10.5, _ color: NSColor = .secondaryLabelColor) -> NSTextField {
             textLabel(text, size, .regular, color, mono: false)
         }
-        // 正股行末尾的小月亮:只在月亮开着、且盘前/盘后显示夜盘价时出现。
-        func tickerLabel(_ text: String, _ color: NSColor) -> NSTextField {
-            let font = (config.positionsFont == "mono")
+        // 正股行:代码 + 现价;☾ 只在价格是 IB 的盘前/盘后/夜盘实时价时出现。
+        func tickerLabel(_ text: String, _ color: NSColor, price: StockPriceView) -> NSTextField {
+            let mono = config.positionsFont == "mono"
+            let font = mono
                 ? NSFont.monospacedSystemFont(ofSize: 12, weight: .semibold)
                 : NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
+            let priceFont = mono
+                ? NSFont.monospacedSystemFont(ofSize: 11.5, weight: .regular)
+                : NSFont.monospacedDigitSystemFont(ofSize: 11.5, weight: .regular)
             let attr = NSMutableAttributedString(string: text, attributes: [
                 .font: font, .foregroundColor: color,
             ])
-            attr.append(NSAttributedString(string: " ☾", attributes: [
-                .font: NSFont.systemFont(ofSize: 9, weight: .regular),
-                .foregroundColor: NSColor.secondaryLabelColor,
+            attr.append(NSAttributedString(string: " " + Self.stockPrice(price.price), attributes: [
+                .font: priceFont,
+                .foregroundColor: price.tone == .dim ? NSColor.tertiaryLabelColor : NSColor.secondaryLabelColor,
             ]))
+            if price.moon {
+                attr.append(NSAttributedString(string: " ☾", attributes: [
+                    .font: NSFont.systemFont(ofSize: 9, weight: .regular),
+                    .foregroundColor: NSColor.secondaryLabelColor,
+                ]))
+            }
             let tf = NSTextField(labelWithAttributedString: attr)
             tf.maximumNumberOfLines = 1
             tf.lineBreakMode = .byClipping
@@ -262,7 +272,11 @@ final class PortfolioWindow: NSPanel, NSWindowDelegate {
         // 盘中永远实时(喂料已保证);快照缺 mode 字段时按当前时段兜底
         let mode = snap?.mode ?? ((config.positionsExtendedHours || Self.usPhase() == .open) ? "live" : "close")
         let staticMode = mode == "close"
-        let showExtendedBadge = config.positionsExtendedHours && !staticMode && Self.usPhase() != .open
+        let now = Date()
+        let snapTime = Self.parseTime(snap?.time)
+        let offline = snap?.connected == false
+        // 网关断开太久:快照里的今日盈亏是旧交易日的,不能再叫今日
+        let staleDay = offline && !staticMode && !Self.snapshotFresh(snapTime, now: now)
         func valueColor(_ v: Double?) -> NSColor {
             staticMode ? .secondaryLabelColor : tint(v)
         }
@@ -284,7 +298,10 @@ final class PortfolioWindow: NSPanel, NSWindowDelegate {
             return partial + value
         }
 
-        let todayValue = textLabel(money(snap?.pnl?.daily, sign: true), 17, .semibold, valueColor(snap?.pnl?.daily))
+        // 网关离线时页头是快照里的旧数:灰显;断开超过 15 分钟写 —
+        let todayValue = offline && !staticMode
+            ? textLabel(staleDay ? "—" : money(snap?.pnl?.daily, sign: true), 17, .semibold, .secondaryLabelColor)
+            : textLabel(money(snap?.pnl?.daily, sign: true), 17, .semibold, valueColor(snap?.pnl?.daily))
         let todayLine = Line(left: subLabel(L("Today's P&L"), 11), right: todayValue, leftSub: nil, rightSub: nil, h1: 20)
 
         // 账户区 2×2:净资产/浮盈亏 一行,可用/现金 一行;隐私开启时四格金额全部打码
@@ -303,31 +320,44 @@ final class PortfolioWindow: NSPanel, NSWindowDelegate {
 
         // 网关离线:正股用行情源现价 + 快照成本重算盈亏(行保持彩色=活数据);
         // 期权/价差没有行情源,冻结在快照并整行灰显,归属一眼可辨
-        let stale = snap?.connected == false
+        let stale = offline
         for var p in positions {
             let kind = p.kind ?? p.secType ?? "STK"
             let live = !staticMode && stale && kind == "STK" && liveQuotes[p.label] != nil
-            if live, let q = liveQuotes[p.label], q.price.isFinite, q.price > 0,
-               let cb = p.costBasis, p.qty != 0 {
-                let avg = cb / p.qty
-                p.unrealized = (q.price - avg) * p.qty
-                p.unrealizedPct = p.unrealized.map { $0 / abs(cb) * 100 }
-                let prevClose = q.changePct > -100 ? q.price / (1 + q.changePct / 100) : q.price
-                p.dayPnl = (q.price - prevClose) * p.qty
+            var dayValid = !(staleDay && !live)
+            var stockView: StockPriceView?
+            if kind == "STK" {
+                let view = Self.stockPriceView(mode: mode, connected: !stale,
+                                               extendedOn: config.positionsExtendedHours,
+                                               feederPrice: p.last, fallback: live ? liveQuotes[p.label] : nil,
+                                               snapshotTime: snapTime, now: now)
+                dayValid = view.dayValid
+                if live, let q = liveQuotes[p.label], q.price.isFinite, q.price > 0,
+                   let cb = p.costBasis, p.qty != 0 {
+                    let avg = cb / p.qty
+                    p.unrealized = (q.price - avg) * p.qty
+                    p.unrealizedPct = p.unrealized.map { $0 / abs(cb) * 100 }
+                    let prevClose = q.changePct > -100 ? q.price / (1 + q.changePct / 100) : q.price
+                    p.dayPnl = (q.price - prevClose) * p.qty
+                }
+                p.last = view.price
+                stockView = view
             }
             let frozenColor: NSColor = (stale && !live) ? .secondaryLabelColor : .labelColor
-            let left = (kind == "STK" && showExtendedBadge)
-                ? tickerLabel(p.label, frozenColor)
-                : textLabel(p.label, 12, .semibold, frozenColor)
+            let left = stockView.map { tickerLabel(p.label, frozenColor, price: $0) }
+                ?? textLabel(p.label, 12, .semibold, frozenColor)
             let pnlColor = (stale && !live) ? frozenColor : valueColor(p.unrealized)
             // %在前、金额在后,读起来先看幅度再看绝对数
             let right = textLabel(pct(p.unrealizedPct) + " " + money(p.unrealized, sign: true),
                                   12, .semibold, pnlColor)
             let subText = Self.detail(p)
-            let rightSub = p.dayPnl.map {
-                subLabel(L("Today") + " " + money($0, sign: true), 10.5,
-                         (stale && !live) ? .secondaryLabelColor : valueColor($0))
-            }
+            // 今日盈亏不属于当前交易日时写 —,不拿上一个交易日的涨跌冒充今日
+            let rightSub: NSTextField? = dayValid
+                ? p.dayPnl.map {
+                    subLabel(L("Today") + " " + money($0, sign: true), 10.5,
+                             (stale && !live) ? .secondaryLabelColor : valueColor($0))
+                }
+                : (p.dayPnl == nil && !live ? nil : subLabel(L("Today") + " —", 10.5, .secondaryLabelColor))
             lines.append(Line(left: left, right: right, leftSub: subLabel(subText), rightSub: rightSub, h1: 16))
         }
 
@@ -454,8 +484,17 @@ final class PortfolioWindow: NSPanel, NSWindowDelegate {
                 + (snap?.time.flatMap(Self.closeLabel).map { " · " + $0 } ?? "")
             footerColor = .secondaryLabelColor
         } else if snap?.connected == false {
-            // 网关不在:正股走自选池行情源照常更新,期权/账户冻结在快照(灰显行)
-            footerText = String(format: L("Stock live · options frozen at %@"), updated ?? "—")
+            // 网关不在:拿不到 IB 的盘外价。正股改用自选池行情源(只有常规时段),
+            // 期权/账户冻结在快照(灰显行)。页脚写明正股价是哪天的收盘价。
+            let frozenAt = snap?.time.flatMap(Self.closeLabel) ?? "—"
+            if liveQuotes.isEmpty {
+                footerText = String(format: L("IB Gateway offline · frozen at %@"), frozenAt)
+            } else if Self.usPhase(at: now) == .open {
+                footerText = String(format: L("IB Gateway offline · stocks live · options frozen at %@"), frozenAt)
+            } else {
+                let day = liveQuotes.values.compactMap(\.marketTime).max().map(Self.nyDayLabel) ?? "—"
+                footerText = String(format: L("IB Gateway offline · stocks at %@ close"), day)
+            }
             footerColor = .systemOrange
         } else {
             switch Self.usPhase() {
@@ -490,11 +529,11 @@ final class PortfolioWindow: NSPanel, NSWindowDelegate {
     }
 
     /// 美股时段与喂料共用 NYSE 日历，覆盖节假日和 13:00 提前收盘。
-    private enum USPhase { case open, pre, closed }
-    private static func usPhase() -> USPhase {
+    enum USPhase { case open, pre, closed }
+    static func usPhase(at now: Date = Date()) -> USPhase {
         var cal = Calendar(identifier: .gregorian)
         cal.timeZone = TimeZone(identifier: "America/New_York") ?? .current
-        let c = cal.dateComponents([.year, .month, .day, .weekday, .hour, .minute], from: Date())
+        let c = cal.dateComponents([.year, .month, .day, .weekday, .hour, .minute], from: now)
         guard let year = c.year, let month = c.month, let day = c.day,
               let wd = c.weekday, let h = c.hour, let m = c.minute else { return .closed }
         if wd == 1 || wd == 7 { return .closed }
@@ -505,6 +544,79 @@ final class PortfolioWindow: NSPanel, NSWindowDelegate {
         if (570..<close).contains(mins) { return .open }
         if (240..<570).contains(mins) { return .pre }
         return .closed
+    }
+
+    // ── 正股行的价格口径 ─────────────────────────────────────────────────────────
+
+    /// 正股行代码后面那个价格怎么显示、今日盈亏还算不算数。
+    struct StockPriceView: Equatable {
+        enum Tone: Equatable { case normal, dim }
+        let price: Double?
+        let moon: Bool          // ☾ 只代表一件事:这是 IB 给的盘前/盘后/夜盘实时价
+        let tone: Tone
+        let dayValid: Bool      // false = 今日写成 —
+    }
+
+    /// 喂料快照多久之内算"刚断开":超过这个时间,快照里的今日盈亏不再展示。
+    static let staleSnapshotLimit: TimeInterval = 15 * 60
+
+    /// - connected: IB 网关在线(数据来自喂料)
+    /// - fallback: 网关离线时 App 自己的行情源(东财/腾讯/Yahoo)给的报价
+    /// - snapshotTime: 喂料快照的时间
+    static func stockPriceView(mode: String, connected: Bool, extendedOn: Bool,
+                               feederPrice: Double?, fallback: Quote?, snapshotTime: Date?,
+                               now: Date = Date()) -> StockPriceView {
+        let phase = usPhase(at: now)
+        if mode == "close" {
+            return StockPriceView(price: feederPrice, moon: false, tone: .normal, dayValid: true)
+        }
+        if connected {
+            return StockPriceView(price: feederPrice, moon: extendedOn && phase != .open,
+                                  tone: .normal, dayValid: true)
+        }
+        if let q = fallback, q.price.isFinite, q.price > 0 {
+            // 这些行情源只有常规时段:涨跌幅是最近一个常规交易日的,不是今天就不能叫今日。
+            let today = q.marketTime.map { sameNYDay($0, now) } ?? (phase == .open)
+            return StockPriceView(price: q.price, moon: false,
+                                  tone: phase == .open ? .normal : .dim, dayValid: today)
+        }
+        return StockPriceView(price: feederPrice, moon: false, tone: .dim,
+                              dayValid: snapshotFresh(snapshotTime, now: now))
+    }
+
+    static func snapshotFresh(_ time: Date?, now: Date = Date()) -> Bool {
+        guard let time else { return false }
+        return now.timeIntervalSince(time) < staleSnapshotLimit
+    }
+
+    static func sameNYDay(_ a: Date, _ b: Date) -> Bool {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "America/New_York") ?? .current
+        return cal.isDate(a, inSameDayAs: b)
+    }
+
+    /// 美东日期 11/02 这种短写法,页脚用
+    static func nyDayLabel(_ d: Date) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(identifier: "America/New_York")
+        f.dateFormat = "MM/dd"
+        return f.string(from: d)
+    }
+
+    static func parseTime(_ iso: String?) -> Date? {
+        guard let iso else { return nil }
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        if let d = f.date(from: iso) { return d }
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f.date(from: iso)
+    }
+
+    /// 代码后面的价格:不带 $,两位小数,低于 1 美元给四位
+    static func stockPrice(_ v: Double?) -> String {
+        guard let v, v.isFinite, v > 0 else { return "—" }
+        return String(format: v < 1 ? "%.4f" : "%.2f", v)
     }
 
     // ── 位置 ───────────────────────────────────────────────────────────────────

@@ -59,7 +59,7 @@ final class SeriesCache {
         entries[key] = entry
         return Quote(price: quote.price, changePct: quote.changePct, series: series,
                      sessionStart: entry.start, sessionEnd: entry.end,
-                     decimals: quote.decimals, marketTime: quote.marketTime)
+                     decimals: quote.decimals, marketTime: quote.marketTime, name: quote.name)
     }
 
     /// 接尾规则。nil = 这条线已过期(报价属于更晚的交易日)。

@@ -51,6 +51,7 @@ struct TickerConfig: Codable {
     }
     var pausePerSymbol:    Double            = 0      // >0 时每个标的滚到左缘停留 N 秒
     var redUpMarkets:      [String]          = ["cn", "hk"]
+    var symbolNames:       Bool              = false  // A 股/港股显示行情源给的中文简称(关=显示代码)
     var provider:          String            = "real" // demo | real(见 RealProvider.swift)
     var usQuoteSource:     String            = "eastmoney" // 美股数据链优先源:eastmoney | tencent | yahoo(见 RealProvider.swift)
 
@@ -83,7 +84,7 @@ struct TickerConfig: Codable {
     init() {}
 
     private enum CodingKeys: String, CodingKey {
-        case tickerEnabled, defaultColor, defaultWidth, ledDotSize, marqueeFont, showDockIcon, scrollSpeed, defaultPause, customChars, transparent, transparentColor, marqueeSeparator, changeArrows, quoteLoop, watchlist, pausePerSymbol, redUpMarkets, provider, usQuoteSource, displayMode, boardCorner, boardOrigin, boardRefresh, barOrigin, boardPixelFont, marqueeBlink, barBackground, hoverPause, smartRefresh, language
+        case tickerEnabled, defaultColor, defaultWidth, ledDotSize, marqueeFont, showDockIcon, scrollSpeed, defaultPause, customChars, transparent, transparentColor, marqueeSeparator, changeArrows, quoteLoop, watchlist, pausePerSymbol, redUpMarkets, symbolNames, provider, usQuoteSource, displayMode, boardCorner, boardOrigin, boardRefresh, barOrigin, boardPixelFont, marqueeBlink, barBackground, hoverPause, smartRefresh, language
         case watchlists, activeWatchlist, checkUpdates, displayScreen, lockPosition, barClickThrough
         case barPlacement, barWidthFraction, menuWidthPoints
         case positionsEnabled, positionsRefresh, positionsOrigin, positionsPrivacy, positionsFont, positionsExtendedHours
@@ -121,6 +122,7 @@ struct TickerConfig: Codable {
         }
         pausePerSymbol = try values.decodeIfPresent(type(of: pausePerSymbol), forKey: .pausePerSymbol) ?? pausePerSymbol
         redUpMarkets = try values.decodeIfPresent(type(of: redUpMarkets), forKey: .redUpMarkets) ?? redUpMarkets
+        symbolNames = try values.decodeIfPresent(type(of: symbolNames), forKey: .symbolNames) ?? symbolNames
         provider = try values.decodeIfPresent(type(of: provider), forKey: .provider) ?? provider
         usQuoteSource = try values.decodeIfPresent(type(of: usQuoteSource), forKey: .usQuoteSource) ?? usQuoteSource
         displayMode = try values.decodeIfPresent(type(of: displayMode), forKey: .displayMode) ?? displayMode
@@ -173,6 +175,7 @@ struct TickerConfig: Codable {
         try c.encode(activeWatchlist, forKey: .activeWatchlist)
         try c.encode(pausePerSymbol, forKey: .pausePerSymbol)
         try c.encode(redUpMarkets, forKey: .redUpMarkets)
+        try c.encode(symbolNames, forKey: .symbolNames)
         try c.encode(provider, forKey: .provider)
         try c.encode(usQuoteSource, forKey: .usQuoteSource)
         try c.encode(displayMode, forKey: .displayMode)

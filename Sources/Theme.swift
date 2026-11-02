@@ -83,6 +83,17 @@ struct LEDStyle: Equatable {
         return NSColor(srgbRed: v.r, green: v.g, blue: v.b, alpha: 1)
     }
 
+    /// 报价卡、持仓板这类普通窗口用的涨跌色:系统红绿,两块板颜色一致。
+    /// 菜单栏跑马灯和点阵面板仍用上面的 LED 霓虹色。
+    func uiColor(_ c: LEDColor) -> NSColor {
+        guard !mono, c == .red || c == .green else { return nsColor(c) }
+        let system: NSColor = c == .red ? .systemRed : .systemGreen
+        guard let appearance = NSAppearance(named: effectiveTone == .dark ? .darkAqua : .aqua) else { return system }
+        var resolved = system
+        appearance.performAsCurrentDrawingAppearance { resolved = system.usingColorSpace(.sRGB) ?? system }
+        return resolved
+    }
+
     /// 小端 RGBA 打包(R | G<<8 | B<<16 | A<<24),与位图字节序 R,G,B,A 一致
     func packed(_ c: LEDColor) -> UInt32 {
         let v = rgb(c)

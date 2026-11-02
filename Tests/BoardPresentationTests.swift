@@ -93,7 +93,9 @@ func runBoardPresentationTests() throws {
     config.marqueeFont = "system"; config.transparentColor = "amber"; board.config = config
     let dark = LEDStyle(tone: .dark)
     precondition(textColor("symbol") == dark.nsColor(.amber) && textColor("price") == dark.nsColor(.amber))
-    precondition(textColor("change") == dark.nsColor(.red))
+    precondition(textColor("change") == dark.uiColor(.red))
+    precondition(dark.uiColor(.red) != dark.nsColor(.red) && LEDStyle(tone: .dark, mono: true).uiColor(.red) == dark.nsColor(.white),
+                 "The board uses the portfolio panel's system red/green, not the LED neon; monochrome stays neutral")
     config.transparentColor = "mono"; board.config = config
     precondition(textColor("price") == textColor("change"), "Monochrome includes percentages")
     config.transparentColor = "adaptive"; config.marqueeBlink = false; board.config = config
@@ -104,8 +106,8 @@ func runBoardPresentationTests() throws {
     config.marqueeBlink = true; board.config = config
     quotes["SPY"] = Quote(price: 773.58, changePct: -0.02, series: nil, sessionStart: nil, sessionEnd: nil, marketTime: mondayOpen)
     update(now: mondayOpen)
-    precondition(textColor("price", index: 3) == dark.nsColor(.white) && textColor("price", index: 4) == dark.nsColor(.green)
-                 && textColor("price", index: 5) == dark.nsColor(.green), "Flash the changed place and all smaller places")
+    precondition(textColor("price", index: 3) == dark.nsColor(.white) && textColor("price", index: 4) == dark.uiColor(.green)
+                 && textColor("price", index: 5) == dark.uiColor(.green), "Flash the changed place and all smaller places")
     RunLoop.main.run(until: Date().addingTimeInterval(PriceFlash.duration + 0.05))
     precondition(textColor("price", index: 4) == dark.nsColor(.white)
                  && (field("price").attributedStringValue.attribute(.paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle)?.alignment == .right,

@@ -120,7 +120,8 @@ final class RealProvider: QuoteProvider {
                         out[symbol] = Quote(price: quote.price, changePct: quote.changePct,
                                             series: series,
                                             sessionStart: session.0, sessionEnd: session.1,
-                                            decimals: quote.decimals, marketTime: quote.marketTime)
+                                            decimals: quote.decimals, marketTime: quote.marketTime,
+                                            name: quote.name)
                         outLock.unlock()
                     }
                     seriesGroup.leave()
@@ -171,6 +172,7 @@ final class RealProvider: QuoteProvider {
         if !key.hasPrefix("hk"), let dot = parts[3].firstIndex(of: ".") {
             quote.decimals = parts[3].distance(from: dot, to: parts[3].endIndex) - 1
         }
+        if !key.hasPrefix("us") { quote.name = QuoteEngine.cleanName(parts[1]) }
         quote.marketTime = Self.tencentTime(parts[30], zone: key.hasPrefix("hk") ? "Asia/Hong_Kong"
                                               : key.hasPrefix("us") ? "America/New_York"
                                               : "Asia/Shanghai")
