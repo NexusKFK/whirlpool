@@ -49,7 +49,10 @@ func readRequest(_ fd: Int32) -> String? {
     return String(bytes: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
 }
 
-func runSocketServer(onMessage: @escaping (TickerMessage) -> String) {
+/// afterReply 在回复发出、连接关闭之后才调用:退出这类动作放在这里做,
+/// 否则进程可能抢在回复发出前就退了,命令行那头收到空回复(CI 上偶发 --quit 无应答)。
+func runSocketServer(onMessage: @escaping (TickerMessage) -> String,
+                     afterReply: @escaping (TickerMessage) -> Void = { _ in }) {
     DispatchQueue.global(qos: .background).async {
         unlink(socketPath)
 
@@ -92,13 +95,16 @@ func runSocketServer(onMessage: @escaping (TickerMessage) -> String) {
             guard getpeereid(clientFd, &uid, &gid) == 0, uid == getuid() else { close(clientFd); continue }
             setSocketTimeouts(clientFd, seconds: 5)
 
+            var handled: TickerMessage?
             if let raw = readRequest(clientFd), let msg = decodeSocketMessage(raw) {
                 let reply = onMessage(msg)
                 reply.withCString { _ = send(clientFd, $0, strlen($0), 0) }
+                handled = msg
             } else {
                 _ = "error".withCString { send(clientFd, $0, 5, 0) }
             }
             close(clientFd)
+            if let handled { afterReply(handled) }
         }
     }
 }

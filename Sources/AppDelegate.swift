@@ -122,12 +122,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         ws.addObserver(self, selector: #selector(systemAsleep(_:)), name: NSWorkspace.sessionDidResignActiveNotification, object: nil)
         ws.addObserver(self, selector: #selector(systemAwake(_:)), name: NSWorkspace.sessionDidBecomeActiveNotification, object: nil)
 
-        runSocketServer { [weak self] msg -> String in
+        runSocketServer(onMessage: { [weak self] msg -> String in
             guard let self else { return "error" }
             var reply = "ok"
             DispatchQueue.main.sync { reply = self.receive(msg) }
             return reply
-        }
+        }, afterReply: { msg in
+            // 回复已经发出去了才退出,命令行那头一定先收到 ok
+            if msg.kind == .quit { DispatchQueue.main.async { NSApp.terminate(nil) } }
+        })
 
         configureQuoteService()
         applyDisplayMode()
@@ -736,8 +739,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.async { self.switchWatchlist(to: index) }
             return "ok"
         case .quit:
-            quitReason = "CLI --quit/--restart"
-            DispatchQueue.main.async { NSApp.terminate(nil) }
+            quitReason = "CLI --quit/--restart"   // 真正退出在回复发出之后(runSocketServer 的 afterReply)
             return "ok"
         default:
             break
