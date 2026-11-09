@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.3.0 (2026-11-10)
 
 - Watchlist page (macOS): **Follow Shepherd Holdings** adds a list that tracks the holdings in a [Shepherd](https://github.com/NexusKFK/shepherd) snapshot (`~/tools/holdings_local/state.json`, or `WHIRLPOOL_SHEPHERD_STATE`). Whirlpool checks the file once a minute and reads it only when it changed. Options show their underlying stock; a symbol held in several accounts or as both stock and options appears once; larger positions (gross market value) come first. Only symbols, markets and hidden symbols are saved in the config. On a linked list, Add and Move are disabled, **Remove** hides a symbol until **Show Hidden**, per-symbol decimals still apply, and **Stop Following** keeps the current symbols as an ordinary list. A missing or unreadable file keeps the last symbols. `whirlpool --status` reports `shepherd` as `off`, `ok N`, `missing` or `unreadable`.
 
