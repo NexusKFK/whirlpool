@@ -11,6 +11,12 @@ struct WatchEntry: Codable, Equatable {
 struct Watchlist: Codable, Equatable {
     var name: String
     var entries: [WatchEntry]
+    /// nil = 手动维护;"shepherd" = 跟随 Shepherd 持仓自动更新(见 ShepherdHoldings.swift)
+    var source: String? = nil
+    /// 跟随池里用户点「移除」隐藏的代码,持仓更新时不再加回来
+    var excluded: [String]? = nil
+
+    var isLinked: Bool { source == ShepherdHoldings.sourceKey }
 }
 
 struct TickerConfig: Codable {
@@ -236,12 +242,19 @@ struct TickerConfig: Codable {
             }
             var seen = Set<String>()
             list.entries = list.entries.filter { !$0.symbol.isEmpty && seen.insert($0.symbol).inserted }
+            if let source = list.source, source != ShepherdHoldings.sourceKey { list.source = nil }
+            if list.isLinked {
+                var hidden = Set<String>()
+                list.excluded = (list.excluded ?? []).map { $0.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() }
+                    .filter { !$0.isEmpty && hidden.insert($0).inserted }
+            } else { list.excluded = nil }
             list.name = list.name.trimmingCharacters(in: .whitespacesAndNewlines)
             watchlists[li] = list
         }
         // 空池丢掉(当前池被丢时退回第一套);全空则恢复默认池
         let activeName = watchlists.indices.contains(activeWatchlist) ? watchlists[activeWatchlist] : nil
-        watchlists.removeAll { $0.entries.isEmpty }
+        // 跟随池可以暂时是空的(快照还没生成、持仓全平),不丢
+        watchlists.removeAll { $0.entries.isEmpty && !$0.isLinked }
         if watchlists.isEmpty { watchlists = [Watchlist(name: L("Watchlist"), entries: Self.defaultEntries)] }
         activeWatchlist = activeName.flatMap { a in watchlists.firstIndex(of: a) } ?? min(max(0, activeWatchlist), watchlists.count - 1)
         // 名称:空名补序号,重名追加序号(CLI 按名切换要唯一)

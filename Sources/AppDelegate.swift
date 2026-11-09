@@ -39,6 +39,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var quitReason = "unknown"
     private var hoverWatch: Timer?
     private var updater: UpdateChecker?
+    private var shepherdTimer: Timer?               // 跟随 Shepherd 持仓:每分钟看一眼快照文件有没有变
+    private var shepherdStamp: Date?                // 上次读过的快照修改时间
+    private var shepherdState = "off"               // --status 用:off / ok N / missing / unreadable
 
     /// Each surface owns a physical width. Font changes only round the LED viewport to its column pitch.
     private var menuOuterWidth: CGFloat {
@@ -136,6 +139,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         applyDisplayMode()
         applyPositionsPanel()
         configureUpdater()
+        configureShepherdSync()
         if let error = configReadError {
             let alert = NSAlert()
             alert.messageText = L("Configuration Could Not Be Read")
@@ -411,6 +415,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if marqueeOn || barOn { fetchNextQuoteCycle() }
         if boardOn { refreshBoard() }
         if config.positionsEnabled { applyPositionsPanel() }
+        syncShepherdLists()
     }
 
     // ── Menü ───────────────────────────────────────────────────────────────────
@@ -702,6 +707,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 self.applyDisplayMode()
                 self.applyPositionsPanel()
                 self.configureUpdater()
+                self.configureShepherdSync()
             }
         }
         configWindow?.reload(config: config)
@@ -797,7 +803,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let next = quoteService.map { Int(max(0, $0.nextRefresh.timeIntervalSinceNow).rounded()) } ?? 0
         let quotes = (try? JSONEncoder().encode(quoteService?.status ?? "")).flatMap { String(data: $0, encoding: .utf8) } ?? "\"\""
-        return "{\"phase\":\"\(engine.phaseName)\",\"queue\":\(engine.queueCount),\"pid\":\(getpid()),\"version\":\"\(Self.version)\",\"list\":\(list),\"menubar\":\(menubar),\"board\":\(boardInfo),\"quotes\":\(quotes),\"nextFetchIn\":\(next),\"cols\":[\(cols.joined(separator: ","))]}"
+        return "{\"phase\":\"\(engine.phaseName)\",\"queue\":\(engine.queueCount),\"pid\":\(getpid()),\"version\":\"\(Self.version)\",\"list\":\(list),\"menubar\":\(menubar),\"board\":\(boardInfo),\"quotes\":\(quotes),\"nextFetchIn\":\(next),\"shepherd\":\"\(shepherdState)\",\"cols\":[\(cols.joined(separator: ","))]}"
     }
 
     // ── Quote-Loop ───────────────────────────────────────────────────────────────
@@ -898,6 +904,56 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let label = isTextMarquee || ledSafe ? name : "LIST \(index + 1)"
         engine.interrupt(with: TickerMessage(kind: .standby, text: "> " + label, priority: .normal,
                                              duration: 1.2, onClickCommand: nil, width: nil))
+    }
+
+    // ── 跟随 Shepherd 持仓 ─────────────────────────────────────────────────────
+    //
+    // 有跟随池才开定时器;快照文件没变就不读。读不到时保留上次的代码,不清空。
+
+    private func configureShepherdSync() {
+        guard config.watchlists.contains(where: { $0.isLinked }) else {
+            shepherdTimer?.invalidate(); shepherdTimer = nil
+            shepherdStamp = nil; shepherdState = "off"
+            return
+        }
+        syncShepherdLists(force: true)
+        guard shepherdTimer == nil else { return }
+        let t = Timer(timeInterval: 60, repeats: true) { [weak self] _ in self?.syncShepherdLists() }
+        t.tolerance = 10
+        RunLoop.main.add(t, forMode: .common)
+        shepherdTimer = t
+    }
+
+    private func syncShepherdLists(force: Bool = false) {
+        guard config.watchlists.contains(where: { $0.isLinked }), force || !suspended else { return }
+        let url = ShepherdHoldings.defaultURL
+        let stamp = ShepherdHoldings.modified(url)
+        guard force || stamp == nil || stamp != shepherdStamp else { return }
+        switch ShepherdHoldings.read(url) {
+        case .failure(let error):
+            let state: String
+            if case .missing = error { state = "missing" } else { state = "unreadable" }
+            if state != shepherdState {
+                appLog.notice("shepherd holdings \(state, privacy: .public): \(url.path, privacy: .public)")
+            }
+            shepherdState = state; shepherdStamp = stamp
+        case .success(let snapshot):
+            shepherdStamp = snapshot.modified
+            shepherdState = "ok \(snapshot.holdings.count)"
+            var lists = config.watchlists
+            guard ShepherdHoldings.apply(snapshot.holdings, to: &lists) else { return }
+            let active = config.activeWatchlist
+            let activeChanged = lists.indices.contains(active) && lists[active] != config.watchlists[active]
+            // 只改跟随池,别的字段以磁盘为准(浮窗位置可能刚被拖动写过)
+            var saved = (try? readConfig(at: configURL)) ?? config!
+            ShepherdHoldings.apply(snapshot.holdings, to: &saved.watchlists)
+            saved.barOrigin = config.barOrigin; saved.boardOrigin = config.boardOrigin
+            config.watchlists = lists
+            if configReadError == nil { saveConfig(saved) }
+            appLog.notice("shepherd holdings → \(snapshot.holdings.count) symbols")
+            if activeChanged { applyDisplayMode() }
+            configWindow?.reload(config: config)
+        }
     }
 
     // ── 新版本提示 ─────────────────────────────────────────────────────────────

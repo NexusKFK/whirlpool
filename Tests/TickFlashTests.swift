@@ -219,5 +219,6 @@ struct TickFlashTestRunner {
         try runBoardPresentationTests()
         try runSettingsUITests()
         try runStatusItemTests()
+        try runShepherdHoldingsTests()
     }
 }

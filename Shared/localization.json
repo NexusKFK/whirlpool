@@ -264,5 +264,14 @@
   "Name": "名称",
   "Names are the short names from Tencent quotes, e.g. 600519 shows as 贵州茅台. The LED dot font has no Chinese glyphs, so it keeps showing codes.": "名称取自腾讯行情的简称，例如 600519 显示为「贵州茅台」。点阵字体没有中文字形，选点阵时仍显示代码。",
   "Names are Tencent's short names, e.g. 600519 shows as 贵州茅台, on the quote board. The scrolling ticker's LED dot font has no Chinese glyphs, so it keeps showing codes.": "报价板上的名称取自腾讯行情的简称，例如 600519 显示为「贵州茅台」。滚动字幕用点阵字体，没有中文字形，仍显示代码。",
-  "IB Gateway offline · account figures are from the last snapshot": "IB 网关未连接 · 账户数字来自最后一次快照"
+  "IB Gateway offline · account figures are from the last snapshot": "IB 网关未连接 · 账户数字来自最后一次快照",
+  "Follow Shepherd Holdings": "跟随 Shepherd 持仓",
+  "Shepherd Holdings": "Shepherd 持仓",
+  "Stop Following": "停止跟随",
+  "Show Hidden (%d)": "恢复隐藏的（%d）",
+  "Follows Shepherd holdings (%@, updated %@). Options show their underlying stock; larger positions come first. Remove hides a symbol until you show it again.": "这个自选池跟随 Shepherd 持仓自动更新（%@，更新于 %@）。期权显示正股走势，市值大的排在前面。「移除」只是隐藏，点「恢复隐藏的」可以加回来。",
+  "Shepherd holdings file not found: %@. The list keeps its last symbols and updates once the file appears.": "找不到 Shepherd 持仓文件：%@。自选池保留上次的代码，文件出现后会自动更新。",
+  "Shepherd holdings file could not be read: %@. The list keeps its last symbols.": "读不了 Shepherd 持仓文件：%@。自选池保留上次的代码。",
+  "Shepherd Holdings Not Found": "找不到 Shepherd 持仓",
+  "No Shepherd holdings file at %@. Open Shepherd and refresh holdings first, or set WHIRLPOOL_SHEPHERD_STATE to the file path.": "找不到 Shepherd 持仓文件：%@。请先打开 Shepherd 刷新一次持仓，或者用环境变量 WHIRLPOOL_SHEPHERD_STATE 指定文件路径。"
 }

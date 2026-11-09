@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Watchlist page (macOS): **Follow Shepherd Holdings** adds a list that tracks the holdings in a [Shepherd](https://github.com/NexusKFK/shepherd) snapshot (`~/tools/holdings_local/state.json`, or `WHIRLPOOL_SHEPHERD_STATE`). Whirlpool checks the file once a minute and reads it only when it changed. Options show their underlying stock; a symbol held in several accounts or as both stock and options appears once; larger positions (gross market value) come first. Only symbols, markets and hidden symbols are saved in the config. On a linked list, Add and Move are disabled, **Remove** hides a symbol until **Show Hidden**, per-symbol decimals still apply, and **Stop Following** keeps the current symbols as an ordinary list. A missing or unreadable file keeps the last symbols. `whirlpool --status` reports `shepherd` as `off`, `ok N`, `missing` or `unreadable`.
+
+  中文：自选页（macOS）新增「跟随 Shepherd 持仓」：新建一个随 Shepherd 持仓快照自动更新的自选池（默认读 `~/tools/holdings_local/state.json`，可用 `WHIRLPOOL_SHEPHERD_STATE` 改路径），每分钟检查一次，文件变了才读。期权显示正股走势；同一只股票在多个账户持有，或正股和期权都有，只出现一次；按合计市值从大到小排。配置里只存代码、市场和被隐藏的代码。这个自选池不能手动添加和排序；「移除」只是隐藏，点「恢复隐藏的」加回来；小数位照样可以逐个设；「停止跟随」把当前代码留成普通自选池。文件不存在或读不了时保留上次的代码。`whirlpool --status` 新增 `shepherd` 字段。
+
 ## 2.2.0 (2026-11-02)
 
 - Portfolio panel: stock rows show the current price after the ticker (`ABC 51.10`); option and spread rows do not. The small moon now follows the price and means one thing only: this price is an IB pre-market, after-hours or overnight quote. It no longer appears when the gateway is down.

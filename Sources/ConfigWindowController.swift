@@ -30,6 +30,12 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
     private var currentList = 0
     private let listPicker = NSPopUpButton()
     private let deleteList = NSButton()
+    // 跟随 Shepherd 持仓的池:增删改代码交给持仓,这里只能隐藏/恢复、调小数位
+    private var addButton: NSButton?
+    private var moveButtons: [NSButton] = []
+    private let restoreHidden = NSButton()
+    private let unlinkList = NSButton()
+    private let linkNote = NSTextField(wrappingLabelWithString: "")
     private var window: NSWindow?
     private let table = NSTableView()
     private let pages = NSTabView()
@@ -299,11 +305,13 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
         table.allowsMultipleSelection = false
         table.columnAutoresizingStyle = .firstColumnOnlyAutoresizingStyle
         table.setAccessibilityLabel(L("Watchlist"))
+        table.identifier = NSUserInterfaceItemIdentifier("watchlist-table")
         let scroll = NSScrollView()
         scroll.documentView = table; scroll.hasVerticalScroller = true; scroll.borderType = .bezelBorder
 
         listPicker.target = self; listPicker.action = #selector(listPicked)
         listPicker.setAccessibilityLabel(L("Watchlist"))
+        listPicker.identifier = NSUserInterfaceItemIdentifier("watchlist-picker")
         listPicker.widthAnchor.constraint(greaterThanOrEqualToConstant: 120).isActive = true
         deleteList.title = L("Delete List"); deleteList.bezelStyle = .rounded
         deleteList.target = self; deleteList.action = #selector(removeList)
@@ -312,11 +320,32 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
                                           button("Rename…", #selector(renameList)), deleteList])
         listRow.orientation = .horizontal; listRow.alignment = .centerY; listRow.spacing = 8
 
-        let actions = NSStackView(views: [button("Add", #selector(add)), button("Remove", #selector(remove)),
-                                         button("Move Up", #selector(up)), button("Move Down", #selector(down))])
+        let addButton = button("Add", #selector(add))
+        moveButtons = [button("Move Up", #selector(up)), button("Move Down", #selector(down))]
+        self.addButton = addButton
+
+        restoreHidden.bezelStyle = .rounded; restoreHidden.target = self; restoreHidden.action = #selector(restoreHiddenSymbols)
+        unlinkList.title = L("Stop Following"); unlinkList.bezelStyle = .rounded
+        unlinkList.target = self; unlinkList.action = #selector(stopFollowing)
+        let follow = button("Follow Shepherd Holdings", #selector(followShepherd))
+        follow.identifier = NSUserInterfaceItemIdentifier("follow-shepherd")
+        restoreHidden.identifier = NSUserInterfaceItemIdentifier("shepherd-restore")
+        unlinkList.identifier = NSUserInterfaceItemIdentifier("shepherd-unlink")
+        linkNote.identifier = NSUserInterfaceItemIdentifier("shepherd-note")
+        addButton.identifier = NSUserInterfaceItemIdentifier("watchlist-add")
+        let removeButton = button("Remove", #selector(remove))
+        removeButton.identifier = NSUserInterfaceItemIdentifier("watchlist-remove")
+        let followRow = NSStackView(views: [follow, restoreHidden, unlinkList])
+        followRow.orientation = .horizontal; followRow.alignment = .centerY; followRow.spacing = 8
+        let actions = NSStackView(views: [addButton, removeButton] + moveButtons)
         actions.orientation = .horizontal; actions.spacing = 8
+        linkNote.font = .systemFont(ofSize: 12); linkNote.textColor = .secondaryLabelColor
+        linkNote.preferredMaxLayoutWidth = 0
+        linkNote.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
         let content = stack([pageTitle("Watchlist", "Organize the symbols you follow."), listRow,
                              note("The list selected here is shown after saving. Switch lists from the menu or Option-click the ticker."),
+                             followRow, linkNote,
                              scroll, actions,
                              note("Examples: AAPL, ^GSPC, 600519, SH000001 (SSE Composite), 00700, BTC-USD. Decimals: Auto uses the data source's precision (A-share ETFs 3, FX 4, low-priced crypto more).")])
         scroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 230).isActive = true
@@ -335,12 +364,86 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
         listPicker.addItems(withTitles: lists.map(\.name))
         listPicker.selectItem(at: currentList)
         deleteList.isEnabled = lists.count > 1
+        refreshLinkControls()
+    }
+
+    private var currentIsLinked: Bool { lists.indices.contains(currentList) && lists[currentList].isLinked }
+
+    /// 跟随池:不能手动加代码/排序,「移除」变成隐藏;说明行写清来源和更新时间
+    private func refreshLinkControls() {
+        let linked = currentIsLinked
+        addButton?.isEnabled = !linked
+        moveButtons.forEach { $0.isEnabled = !linked }
+        restoreHidden.isHidden = !linked; unlinkList.isHidden = !linked
+        let hidden = linked ? (lists[currentList].excluded ?? []).count : 0
+        restoreHidden.title = String(format: L("Show Hidden (%d)"), hidden)
+        restoreHidden.isEnabled = hidden > 0
+        linkNote.isHidden = !linked
+        guard linked else { return }
+        let path = ShepherdHoldings.defaultURL.path.replacingOccurrences(of: NSHomeDirectory(), with: "~")
+        switch ShepherdHoldings.read() {
+        case .success(let snapshot):
+            let time = snapshot.modified.map { DateFormatter.localizedString(from: $0, dateStyle: .short, timeStyle: .short) } ?? "—"
+            linkNote.stringValue = String(format: L("Follows Shepherd holdings (%@, updated %@). Options show their underlying stock; larger positions come first. Remove hides a symbol until you show it again."), path, time)
+        case .failure(let error):
+            if case .missing = error {
+                linkNote.stringValue = String(format: L("Shepherd holdings file not found: %@. The list keeps its last symbols and updates once the file appears."), path)
+            } else {
+                linkNote.stringValue = String(format: L("Shepherd holdings file could not be read: %@. The list keeps its last symbols."), path)
+            }
+        }
+    }
+
+    @objc private func followShepherd() {
+        syncCurrentList()
+        if let existing = lists.firstIndex(where: { $0.isLinked }) {
+            currentList = existing; entries = lists[existing].entries
+            reloadListPicker(); table.reloadData()
+            return
+        }
+        let holdings: [ShepherdHoldings.Holding]
+        switch ShepherdHoldings.read() {
+        case .success(let snapshot): holdings = snapshot.holdings
+        case .failure:
+            let path = ShepherdHoldings.defaultURL.path.replacingOccurrences(of: NSHomeDirectory(), with: "~")
+            error(String(format: L("No Shepherd holdings file at %@. Open Shepherd and refresh holdings first, or set WHIRLPOOL_SHEPHERD_STATE to the file path."), path),
+                  title: "Shepherd Holdings Not Found")
+            return
+        }
+        var name = L("Shepherd Holdings"), n = 2
+        while lists.contains(where: { $0.name == name }) { name = "\(L("Shepherd Holdings")) \(n)"; n += 1 }
+        let list = Watchlist(name: name, entries: ShepherdHoldings.entries(from: holdings, excluded: [], previous: []),
+                             source: ShepherdHoldings.sourceKey, excluded: [])
+        lists.append(list)
+        currentList = lists.count - 1
+        entries = list.entries
+        reloadListPicker(); table.reloadData()
+    }
+
+    @objc private func restoreHiddenSymbols() {
+        syncCurrentList()
+        guard currentIsLinked else { return }
+        lists[currentList].excluded = []
+        if case .success(let snapshot) = ShepherdHoldings.read() {
+            entries = ShepherdHoldings.entries(from: snapshot.holdings, excluded: [], previous: entries)
+            lists[currentList].entries = entries
+        }
+        refreshLinkControls(); table.reloadData()
+    }
+
+    /// 停止跟随:留下当前代码,变回普通池
+    @objc private func stopFollowing() {
+        syncCurrentList()
+        guard currentIsLinked else { return }
+        lists[currentList].source = nil; lists[currentList].excluded = nil
+        refreshLinkControls(); table.reloadData()
     }
 
     @objc private func listPicked() {
         syncCurrentList()
         currentList = max(0, listPicker.indexOfSelectedItem)
         entries = lists[currentList].entries
+        refreshLinkControls()
         table.reloadData()
     }
 
@@ -640,6 +743,7 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
             field.delegate = self
             field.tag = row; field.target = self; field.action = #selector(symbolEdited(_:))
             field.setAccessibilityLabel(L("Symbol"))
+            if currentIsLinked { field.isEditable = false; field.isSelectable = true }
             return Self.cell(field, inset: 6)
         }
         let popup = NSPopUpButton()
@@ -647,6 +751,7 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
         popup.selectItem(at: Self.markets.firstIndex { $0.key == entries[row].market } ?? 0)
         popup.tag = row; popup.target = self; popup.action = #selector(marketEdited(_:))
         popup.setAccessibilityLabel(L("Market"))
+        popup.isEnabled = !currentIsLinked
         return Self.cell(popup)
     }
 
@@ -687,7 +792,14 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
     @objc private func remove() {
         finishEditing(); let row = table.selectedRow
         guard entries.indices.contains(row) else { return }
+        if currentIsLinked {
+            // 跟随池:隐藏这只,持仓更新时也不加回来
+            var hidden = lists[currentList].excluded ?? []
+            if !hidden.contains(entries[row].symbol) { hidden.append(entries[row].symbol) }
+            lists[currentList].excluded = hidden
+        }
         entries.remove(at: row); table.reloadData()
+        refreshLinkControls()
     }
     private func move(_ delta: Int) {
         finishEditing(); let row = table.selectedRow, next = row + delta
@@ -821,9 +933,9 @@ final class ConfigWindowController: NSObject, NSWindowDelegate, NSTableViewDataS
                 self.selectPage(0)
                 self.error(String(format: L("List “%@”: "), list.name) + L(message))
             }
-            guard !cleaned.isEmpty else { showProblem("Add at least one symbol."); return }
+            guard !cleaned.isEmpty || list.isLinked else { showProblem("Add at least one symbol."); return }
             guard Self.validEntries(cleaned) else { showProblem("Use unique symbols with valid market codes."); return }
-            cleanedLists.append(Watchlist(name: list.name, entries: cleaned))
+            cleanedLists.append(Watchlist(name: list.name, entries: cleaned, source: list.source, excluded: list.excluded))
         }
         guard let interval = Double(refresh.stringValue), interval.isFinite, (5...3600).contains(interval) else {
             selectPage(3)

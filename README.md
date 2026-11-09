@@ -67,6 +67,8 @@ On macOS, scrolling is GPU-composited: each round is rendered once and Core Anim
 
 Keep several named watchlists and switch them from the menu (**Watchlists**), by Option-clicking a ticker on macOS or Ctrl-clicking it on Windows, or with `whirlpool --list NAME` on macOS. Price precision is automatic per instrument (FX 4 decimals, A-share ETFs 3, low-priced crypto more) and can be set per symbol in the Watchlist page.
 
+If you use [Shepherd](https://github.com/NexusKFK/shepherd), **Follow Shepherd Holdings** on the Watchlist page (macOS) adds a list that tracks your holdings. It reads the symbols from Shepherd's snapshot (`~/tools/holdings_local/state.json`; set `WHIRLPOOL_SHEPHERD_STATE` to use another path) and checks the file once a minute. Options show their underlying stock, a symbol held in several accounts or as both stock and options appears once, and larger positions come first. Only symbols are copied into Whirlpool's settings; quantities and prices stay in Shepherd. On this list, **Remove** hides a symbol until you click **Show Hidden**, and **Stop Following** turns it into an ordinary list. If the file is missing or unreadable, the list keeps its last symbols.
+
 Choose your data source in General. Demo prices are simulated and identified in the status menu. Symbols include `AAPL`, `^GSPC`, `600519`, `00700`, and `BTC-USD`. Stock symbols must be unique. Mainland China codes use six digits and may name their exchange with `SH`, `SZ` or `BJ`: `000001` is Ping An Bank in Shenzhen, `SH000001` is the SSE Composite. Without a prefix, codes starting with 6, 5 or 9 go to Shanghai, 4, 8 or 92 to Beijing, and the rest to Shenzhen. Hong Kong codes use one to five digits and are left-padded for requests.
 
 
